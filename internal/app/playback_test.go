@@ -1,0 +1,518 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/config"
+	"github.com/Thelost77/pine/internal/player"
+	"github.com/Thelost77/pine/internal/screens/detail"
+)
+
+// apiLog records HTTP requests made to the mock ABS server.
+type apiLog struct {
+	mu       sync.Mutex
+	requests []apiRequest
+}
+
+type apiRequest struct {
+	Method string
+	Path   string
+	Body   map[string]interface{}
+}
+
+func (l *apiLog) record(method, path string, body map[string]interface{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.requests = append(l.requests, apiRequest{Method: method, Path: path, Body: body})
+}
+
+func (l *apiLog) get() []apiRequest {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cp := make([]apiRequest, len(l.requests))
+	copy(cp, l.requests)
+	return cp
+}
+
+// newMockABSServer creates an httptest.Server that handles playback API calls
+// and logs them for verification.
+func newMockABSServer(log *apiLog) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-001/play":
+			resp := abs.PlaySession{
+				ID: "sess-abc",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, ContentURL: "/s/item/item-001/audio.mp3", Duration: 3600},
+				},
+				CurrentTime: 42.0,
+			}
+			json.NewEncoder(w).Encode(resp)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-abc/sync":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-abc/close":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-001":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// TestPlaybackLifecycleIntegration tests the full playback state machine:
+// PlayCmd → StartPlaySessionCmd → PlaySessionMsg → LaunchCmd → PlayerReadyMsg → ticking → Back → close.
+func TestPlaybackLifecycleIntegration(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient(srv.URL, "tok")
+	cfg := config.Default()
+	m := NewWithPlayer(cfg, nil, client, mp)
+	m.screen = ScreenDetail
+	m.backStack = []Screen{ScreenHome}
+
+	// --- Step 1: Send PlayCmd (simulates user pressing 'p' on detail screen) ---
+	dur := 3600.0
+	playMsg := detail.PlayCmd{Item: abs.LibraryItem{
+		ID: "item-001",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title:    "Test Audiobook",
+				Duration: &dur,
+			},
+		},
+	}}
+
+	result, cmd := m.Update(playMsg)
+	m = result.(Model)
+
+	if cmd == nil {
+		t.Fatal("PlayCmd should return an async command to start play session")
+	}
+
+	// --- Step 2: Execute the command — it calls StartPlaySession on our mock server ---
+	msg := cmd()
+	psMsg, ok := msg.(PlaySessionMsg)
+	if !ok {
+		t.Fatalf("expected PlaySessionMsg, got %T: %+v", msg, msg)
+	}
+
+	if psMsg.Session.SessionID != "sess-abc" {
+		t.Errorf("session ID = %q, want %q", psMsg.Session.SessionID, "sess-abc")
+	}
+	if psMsg.Session.ItemID != "item-001" {
+		t.Errorf("item ID = %q, want %q", psMsg.Session.ItemID, "item-001")
+	}
+	if psMsg.Session.CurrentTime != 42.0 {
+		t.Errorf("currentTime = %f, want 42.0", psMsg.Session.CurrentTime)
+	}
+
+	// Verify API was called
+	reqs := log.get()
+	found := false
+	for _, r := range reqs {
+		if r.Method == http.MethodPost && r.Path == "/api/items/item-001/play" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected POST /api/items/item-001/play to be called")
+	}
+
+	// --- Step 3: Inject PlaySessionMsg → verify state + LaunchCmd returned ---
+	result, cmd = m.Update(psMsg)
+	m = result.(Model)
+
+	if m.sessionID != "sess-abc" {
+		t.Errorf("sessionID = %q, want %q", m.sessionID, "sess-abc")
+	}
+	if m.itemID != "item-001" {
+		t.Errorf("itemID = %q, want %q", m.itemID, "item-001")
+	}
+	if !m.isPlaying() {
+		t.Error("model should be playing after PlaySessionMsg")
+	}
+	if m.player.Title != "Test Audiobook" {
+		t.Errorf("player title = %q, want %q", m.player.Title, "Test Audiobook")
+	}
+	if m.player.Position != 42.0 {
+		t.Errorf("player position = %f, want 42.0", m.player.Position)
+	}
+	if m.player.Duration != 3600.0 {
+		t.Errorf("player duration = %f, want 3600.0", m.player.Duration)
+	}
+	if m.timeListened != 0 {
+		t.Errorf("timeListened = %f, want 0", m.timeListened)
+	}
+	if m.lastSyncPos != 42.0 {
+		t.Errorf("lastSyncPos = %f, want 42.0", m.lastSyncPos)
+	}
+	if cmd == nil {
+		t.Fatal("PlaySessionMsg should return LaunchCmd")
+	}
+
+	// --- Step 4: Inject PlayerReadyMsg → verify TickCmd + syncTickCmd batch ---
+	result, cmd = m.Update(player.PlayerReadyMsg{})
+	m = result.(Model)
+
+	if cmd == nil {
+		t.Fatal("PlayerReadyMsg should return batch of TickCmd + syncTickCmd")
+	}
+
+	// --- Step 5: Inject PositionMsg → verify position tracking ---
+	mp.position = 52.0
+	mp.duration = 3600.0
+
+	result, cmd = m.Update(player.PositionMsg{
+		Position:   52.0,
+		Duration:   3600.0,
+		Paused:     false,
+		Generation: 1, // matches playGeneration after PlaySessionMsg
+	})
+	m = result.(Model)
+
+	if m.player.Position != 52.0 {
+		t.Errorf("player position = %f, want 52.0", m.player.Position)
+	}
+	// Delta from 42.0 to 52.0 = 10.0 seconds listened
+	if m.timeListened != 10.0 {
+		t.Errorf("timeListened = %f, want 10.0", m.timeListened)
+	}
+	if cmd == nil {
+		t.Error("PositionMsg should reschedule TickCmd")
+	}
+
+	// Another tick: advance to 57.0
+	result, cmd = m.Update(player.PositionMsg{
+		Position:   57.0,
+		Duration:   3600.0,
+		Paused:     false,
+		Generation: 1,
+	})
+	m = result.(Model)
+
+	if m.player.Position != 57.0 {
+		t.Errorf("player position = %f, want 57.0", m.player.Position)
+	}
+	if m.timeListened != 15.0 {
+		t.Errorf("timeListened = %f, want 15.0 (10+5)", m.timeListened)
+	}
+
+	// --- Step 6: Inject SyncTickMsg → verify sync fires ---
+	result, cmd = m.Update(SyncTickMsg{})
+	m = result.(Model)
+
+	if m.lastSyncPos != 57.0 {
+		t.Errorf("lastSyncPos = %f, want 57.0", m.lastSyncPos)
+	}
+	if cmd == nil {
+		t.Fatal("SyncTickMsg should return batch of sync cmds")
+	}
+
+	// Execute sync commands to trigger API calls
+	executeBatchCmds(cmd)
+
+	// Verify SyncSession was called
+	reqs = log.get()
+	syncFound := false
+	for _, r := range reqs {
+		if r.Method == http.MethodPost && r.Path == "/api/session/sess-abc/sync" {
+			syncFound = true
+			break
+		}
+	}
+	if !syncFound {
+		t.Error("expected POST /api/session/sess-abc/sync to be called")
+	}
+
+	// --- Step 7: Send BackMsg → verify playback continues ---
+	result, _ = m.Update(BackMsg{})
+	m = result.(Model)
+
+	// Verify playback state is preserved
+	if m.sessionID != "sess-abc" {
+		t.Errorf("sessionID should be preserved after back, got %q", m.sessionID)
+	}
+	if m.itemID != "item-001" {
+		t.Errorf("itemID should be preserved after back, got %q", m.itemID)
+	}
+	if !m.player.Playing {
+		t.Error("player should still be playing after back")
+	}
+	if m.player.Title != "Test Audiobook" {
+		t.Errorf("player title should be preserved, got %q", m.player.Title)
+	}
+	if m.ActiveScreen() != ScreenHome {
+		t.Errorf("screen = %v, want Home after back", m.ActiveScreen())
+	}
+}
+
+// TestPlaybackSeekBackwardThenForward tests that backward seeks don't inflate timeListened,
+// and subsequent forward movement resumes tracking.
+func TestPlaybackSeekBackwardThenForward(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.screen = ScreenDetail
+	m.backStack = []Screen{ScreenHome}
+
+	// Set up active session
+	m.sessionID = "sess-abc"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.timeListened = 0
+
+	// Forward: 100 → 110, adds 10s
+	result, _ := m.Update(player.PositionMsg{Position: 110.0, Duration: 3600.0})
+	m = result.(Model)
+	if m.timeListened != 10.0 {
+		t.Errorf("timeListened = %f, want 10.0", m.timeListened)
+	}
+
+	// Backward seek: 110 → 80, should NOT add time
+	result, _ = m.Update(player.PositionMsg{Position: 80.0, Duration: 3600.0})
+	m = result.(Model)
+	if m.timeListened != 10.0 {
+		t.Errorf("timeListened = %f, want 10.0 (no change after backward seek)", m.timeListened)
+	}
+
+	// Forward again: 80 → 90, adds 10s
+	result, _ = m.Update(player.PositionMsg{Position: 90.0, Duration: 3600.0})
+	m = result.(Model)
+	if m.timeListened != 20.0 {
+		t.Errorf("timeListened = %f, want 20.0", m.timeListened)
+	}
+}
+
+// TestPlaybackNavigateWhilePlayingKeepsPlayback verifies that NavigateMsg
+// during active playback preserves playback state and navigates.
+func TestPlaybackNavigateWhilePlayingKeepsPlayback(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.screen = ScreenDetail
+	m.backStack = []Screen{ScreenHome}
+
+	// Set up active playback
+	m.sessionID = "sess-abc"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Title = "Test Book"
+	m.player.Position = 200.0
+	m.player.Duration = 3600.0
+	m.timeListened = 30.0
+
+	// Navigate to Library while playing
+	result, _ := m.Update(NavigateMsg{Screen: ScreenLibrary})
+	m = result.(Model)
+
+	// Playback should continue
+	if m.sessionID != "sess-abc" {
+		t.Errorf("sessionID should be preserved, got %q", m.sessionID)
+	}
+	if !m.player.Playing {
+		t.Error("player should still be playing")
+	}
+	if m.ActiveScreen() != ScreenLibrary {
+		t.Errorf("screen = %v, want Library", m.ActiveScreen())
+	}
+}
+
+// TestPlaybackSyncTickNoOpWhenNotPlaying verifies SyncTickMsg is ignored
+// when there's no active session.
+func TestPlaybackSyncTickNoOpWhenNotPlaying(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "" // not playing
+
+	_, cmd := m.Update(SyncTickMsg{})
+	if cmd != nil {
+		t.Error("SyncTickMsg with no active session should return nil cmd")
+	}
+
+	reqs := log.get()
+	if len(reqs) > 0 {
+		t.Errorf("expected no API calls, got %d", len(reqs))
+	}
+}
+
+// TestPlaybackPositionErrorTriggersCleanup verifies that a PositionMsg with
+// an error triggers stopPlayback.
+func TestPlaybackPositionErrorTriggersCleanup(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-abc"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+
+	// Send a PositionMsg with an error (mpv crashed)
+	result, cmd := m.Update(player.PositionMsg{
+		Err: fmt.Errorf("mpv exited"),
+	})
+	m = result.(Model)
+
+	if m.sessionID != "" {
+		t.Errorf("sessionID should be cleared after error, got %q", m.sessionID)
+	}
+	if m.player.Playing {
+		t.Error("player should not be playing after error")
+	}
+	if cmd == nil {
+		t.Error("expected cleanup commands after position error")
+	}
+}
+
+// TestPlaybackMultipleSyncCycles verifies that multiple sync ticks
+// accumulate correctly and update lastSyncPos.
+func TestPlaybackMultipleSyncCycles(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.screen = ScreenDetail
+	m.backStack = []Screen{ScreenHome}
+	m.sessionID = "sess-abc"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.lastSyncPos = 100.0
+	m.timeListened = 10.0
+
+	// First sync tick
+	result, cmd := m.Update(SyncTickMsg{})
+	m = result.(Model)
+	if m.lastSyncPos != 100.0 {
+		t.Errorf("lastSyncPos = %f, want 100.0", m.lastSyncPos)
+	}
+	executeBatchCmds(cmd)
+
+	// Advance position
+	result, _ = m.Update(player.PositionMsg{Position: 130.0, Duration: 3600.0})
+	m = result.(Model)
+
+	// Second sync tick
+	result, cmd = m.Update(SyncTickMsg{})
+	m = result.(Model)
+	if m.lastSyncPos != 130.0 {
+		t.Errorf("lastSyncPos = %f, want 130.0", m.lastSyncPos)
+	}
+	executeBatchCmds(cmd)
+
+	// Verify two sync calls were made
+	reqs := log.get()
+	syncCount := 0
+	for _, r := range reqs {
+		if r.Method == http.MethodPost && r.Path == "/api/session/sess-abc/sync" {
+			syncCount++
+		}
+	}
+	if syncCount != 2 {
+		t.Errorf("expected 2 sync API calls, got %d", syncCount)
+	}
+}
+
+// TestPlaybackPlayCmdNoClientIsNoOp verifies PlayCmd with nil client returns nil cmd.
+func TestPlaybackPlayCmdNoClientIsNoOp(t *testing.T) {
+	mp := &mockPlayer{}
+	m := NewWithPlayer(config.Default(), nil, nil, mp)
+	m.screen = ScreenDetail
+
+	dur := 3600.0
+	_, cmd := m.Update(detail.PlayCmd{Item: abs.LibraryItem{
+		ID: "item-1",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "X", Duration: &dur},
+		},
+	}})
+	if cmd != nil {
+		t.Error("PlayCmd with nil client should return nil")
+	}
+}
+
+// executeBatchCmds recursively executes tea.Cmd including batch commands.
+// It handles the internal batch type from bubbletea by calling the cmd
+// and processing the result. Commands that block (e.g. tea.Tick) are
+// executed with a short timeout so tests don't stall.
+func executeBatchCmds(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+
+	type result struct {
+		msg tea.Msg
+	}
+
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{msg: cmd()}
+	}()
+
+	// Allow 50ms for immediate commands; skip tick-based commands that sleep.
+	select {
+	case r := <-ch:
+		if r.msg == nil {
+			return
+		}
+		if batchMsg, ok := r.msg.(tea.BatchMsg); ok {
+			for _, c := range batchMsg {
+				executeBatchCmds(c)
+			}
+		}
+	case <-time.After(50 * time.Millisecond):
+		// Command is a tea.Tick or similar blocking cmd — skip it.
+		return
+	}
+}

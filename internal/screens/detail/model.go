@@ -1,0 +1,433 @@
+package detail
+
+import (
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/ui"
+)
+
+// PlayCmd requests playback of the given library item.
+type PlayCmd struct {
+	Item abs.LibraryItem
+}
+
+// PlayEpisodeCmd requests playback of a specific podcast episode.
+type PlayEpisodeCmd struct {
+	Item    abs.LibraryItem
+	Episode abs.PodcastEpisode
+}
+
+// AddBookmarkCmd requests adding a bookmark at the current playback position.
+type AddBookmarkCmd struct {
+	Item abs.LibraryItem
+}
+
+// SeekToBookmarkCmd requests seeking the player to a bookmark's timestamp.
+type SeekToBookmarkCmd struct {
+	Time float64
+}
+
+// DeleteBookmarkCmd requests deletion of a bookmark.
+type DeleteBookmarkCmd struct {
+	ItemID   string
+	Bookmark abs.Bookmark
+}
+
+// SeekToChapterCmd requests seeking the player to a chapter's start time.
+type SeekToChapterCmd struct {
+	Time float64
+}
+
+// MarkFinishedCmd requests marking an item as finished.
+type MarkFinishedCmd struct {
+	Item abs.LibraryItem
+}
+
+// MarkFinishedMsg updates the item after marking it finished.
+type MarkFinishedMsg struct {
+	Progress *abs.UserMediaProgress
+}
+
+// BookmarksUpdatedMsg updates the bookmark list after an add/delete operation.
+type BookmarksUpdatedMsg struct {
+	Bookmarks []abs.Bookmark
+}
+
+// BackMsg signals that the user wants to go back from the detail screen.
+type BackMsg struct{}
+
+// KeyMap defines keybindings for the detail screen.
+type KeyMap struct {
+	Play        key.Binding
+	Bookmark    key.Binding
+	Up          key.Binding
+	Down        key.Binding
+	Back        key.Binding
+	Enter       key.Binding
+	Delete       key.Binding
+	ToggleFocus  key.Binding
+	MarkFinished key.Binding
+}
+
+// DefaultKeyMap returns the default keybindings for the detail screen.
+func DefaultKeyMap() KeyMap {
+	return KeyMap{
+		Play: key.NewBinding(
+			key.WithKeys("p", " "),
+			key.WithHelp("space/p", "play/pause"),
+		),
+		Bookmark: key.NewBinding(
+			key.WithKeys("b"),
+			key.WithHelp("b", "bookmark"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("k", "up"),
+			key.WithHelp("k/↑", "scroll up"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("j", "down"),
+			key.WithHelp("j/↓", "scroll down"),
+		),
+		Back: key.NewBinding(
+			key.WithKeys("esc", "left"),
+			key.WithHelp("esc/←", "back"),
+		),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select"),
+		),
+		Delete: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "delete bookmark"),
+		),
+		ToggleFocus: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "toggle bookmarks"),
+		),
+		MarkFinished: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "mark finished"),
+		),
+	}
+}
+
+// Model is the bubbletea model for the detail screen.
+type Model struct {
+	item             abs.LibraryItem
+	viewport         viewport.Model
+	ready            bool
+	keys             KeyMap
+	width            int
+	height           int
+	styles           ui.Styles
+	bookmarks        []abs.Bookmark
+	selectedBookmark int
+	focusBookmarks   bool
+	selectedChapter int
+	focusChapters   bool
+	episodes        []abs.PodcastEpisode
+	selectedEpisode int
+	focusEpisodes   bool
+}
+
+// New creates a new detail screen model for the given library item.
+func New(styles ui.Styles, item abs.LibraryItem) Model {
+	return Model{
+		item:             item,
+		keys:             DefaultKeyMap(),
+		styles:           styles,
+		selectedBookmark: 0,
+		episodes:         item.Media.Episodes,
+		selectedEpisode:  0,
+		focusEpisodes:    item.MediaType == "podcast" && len(item.Media.Episodes) > 0,
+	}
+}
+
+// SetBookmarks updates the bookmark list and refreshes the viewport content.
+func (m *Model) SetBookmarks(bookmarks []abs.Bookmark) {
+	m.bookmarks = bookmarks
+	if m.selectedBookmark >= len(bookmarks) {
+		m.selectedBookmark = max(0, len(bookmarks)-1)
+	}
+	if m.ready {
+		m.viewport.SetContent(m.buildContent())
+	}
+}
+
+// SetSize updates the terminal dimensions for the detail screen.
+func (m *Model) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+
+	headerLines := m.headerHeight()
+	vpHeight := height - headerLines
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	vpWidth := width
+	if vpWidth < 1 {
+		vpWidth = 1
+	}
+
+	if !m.ready {
+		m.viewport = viewport.New(vpWidth, vpHeight)
+		m.viewport.SetContent(m.buildContent())
+		m.ready = true
+	} else {
+		m.viewport.Width = vpWidth
+		m.viewport.Height = vpHeight
+		m.viewport.SetContent(m.buildContent())
+	}
+}
+
+// Item returns the library item being displayed.
+func (m Model) Item() abs.LibraryItem {
+	return m.item
+}
+
+// Episodes returns the podcast episodes.
+func (m Model) Episodes() []abs.PodcastEpisode {
+	return m.episodes
+}
+
+// SetEpisodes updates the episode list and refreshes the viewport content.
+func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
+	m.episodes = episodes
+	if m.selectedEpisode >= len(episodes) {
+		m.selectedEpisode = max(0, len(episodes)-1)
+	}
+	if len(episodes) > 0 && m.item.MediaType == "podcast" {
+		m.focusEpisodes = true
+	}
+	if m.ready {
+		m.viewport.SetContent(m.buildContent())
+	}
+}
+
+// SelectedEpisode returns the currently selected episode index.
+func (m Model) SelectedEpisode() int {
+	return m.selectedEpisode
+}
+
+// Bookmarks returns the current bookmark list.
+func (m Model) Bookmarks() []abs.Bookmark {
+	return m.bookmarks
+}
+
+// SelectedBookmark returns the currently selected bookmark index.
+func (m Model) SelectedBookmark() int {
+	return m.selectedBookmark
+}
+
+// FocusBookmarks returns whether bookmark navigation is focused.
+func (m Model) FocusBookmarks() bool {
+	return m.focusBookmarks
+}
+
+// FocusChapters returns whether chapter navigation is focused.
+func (m Model) FocusChapters() bool {
+	return m.focusChapters
+}
+
+// Init returns the initial command (none needed).
+func (m Model) Init() tea.Cmd {
+	return nil
+}
+
+// Update handles messages for the detail screen.
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case MarkFinishedMsg:
+		if msg.Progress != nil {
+			m.item.UserMediaProgress = msg.Progress
+			if m.ready {
+				m.viewport.SetContent(m.buildContent())
+			}
+		}
+		return m, nil
+
+	case BookmarksUpdatedMsg:
+		m.bookmarks = msg.Bookmarks
+		if m.selectedBookmark >= len(m.bookmarks) {
+			m.selectedBookmark = max(0, len(m.bookmarks)-1)
+		}
+		if len(m.bookmarks) == 0 {
+			m.focusBookmarks = false
+		}
+		if m.ready {
+			m.viewport.SetContent(m.buildContent())
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, m.keys.Back):
+			return m, func() tea.Msg {
+				return BackMsg{}
+			}
+		case key.Matches(msg, m.keys.Play):
+			// For podcasts with episodes, always play the selected episode
+			if len(m.episodes) > 0 && m.selectedEpisode < len(m.episodes) {
+				item := m.item
+				ep := m.episodes[m.selectedEpisode]
+				return m, func() tea.Msg {
+					return PlayEpisodeCmd{Item: item, Episode: ep}
+				}
+			}
+			item := m.item
+			return m, func() tea.Msg {
+				return PlayCmd{Item: item}
+			}
+		case key.Matches(msg, m.keys.Bookmark):
+			item := m.item
+			return m, func() tea.Msg {
+				return AddBookmarkCmd{Item: item}
+			}
+		case key.Matches(msg, m.keys.MarkFinished):
+			item := m.item
+			return m, func() tea.Msg {
+				return MarkFinishedCmd{Item: item}
+			}
+		case key.Matches(msg, m.keys.ToggleFocus):
+			m.cycleFocus()
+			if m.ready {
+				m.viewport.SetContent(m.buildContent())
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Enter):
+			if m.focusEpisodes && len(m.episodes) > 0 && m.selectedEpisode < len(m.episodes) {
+				item := m.item
+				ep := m.episodes[m.selectedEpisode]
+				return m, func() tea.Msg {
+					return PlayEpisodeCmd{Item: item, Episode: ep}
+				}
+			}
+			if m.focusChapters && m.selectedChapter < len(m.item.Media.Metadata.Chapters) {
+				ch := m.item.Media.Metadata.Chapters[m.selectedChapter]
+				return m, func() tea.Msg {
+					return SeekToChapterCmd{Time: ch.Start}
+				}
+			}
+			if m.focusBookmarks && len(m.bookmarks) > 0 && m.selectedBookmark < len(m.bookmarks) {
+				bm := m.bookmarks[m.selectedBookmark]
+				return m, func() tea.Msg {
+					return SeekToBookmarkCmd{Time: bm.Time}
+				}
+			}
+		case key.Matches(msg, m.keys.Delete):
+			if m.focusBookmarks && len(m.bookmarks) > 0 && m.selectedBookmark < len(m.bookmarks) {
+				bm := m.bookmarks[m.selectedBookmark]
+				itemID := m.item.ID
+				return m, func() tea.Msg {
+					return DeleteBookmarkCmd{ItemID: itemID, Bookmark: bm}
+				}
+			}
+		case key.Matches(msg, m.keys.Up):
+			if m.focusEpisodes && len(m.episodes) > 0 {
+				if m.selectedEpisode > 0 {
+					m.selectedEpisode--
+				}
+				if m.ready {
+					m.viewport.SetContent(m.buildContent())
+				}
+				return m, nil
+			}
+			if m.focusChapters && len(m.item.Media.Metadata.Chapters) > 0 {
+				if m.selectedChapter > 0 {
+					m.selectedChapter--
+				}
+				if m.ready {
+					m.viewport.SetContent(m.buildContent())
+				}
+				return m, nil
+			}
+			if m.focusBookmarks && len(m.bookmarks) > 0 {
+				if m.selectedBookmark > 0 {
+					m.selectedBookmark--
+				}
+				if m.ready {
+					m.viewport.SetContent(m.buildContent())
+				}
+				return m, nil
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.focusEpisodes && len(m.episodes) > 0 {
+				if m.selectedEpisode < len(m.episodes)-1 {
+					m.selectedEpisode++
+				}
+				if m.ready {
+					m.viewport.SetContent(m.buildContent())
+				}
+				return m, nil
+			}
+			if m.focusChapters && len(m.item.Media.Metadata.Chapters) > 0 {
+				if m.selectedChapter < len(m.item.Media.Metadata.Chapters)-1 {
+					m.selectedChapter++
+				}
+				if m.ready {
+					m.viewport.SetContent(m.buildContent())
+				}
+				return m, nil
+			}
+			if m.focusBookmarks && len(m.bookmarks) > 0 {
+				if m.selectedBookmark < len(m.bookmarks)-1 {
+					m.selectedBookmark++
+				}
+				if m.ready {
+					m.viewport.SetContent(m.buildContent())
+				}
+				return m, nil
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// cycleFocus cycles focus between sections.
+// Podcasts: none → episodes → bookmarks → none
+// Books with chapters: none → chapters → bookmarks → none
+// Books without chapters: none → bookmarks → none
+func (m *Model) cycleFocus() {
+	chapters := m.item.Media.Metadata.Chapters
+	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
+		if !m.focusEpisodes && !m.focusBookmarks {
+			m.focusEpisodes = true
+		} else if m.focusEpisodes {
+			m.focusEpisodes = false
+			if len(m.bookmarks) > 0 {
+				m.focusBookmarks = true
+			}
+		} else {
+			m.focusBookmarks = false
+		}
+	} else if len(chapters) > 0 {
+		if !m.focusChapters && !m.focusBookmarks {
+			m.focusChapters = true
+		} else if m.focusChapters {
+			m.focusChapters = false
+			if len(m.bookmarks) > 0 {
+				m.focusBookmarks = true
+			}
+		} else {
+			m.focusBookmarks = false
+		}
+	} else if len(m.bookmarks) > 0 {
+		m.focusBookmarks = !m.focusBookmarks
+	}
+}
+
+// headerHeight returns the number of lines used by the fixed header section.
+func (m Model) headerHeight() int {
+	// title + author + duration + progress bar + blank separator line
+	lines := 4 // title, author, duration/progress, blank
+	if m.item.UserMediaProgress != nil {
+		lines++ // progress bar line
+	}
+	return lines
+}
+

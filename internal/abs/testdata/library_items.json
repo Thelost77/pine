@@ -1,0 +1,29 @@
+{
+  "results": [
+    {
+      "id": "li-001",
+      "mediaType": "book",
+      "media": {
+        "metadata": {
+          "title": "The Great Adventure",
+          "authorName": "Jane Author",
+          "duration": 36000
+        }
+      }
+    },
+    {
+      "id": "li-003",
+      "mediaType": "book",
+      "media": {
+        "metadata": {
+          "title": "Mystery Novel",
+          "authorName": "Sam Sleuth",
+          "duration": 28800
+        }
+      }
+    }
+  ],
+  "total": 42,
+  "limit": 10,
+  "page": 0
+}

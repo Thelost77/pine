@@ -1,0 +1,38 @@
+[
+  {
+    "id": "continue-listening",
+    "entities": [
+      {
+        "id": "li-001",
+        "mediaType": "book",
+        "media": {
+          "metadata": {
+            "title": "The Great Adventure",
+            "authorName": "Jane Author",
+            "duration": 36000
+          }
+        },
+        "userMediaProgress": {
+          "currentTime": 16200,
+          "progress": 0.45,
+          "isFinished": false
+        }
+      }
+    ]
+  },
+  {
+    "id": "recently-added",
+    "entities": [
+      {
+        "id": "li-002",
+        "mediaType": "book",
+        "media": {
+          "metadata": {
+            "title": "New Horizons",
+            "authorName": "Bob Writer"
+          }
+        }
+      }
+    ]
+  }
+]

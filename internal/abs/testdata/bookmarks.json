@@ -1,0 +1,18 @@
+{
+  "libraryItemId": "li-001",
+  "currentTime": 1234.56,
+  "progress": 0.45,
+  "isFinished": false,
+  "bookmarks": [
+    {
+      "title": "Great passage",
+      "time": 300.5,
+      "createdAt": 1700000000000
+    },
+    {
+      "title": "Important quote",
+      "time": 1500.0,
+      "createdAt": 1700001000000
+    }
+  ]
+}

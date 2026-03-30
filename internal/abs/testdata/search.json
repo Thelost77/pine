@@ -1,0 +1,33 @@
+{
+  "book": [
+    {
+      "libraryItem": {
+        "id": "li-001",
+        "mediaType": "book",
+        "media": {
+          "metadata": {
+            "title": "The Great Adventure",
+            "authorName": "Jane Author"
+          }
+        }
+      },
+      "matchKey": "title",
+      "matchText": "The Great Adventure"
+    }
+  ],
+  "podcast": [
+    {
+      "libraryItem": {
+        "id": "li-pod-001",
+        "mediaType": "podcast",
+        "media": {
+          "metadata": {
+            "title": "Tech Talk Daily"
+          }
+        }
+      },
+      "matchKey": "title",
+      "matchText": "Tech Talk Daily"
+    }
+  ]
+}
