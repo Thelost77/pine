@@ -1,0 +1,66 @@
+package app
+
+import (
+	"testing"
+
+	"github.com/Thelost77/pine/internal/abs"
+)
+
+func TestViewRendersChapterOverlay(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 100
+	m.height = 30
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "Opening Credits"},
+		{ID: 1, Start: 60, End: 120, Title: "Chapter One"},
+		{ID: 2, Start: 120, End: 180, Title: "Chapter Two"},
+	}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 1
+
+	view := m.View()
+
+	for _, want := range []string{
+		"Chapter Navigation",
+		"Test Book",
+		"  Opening Credits",
+		"› Chapter One",
+		"  Chapter Two",
+	} {
+		if !containsString(view, want) {
+			t.Fatalf("View() missing %q\n%s", want, view)
+		}
+	}
+}
+
+func TestViewHintsAdvertiseChaptersOnlyWhenAvailable(t *testing.T) {
+	m := newPlaybackTestModel()
+
+	if containsString(m.viewHints(), "c chapters") {
+		t.Fatal("chapter hint should be hidden when playback is inactive")
+	}
+
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	if containsString(m.viewHints(), "c chapters") {
+		t.Fatal("chapter hint should be hidden when no chapters exist")
+	}
+
+	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
+	if !containsString(m.viewHints(), "c chapters") {
+		t.Fatalf("chapter hint should be shown when playback chapters exist\n%s", m.viewHints())
+	}
+}
+
+func TestHelpOverlayDocumentsChapterOverlay(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.help.Toggle()
+
+	view := m.View()
+	if !containsString(view, "c") || !containsString(view, "open chapters") {
+		t.Fatalf("help overlay should document chapter overlay binding\n%s", view)
+	}
+}

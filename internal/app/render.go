@@ -1,6 +1,12 @@
 package app
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
 
 // View composes the header, error banner, active screen, and player footer.
 func (m Model) View() string {
@@ -28,11 +34,15 @@ func (m Model) View() string {
 
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	if m.width == 0 {
+	if m.width > 0 {
+		content = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	}
+
+	if !m.chapterOverlayVisible {
 		return content
 	}
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return m.overlayChapterModal(content)
 }
 
 // viewHeader renders the application header bar.
@@ -93,6 +103,9 @@ func (m Model) viewHints() string {
 	if m.isPlaying() {
 		parts = append(parts, key("space", "pause"))
 		parts = append(parts, key("h/l", "seek"))
+		if len(m.chapters) > 0 {
+			parts = append(parts, key("c", "chapters"))
+		}
 	}
 	parts = append(parts, key("?", "help"))
 
@@ -101,6 +114,89 @@ func (m Model) viewHints() string {
 		style = style.Width(m.width)
 	}
 	return style.Render(lipgloss.JoinHorizontal(lipgloss.Center, joinWith(parts, sep)...))
+}
+
+func (m Model) overlayChapterModal(content string) string {
+	overlay := m.viewChapterOverlay()
+	if overlay == "" {
+		return content
+	}
+	if m.width <= 0 || m.height <= 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
+	}
+
+	baseLines := normalizeOverlayCanvas(content, m.width, m.height)
+	overlayLines := strings.Split(overlay, "\n")
+	overlayWidth := lipgloss.Width(overlay)
+	overlayHeight := len(overlayLines)
+	if overlayWidth <= 0 || overlayHeight == 0 {
+		return content
+	}
+
+	x := max(0, (m.width-overlayWidth)/2)
+	y := max(0, (m.height-overlayHeight)/2)
+	for i, line := range overlayLines {
+		if y+i >= len(baseLines) {
+			break
+		}
+		lineWidth := lipgloss.Width(line)
+		left := ansi.Truncate(baseLines[y+i], x, "")
+		rightWidth := max(0, m.width-(x+lineWidth))
+		right := ansi.TruncateLeft(baseLines[y+i], rightWidth, "")
+		baseLines[y+i] = left + line + right
+	}
+
+	return strings.Join(baseLines, "\n")
+}
+
+func (m Model) viewChapterOverlay() string {
+	if !m.chapterOverlayVisible {
+		return ""
+	}
+
+	titleWidth := 44
+	if m.width > 0 {
+		titleWidth = min(max(20, m.width-18), 56)
+	}
+
+	playbackTitle := m.player.Title
+	if playbackTitle == "" {
+		playbackTitle = "Current playback"
+	}
+
+	selected := min(max(m.chapterOverlayIndex, 0), max(len(m.chapters)-1, 0))
+	maxItems := len(m.chapters)
+	if m.height > 0 {
+		maxItems = min(maxItems, max(1, m.height-11))
+	}
+	start, end := overlayWindow(len(m.chapters), selected, maxItems)
+
+	lines := []string{
+		m.styles.Title.PaddingBottom(0).Render("Chapter Navigation"),
+		m.styles.Muted.Render("Current playback"),
+		m.styles.Subtitle.Render(ansi.Truncate(playbackTitle, titleWidth, "…")),
+		m.styles.Muted.Render(fmt.Sprintf("%d chapters • j/k navigate • esc close", len(m.chapters))),
+		"",
+	}
+
+	for i := start; i < end; i++ {
+		line := ansi.Truncate(m.chapters[i].Title, titleWidth, "…")
+		if i == selected {
+			lines = append(lines, m.styles.Selected.Render("› "+line))
+			continue
+		}
+		lines = append(lines, "  "+line)
+	}
+
+	if len(m.chapters) == 0 {
+		lines = append(lines, m.styles.Muted.Render("No chapters available"))
+	}
+
+	if start > 0 || end < len(m.chapters) {
+		lines = append(lines, "", m.styles.Muted.Render(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.chapters))))
+	}
+
+	return m.styles.Border.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 // joinWith interleaves items with a separator for lipgloss joining.
@@ -116,4 +212,41 @@ func joinWith(items []string, sep string) []string {
 		result = append(result, item)
 	}
 	return result
+}
+
+func overlayWindow(total, selected, visible int) (int, int) {
+	if visible <= 0 || visible >= total {
+		return 0, total
+	}
+
+	start := selected - visible/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + visible
+	if end > total {
+		end = total
+		start = end - visible
+	}
+	return start, end
+}
+
+func normalizeOverlayCanvas(content string, width, height int) []string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	canvas := make([]string, 0, height)
+	for _, line := range lines {
+		line = ansi.Truncate(line, width, "")
+		if lipgloss.Width(line) < width {
+			line += strings.Repeat(" ", width-lipgloss.Width(line))
+		}
+		canvas = append(canvas, line)
+	}
+	for len(canvas) < height {
+		canvas = append(canvas, strings.Repeat(" ", width))
+	}
+	return canvas
 }

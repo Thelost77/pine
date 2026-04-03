@@ -3,8 +3,8 @@ package components
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // HelpBinding represents a single keybinding entry for the help overlay.
@@ -73,6 +73,7 @@ func defaultGroups() []HelpGroup {
 				{Key: "+", Desc: "speed up"},
 				{Key: "-", Desc: "speed down"},
 				{Key: "] / [", Desc: "volume up / down"},
+				{Key: "c", Desc: "open chapters"},
 				{Key: "n / N", Desc: "next / prev chapter"},
 				{Key: "s", Desc: "sleep timer"},
 			},
