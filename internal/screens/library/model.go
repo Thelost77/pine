@@ -185,11 +185,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.libraryID = m.libraries[m.selectedLibrary].ID
 				m.updateListTitle()
-				// Reset items and fetch new library
-				m.items = nil
 				m.page = 0
 				m.totalItems = 0
-				m.list.SetItems(nil)
 				return m, m.fetchLibraryItemsCmd(0, pageLimit)
 			}
 			return m, nil
