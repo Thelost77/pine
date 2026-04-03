@@ -94,6 +94,12 @@ func (m *Model) SetWidth(w int) {
 	m.width = w
 }
 
+// SeekForwardKey returns the seek forward key binding.
+func (m Model) SeekForwardKey() key.Binding { return m.keys.SeekForward }
+
+// SeekBackKey returns the seek backward key binding.
+func (m Model) SeekBackKey() key.Binding { return m.keys.SeekBack }
+
 // Update handles messages for the player sub-model.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -136,24 +142,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.Playing = !m.Playing
 		if m.player != nil {
 			return m, TogglePauseCmd(m.player, m.Playing)
-		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.SeekForward):
-		seekSec := float64(m.config.SeekSeconds)
-		currentPos := m.Position
-		m.Position = math.Min(m.Position+seekSec, m.Duration)
-		if m.player != nil {
-			return m, SeekCmd(m.player, currentPos, seekSec, m.Duration)
-		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.SeekBack):
-		seekSec := float64(m.config.SeekSeconds)
-		currentPos := m.Position
-		m.Position = math.Max(m.Position-seekSec, 0)
-		if m.player != nil {
-			return m, SeekCmd(m.player, currentPos, -seekSec, m.Duration)
 		}
 		return m, nil
 

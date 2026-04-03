@@ -107,54 +107,6 @@ func TestSpaceTogglesPause(t *testing.T) {
 	}
 }
 
-func TestSeekForward(t *testing.T) {
-	m := newTestModel()
-	m, _ = m.Update(StartPlayMsg{Title: "Test"})
-	m.Position = 100
-	m.Duration = 600
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	if m.Position != 110 {
-		t.Errorf("expected Position 110 after seek forward, got %f", m.Position)
-	}
-}
-
-func TestSeekBackward(t *testing.T) {
-	m := newTestModel()
-	m, _ = m.Update(StartPlayMsg{Title: "Test"})
-	m.Position = 100
-	m.Duration = 600
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	if m.Position != 90 {
-		t.Errorf("expected Position 90 after seek backward, got %f", m.Position)
-	}
-}
-
-func TestSeekBackwardFloor(t *testing.T) {
-	m := newTestModel()
-	m, _ = m.Update(StartPlayMsg{Title: "Test"})
-	m.Position = 5
-	m.Duration = 600
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	if m.Position != 0 {
-		t.Errorf("expected Position 0 (floor), got %f", m.Position)
-	}
-}
-
-func TestSeekForwardCeiling(t *testing.T) {
-	m := newTestModel()
-	m, _ = m.Update(StartPlayMsg{Title: "Test"})
-	m.Position = 595
-	m.Duration = 600
-
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	if m.Position != 600 {
-		t.Errorf("expected Position 600 (ceiling), got %f", m.Position)
-	}
-}
-
 func TestSpeedUp(t *testing.T) {
 	m := newTestModel()
 	m, _ = m.Update(StartPlayMsg{Title: "Test"})
