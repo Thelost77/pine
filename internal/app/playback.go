@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // isPlaying returns true if there's an active playback session.
@@ -166,6 +166,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.itemID = msg.Session.ItemID
 	m.episodeID = msg.Session.EpisodeID
 	m.chapters = msg.Session.Chapters
+	m.resetChapterOverlay()
 	m.trackStartOffset = msg.Session.TrackStartOffset
 	m.trackDuration = msg.Session.TrackDuration
 	m.timeListened = 0
@@ -315,21 +316,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	mpvPlayer := m.mpv
 
 	// Clear session state
-	m.sessionID = ""
-	m.itemID = ""
-	m.episodeID = ""
-	m.timeListened = 0
-	m.lastSyncPos = 0
-	m.chapters = nil
-	m.trackStartOffset = 0
-	m.trackDuration = 0
-	m.sleepDeadline = time.Time{}
-	m.sleepDuration = 0
-	m.player.SleepRemaining = ""
-	m.player.Playing = false
-	m.player.Title = ""
-	m.player.Position = 0
-	m.player.Duration = 0
+	m.clearPlaybackSessionState()
 	m.propagateSize()
 
 	var progress float64

@@ -5,13 +5,13 @@ import (
 	"sync"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/ui/components"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // mockPlayer implements player.Player for testing.
@@ -66,9 +66,9 @@ func (p *mockPlayer) Seek(seconds float64) error {
 	p.position = seconds
 	return nil
 }
-func (p *mockPlayer) SetSpeed(speed float64) error  { return nil }
-func (p *mockPlayer) SetVolume(vol int) error        { return nil }
-func (p *mockPlayer) GetVolume() (int, error)        { return 100, nil }
+func (p *mockPlayer) SetSpeed(speed float64) error { return nil }
+func (p *mockPlayer) SetVolume(vol int) error      { return nil }
+func (p *mockPlayer) GetVolume() (int, error)      { return 100, nil }
 func (p *mockPlayer) Quit() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -430,6 +430,46 @@ func TestPlaySessionMsgSetsState(t *testing.T) {
 	}
 }
 
+func TestPlaySessionMsgResetsChapterOverlayForNewSession(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 2
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "Old One"},
+		{ID: 1, Start: 60, End: 120, Title: "Old Two"},
+		{ID: 2, Start: 120, End: 180, Title: "Old Three"},
+	}
+
+	result, _ := m.Update(PlaySessionMsg{
+		Session: PlaySessionData{
+			SessionID:   "sess-456",
+			ItemID:      "item-789",
+			CurrentTime: 10.0,
+			Duration:    1800.0,
+			Title:       "New Book",
+			Chapters: []abs.Chapter{
+				{ID: 10, Start: 0, End: 30, Title: "New One"},
+				{ID: 11, Start: 30, End: 60, Title: "New Two"},
+			},
+		},
+		StreamURL: "http://test/new.mp3",
+	})
+	rm := result.(Model)
+
+	if rm.chapterOverlayVisible {
+		t.Fatal("overlay should close for a new play session")
+	}
+	if rm.chapterOverlayIndex != 0 {
+		t.Fatalf("overlay index = %d, want 0", rm.chapterOverlayIndex)
+	}
+	if len(rm.chapters) != 2 {
+		t.Fatalf("chapters len = %d, want 2", len(rm.chapters))
+	}
+	if rm.chapters[0].Title != "New One" {
+		t.Fatalf("first chapter = %q, want %q", rm.chapters[0].Title, "New One")
+	}
+}
+
 func TestPlayerReadyMsgStartsTicking(t *testing.T) {
 	m := newPlaybackTestModel()
 
@@ -502,6 +542,9 @@ func TestStopPlaybackClearsState(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.sessionID = "sess-123"
 	m.itemID = "item-456"
+	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 1
 	m.player.Title = "Test Book"
 	m.player.Playing = true
 	m.player.Position = 100.0
@@ -524,6 +567,12 @@ func TestStopPlaybackClearsState(t *testing.T) {
 	}
 	if m.timeListened != 0 {
 		t.Errorf("timeListened should be 0, got %f", m.timeListened)
+	}
+	if m.chapterOverlayVisible {
+		t.Error("chapter overlay should be closed")
+	}
+	if m.chapterOverlayIndex != 0 {
+		t.Errorf("chapter overlay index = %d, want 0", m.chapterOverlayIndex)
 	}
 	if cmd == nil {
 		t.Error("expected cleanup batch cmd")
@@ -617,6 +666,39 @@ func TestJKMovesChapterOverlaySelection(t *testing.T) {
 
 	if m.chapterOverlayIndex != 1 {
 		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
+	}
+}
+
+func TestPausedPositionMsgKeepsChapterOverlayOpen(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.itemID = "item-456"
+	m.playGeneration = 1
+	m.player.Position = 42.0
+	m.player.Duration = 3600.0
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "One"},
+		{ID: 1, Start: 60, End: 120, Title: "Two"},
+	}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 1
+
+	result, _ := m.Update(player.PositionMsg{
+		Position:   42.0,
+		Duration:   3600.0,
+		Paused:     true,
+		Generation: 1,
+	})
+	m = result.(Model)
+
+	if !m.chapterOverlayVisible {
+		t.Fatal("overlay should stay open on pause-only updates")
+	}
+	if m.chapterOverlayIndex != 1 {
+		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
+	}
+	if m.player.Playing {
+		t.Fatal("player should reflect paused state")
 	}
 }
 
@@ -966,12 +1048,24 @@ func TestPlaybackErrorMsgShowsBanner(t *testing.T) {
 func TestPlayerLaunchErrShowsBanner(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.sessionID = "sess-123"
+	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 1
 
 	result, cmd := m.Update(player.PlayerLaunchErrMsg{Err: fmt.Errorf("mpv not found")})
 	rm := result.(Model)
 
 	if rm.sessionID != "" {
 		t.Error("session should be cleared")
+	}
+	if rm.chapterOverlayVisible {
+		t.Error("chapter overlay should be closed")
+	}
+	if rm.chapterOverlayIndex != 0 {
+		t.Errorf("chapter overlay index = %d, want 0", rm.chapterOverlayIndex)
+	}
+	if len(rm.chapters) != 0 {
+		t.Errorf("chapters len = %d, want 0", len(rm.chapters))
 	}
 	if !rm.err.HasError() {
 		t.Error("launch error should show banner")

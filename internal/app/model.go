@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
@@ -19,6 +16,9 @@ import (
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const headerHeight = 2
@@ -39,20 +39,20 @@ type Model struct {
 	player  player.Model
 
 	// Playback session state
-	sessionID        string
-	itemID           string
-	episodeID        string
-	timeListened     float64
-	lastSyncPos      float64
-	playGeneration   uint64
-	chapters         []abs.Chapter
+	sessionID             string
+	itemID                string
+	episodeID             string
+	timeListened          float64
+	lastSyncPos           float64
+	playGeneration        uint64
+	chapters              []abs.Chapter
 	chapterOverlayVisible bool
 	chapterOverlayIndex   int
-	trackStartOffset float64
-	trackDuration    float64
-	sleepDeadline    time.Time
-	sleepDuration    time.Duration
-	sleepGeneration  uint64
+	trackStartOffset      float64
+	trackDuration         float64
+	sleepDeadline         time.Time
+	sleepDuration         time.Duration
+	sleepGeneration       uint64
 
 	keys   KeyMap
 	err    components.ErrorBanner
@@ -286,18 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case player.PlayerLaunchErrMsg:
 		logger.Error("player launch failed", "err", msg.Err)
-		m.sessionID = ""
-		m.itemID = ""
-		m.episodeID = ""
-		m.timeListened = 0
-		m.lastSyncPos = 0
-		m.chapters = nil
-		m.trackStartOffset = 0
-		m.trackDuration = 0
-		m.player.Playing = false
-		m.player.Title = ""
-		m.player.Position = 0
-		m.player.Duration = 0
+		m.clearPlaybackSessionState()
 		errCmd := m.err.SetError(msg.Err)
 		m.propagateSize()
 		return m, tea.Batch(errCmd, player.QuitCmd(m.mpv))
@@ -487,6 +476,11 @@ func (m *Model) closeChapterOverlay() {
 	m.chapterOverlayVisible = false
 }
 
+func (m *Model) resetChapterOverlay() {
+	m.chapterOverlayVisible = false
+	m.chapterOverlayIndex = 0
+}
+
 func (m *Model) moveChapterOverlaySelection(delta int) {
 	if !m.chapterOverlayVisible || len(m.chapters) == 0 {
 		return
@@ -498,4 +492,23 @@ func (m *Model) moveChapterOverlaySelection(delta int) {
 	if m.chapterOverlayIndex >= len(m.chapters) {
 		m.chapterOverlayIndex = len(m.chapters) - 1
 	}
+}
+
+func (m *Model) clearPlaybackSessionState() {
+	m.sessionID = ""
+	m.itemID = ""
+	m.episodeID = ""
+	m.timeListened = 0
+	m.lastSyncPos = 0
+	m.chapters = nil
+	m.resetChapterOverlay()
+	m.trackStartOffset = 0
+	m.trackDuration = 0
+	m.sleepDeadline = time.Time{}
+	m.sleepDuration = 0
+	m.player.SleepRemaining = ""
+	m.player.Playing = false
+	m.player.Title = ""
+	m.player.Position = 0
+	m.player.Duration = 0
 }
