@@ -669,6 +669,44 @@ func TestJKMovesChapterOverlaySelection(t *testing.T) {
 	}
 }
 
+func TestEnterSeeksSelectedChapterAndClosesOverlay(t *testing.T) {
+	m := newPlaybackTestModel()
+	mp := m.mpv.(*mockPlayer)
+	m.sessionID = "sess-123"
+	m.itemID = "item-456"
+	m.player.Position = 10.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 0
+	m.trackDuration = 3600.0
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "One"},
+		{ID: 1, Start: 120, End: 180, Title: "Two"},
+	}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 1
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	if m.chapterOverlayVisible {
+		t.Fatal("overlay should close after selecting a chapter")
+	}
+	if m.player.Position != 120.0 {
+		t.Fatalf("player position = %f, want 120.0", m.player.Position)
+	}
+	if cmd == nil {
+		t.Fatal("expected seek command after selecting chapter")
+	}
+
+	_ = cmd()
+
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+	if mp.position != 120.0 {
+		t.Fatalf("mock player position = %f, want 120.0", mp.position)
+	}
+}
+
 func TestPausedPositionMsgKeepsChapterOverlayOpen(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.sessionID = "sess-123"

@@ -340,6 +340,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closeChapterOverlay()
 				return m, nil
 			}
+			if msg.Type == tea.KeyEnter {
+				if m.chapterOverlayIndex >= 0 && m.chapterOverlayIndex < len(m.chapters) {
+					target := m.chapters[m.chapterOverlayIndex].Start
+					m.closeChapterOverlay()
+					return m.seekToChapter(target, true)
+				}
+				m.closeChapterOverlay()
+				return m, nil
+			}
 			if msg.String() == "j" || msg.String() == "down" {
 				m.moveChapterOverlaySelection(1)
 				return m, nil
