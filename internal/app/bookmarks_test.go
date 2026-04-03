@@ -58,7 +58,7 @@ func TestHandleAddBookmarkReturnsBookmarkUpdateErrorWhenRefreshFails(t *testing.
 func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodDelete && r.URL.Path == "/api/me/item/item-001/bookmark/300.500":
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/me/item/item-001/bookmark/300.5":
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			w.WriteHeader(http.StatusOK)

@@ -56,7 +56,7 @@ func (c *Client) CreateBookmark(ctx context.Context, itemID string, time float64
 
 // DeleteBookmark deletes a bookmark from a library item at the given time.
 func (c *Client) DeleteBookmark(ctx context.Context, itemID string, time float64) error {
-	timeStr := strconv.FormatFloat(time, 'f', 3, 64)
+	timeStr := strconv.FormatFloat(time, 'f', -1, 64)
 	path := fmt.Sprintf("/api/me/item/%s/bookmark/%s", itemID, timeStr)
 	_, err := c.do(ctx, http.MethodDelete, path, nil)
 	if err != nil {

@@ -128,8 +128,8 @@ func TestCreateBookmarkHTTP(t *testing.T) {
 
 func TestDeleteBookmarkHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me/item/li-001/bookmark/300.500" {
-			t.Errorf("path = %q, want /api/me/item/li-001/bookmark/300.500", r.URL.Path)
+		if r.URL.Path != "/api/me/item/li-001/bookmark/300.5" {
+			t.Errorf("path = %q, want /api/me/item/li-001/bookmark/300.5", r.URL.Path)
 		}
 		if r.Method != http.MethodDelete {
 			t.Errorf("method = %q, want DELETE", r.Method)
@@ -140,6 +140,25 @@ func TestDeleteBookmarkHTTP(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	err := c.DeleteBookmark(context.Background(), "li-001", 300.5)
+	if err != nil {
+		t.Fatalf("DeleteBookmark() error: %v", err)
+	}
+}
+
+func TestDeleteBookmarkHTTPPreservesBookmarkPrecision(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me/item/li-001/bookmark/4733.343044" {
+			t.Errorf("path = %q, want /api/me/item/li-001/bookmark/4733.343044", r.URL.Path)
+		}
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %q, want DELETE", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	err := c.DeleteBookmark(context.Background(), "li-001", 4733.343044)
 	if err != nil {
 		t.Fatalf("DeleteBookmark() error: %v", err)
 	}
