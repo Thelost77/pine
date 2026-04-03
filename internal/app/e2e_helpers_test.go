@@ -103,9 +103,10 @@ func testBookmark(title string, seconds float64) abs.Bookmark {
 
 // e2eServerState holds mutable state for the mock server.
 type e2eServerState struct {
-	mu        sync.Mutex
-	bookmarks map[string][]abs.Bookmark // itemID → bookmarks
-	force401  bool                      // when true, next API call returns 401
+	mu             sync.Mutex
+	bookmarks      map[string][]abs.Bookmark // itemID → bookmarks
+	progressStatus map[string]int            // itemID → GET /api/me/progress status override
+	force401       bool                      // when true, next API call returns 401
 }
 
 func (s *e2eServerState) setForce401(v bool) {
@@ -131,6 +132,18 @@ func (s *e2eServerState) getBookmarks(itemID string) []abs.Bookmark {
 	cp := make([]abs.Bookmark, len(bms))
 	copy(cp, bms)
 	return cp
+}
+
+func (s *e2eServerState) getProgressStatus(itemID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.progressStatus == nil {
+		return http.StatusOK
+	}
+	if status, ok := s.progressStatus[itemID]; ok {
+		return status
+	}
+	return http.StatusOK
 }
 
 func (s *e2eServerState) addBookmark(itemID string, bm abs.Bookmark) {
@@ -287,6 +300,15 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 		// --- Bookmarks (via progress endpoint) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/progress/"):
 			itemID := strings.TrimPrefix(r.URL.Path, "/api/me/progress/")
+			status := state.getProgressStatus(itemID)
+			if status != http.StatusOK {
+				if status == http.StatusNotFound {
+					http.Error(w, `{"error":"not found"}`, status)
+				} else {
+					http.Error(w, `{"error":"boom"}`, status)
+				}
+				return
+			}
 			bms := state.getBookmarks(itemID)
 			resp := abs.MediaProgressWithBookmarks{
 				LibraryItemID: itemID,

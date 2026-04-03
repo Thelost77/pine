@@ -603,6 +603,9 @@ func TestE2E_BookmarkCRUD(t *testing.T) {
 	if len(m.detail.Bookmarks()) != 0 {
 		t.Errorf("detail bookmarks = %d, want 0", len(m.detail.Bookmarks()))
 	}
+	if !strings.Contains(m.detail.View(), "No bookmarks yet") {
+		t.Error("expected detail view to show empty bookmark state after deleting the last bookmark")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +643,65 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	// Verify bookmarks are on the detail screen
 	if len(m.detail.Bookmarks()) != 2 {
 		t.Errorf("detail bookmarks = %d, want 2", len(m.detail.Bookmarks()))
+	}
+}
+
+func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForMissingProgress(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{
+		bookmarks:      make(map[string][]abs.Bookmark),
+		progressStatus: map[string]int{"item-001": http.StatusNotFound},
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	item := testLibraryItem("item-001", "The Great Gatsby")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+
+	m = feedCmdChain(m, cmd, 5)
+
+	if !m.detail.BookmarksLoaded() {
+		t.Fatal("expected bookmarks to be marked loaded")
+	}
+	if m.detail.BookmarkLoadError() != nil {
+		t.Fatalf("expected no bookmark load error, got %v", m.detail.BookmarkLoadError())
+	}
+	if !strings.Contains(m.detail.View(), "No bookmarks yet") {
+		t.Error("expected detail view to show empty bookmark state for missing progress")
+	}
+}
+
+func TestE2E_BookmarkFetchOnDetailEntryShowsBookmarkErrorForServerFailure(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{
+		bookmarks:      make(map[string][]abs.Bookmark),
+		progressStatus: map[string]int{"item-001": http.StatusInternalServerError},
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	item := testLibraryItem("item-001", "The Great Gatsby")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+
+	m = feedCmdChain(m, cmd, 5)
+
+	if m.detail.BookmarkLoadError() == nil {
+		t.Fatal("expected bookmark load error for server failure")
+	}
+	if !strings.Contains(m.detail.View(), "boom") {
+		t.Error("expected detail view to show bookmark load error text")
 	}
 }
 
