@@ -180,6 +180,8 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 	mpvPlayer := m.mpv
 	targetPos := bookPos
 
+	// Bump generation so old position ticks get discarded
+	m.playGeneration++
 	// Clear current session but keep itemID/chapters for the restart
 	m.sessionID = ""
 	m.timeListened = 0
