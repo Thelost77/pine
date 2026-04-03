@@ -142,6 +142,7 @@ type PersonalizedResponse struct {
 
 // Bookmark represents a user bookmark within a media item.
 type Bookmark struct {
+	LibraryItemID string  `json:"libraryItemId,omitempty"`
 	Title     string  `json:"title"`
 	Time      float64 `json:"time"`      // seconds
 	CreatedAt int64   `json:"createdAt"` // unix timestamp ms

@@ -2,7 +2,6 @@ package abs
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,26 +9,45 @@ import (
 	"testing"
 )
 
-//go:embed testdata/bookmarks.json
-var bookmarksFixture []byte
+var userBookmarksFixture = []byte(`{
+  "bookmarks": [
+    {
+      "libraryItemId": "li-001",
+      "title": "Great passage",
+      "time": 300.5,
+      "createdAt": 1700000000000
+    },
+    {
+      "libraryItemId": "li-001",
+      "title": "Important quote",
+      "time": 1500.0,
+      "createdAt": 1700001000000
+    },
+    {
+      "libraryItemId": "li-002",
+      "title": "Different item",
+      "time": 42,
+      "createdAt": 1700002000000
+    }
+  ]
+}`)
 
 // --- Deserialization tests ---
 
-func TestMediaProgressWithBookmarksDeserialization(t *testing.T) {
-	var progress MediaProgressWithBookmarks
-	if err := json.Unmarshal(bookmarksFixture, &progress); err != nil {
+func TestUserBookmarksDeserialization(t *testing.T) {
+	var resp struct {
+		Bookmarks []Bookmark `json:"bookmarks"`
+	}
+	if err := json.Unmarshal(userBookmarksFixture, &resp); err != nil {
 		t.Fatalf("failed to unmarshal fixture: %v", err)
 	}
-	if progress.LibraryItemID != "li-001" {
-		t.Errorf("LibraryItemID = %q, want %q", progress.LibraryItemID, "li-001")
+	if len(resp.Bookmarks) != 3 {
+		t.Fatalf("expected 3 bookmarks, got %d", len(resp.Bookmarks))
 	}
-	if progress.CurrentTime != 1234.56 {
-		t.Errorf("CurrentTime = %f, want 1234.56", progress.CurrentTime)
+	bm := resp.Bookmarks[0]
+	if bm.LibraryItemID != "li-001" {
+		t.Errorf("bookmark libraryItemId = %q, want %q", bm.LibraryItemID, "li-001")
 	}
-	if len(progress.Bookmarks) != 2 {
-		t.Fatalf("expected 2 bookmarks, got %d", len(progress.Bookmarks))
-	}
-	bm := progress.Bookmarks[0]
 	if bm.Title != "Great passage" {
 		t.Errorf("bookmark title = %q, want %q", bm.Title, "Great passage")
 	}
@@ -45,14 +63,14 @@ func TestMediaProgressWithBookmarksDeserialization(t *testing.T) {
 
 func TestGetBookmarksHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me/progress/li-001" {
-			t.Errorf("path = %q, want /api/me/progress/li-001", r.URL.Path)
+		if r.URL.Path != "/api/me" {
+			t.Errorf("path = %q, want /api/me", r.URL.Path)
 		}
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(bookmarksFixture)
+		w.Write(userBookmarksFixture)
 	}))
 	defer srv.Close()
 
@@ -83,7 +101,7 @@ func TestCreateBookmarkHTTP(t *testing.T) {
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(bookmarksFixture)
+		w.Write(userBookmarksFixture)
 	}))
 	defer srv.Close()
 
@@ -128,10 +146,10 @@ func TestDeleteBookmarkHTTP(t *testing.T) {
 }
 
 func TestGetBookmarksEmptyResponse(t *testing.T) {
-	emptyProgress := `{"libraryItemId": "li-002", "currentTime": 0, "progress": 0, "isFinished": false, "bookmarks": []}`
+	emptyBookmarks := `{"bookmarks": []}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(emptyProgress))
+		w.Write([]byte(emptyBookmarks))
 	}))
 	defer srv.Close()
 
@@ -145,19 +163,16 @@ func TestGetBookmarksEmptyResponse(t *testing.T) {
 	}
 }
 
-func TestGetBookmarksNotFoundReturnsEmpty(t *testing.T) {
+func TestGetBookmarksNotFoundReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok")
-	bookmarks, err := c.GetBookmarks(context.Background(), "li-404")
-	if err != nil {
-		t.Fatalf("GetBookmarks() error: %v", err)
-	}
-	if len(bookmarks) != 0 {
-		t.Errorf("expected 0 bookmarks, got %d", len(bookmarks))
+	_, err := c.GetBookmarks(context.Background(), "li-404")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
 	}
 }
 

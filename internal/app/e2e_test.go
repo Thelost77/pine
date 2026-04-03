@@ -638,7 +638,7 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	// Execute the bookmark fetch
 	m = feedCmdChain(m, cmd, 5)
 
-	assertAPICallMade(t, log, "GET", "/api/me/progress/item-001")
+	assertAPICallMade(t, log, "GET", "/api/me")
 
 	// Verify bookmarks are on the detail screen
 	if len(m.detail.Bookmarks()) != 2 {
@@ -646,12 +646,9 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	}
 }
 
-func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForMissingProgress(t *testing.T) {
+func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForNoBookmarks(t *testing.T) {
 	log := &apiLog{}
-	state := &e2eServerState{
-		bookmarks:      make(map[string][]abs.Bookmark),
-		progressStatus: map[string]int{"item-001": http.StatusNotFound},
-	}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
 	srv := newFullMockABSServer(log, state)
 	defer srv.Close()
 
@@ -673,15 +670,15 @@ func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForMissingProgress(t *test
 		t.Fatalf("expected no bookmark load error, got %v", m.detail.BookmarkLoadError())
 	}
 	if !strings.Contains(m.detail.View(), "No bookmarks yet") {
-		t.Error("expected detail view to show empty bookmark state for missing progress")
+		t.Error("expected detail view to show empty bookmark state when user bookmark list is empty")
 	}
 }
 
 func TestE2E_BookmarkFetchOnDetailEntryShowsBookmarkErrorForServerFailure(t *testing.T) {
 	log := &apiLog{}
 	state := &e2eServerState{
-		bookmarks:      make(map[string][]abs.Bookmark),
-		progressStatus: map[string]int{"item-001": http.StatusInternalServerError},
+		bookmarks: make(map[string][]abs.Bookmark),
+		meStatus:  http.StatusInternalServerError,
 	}
 	srv := newFullMockABSServer(log, state)
 	defer srv.Close()

@@ -28,7 +28,7 @@ func TestHandleAddBookmarkReturnsBookmarkUpdateErrorWhenRefreshFails(t *testing.
 		case r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
@@ -60,8 +60,9 @@ func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *tes
 		switch {
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/me/item/item-001/bookmark/300.500":
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
-			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"bookmarks":[]}`))
 		default:
 			http.NotFound(w, r)
 		}

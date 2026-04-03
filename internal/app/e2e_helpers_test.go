@@ -106,6 +106,7 @@ type e2eServerState struct {
 	mu             sync.Mutex
 	bookmarks      map[string][]abs.Bookmark // itemID → bookmarks
 	progressStatus map[string]int            // itemID → GET /api/me/progress status override
+	meStatus       int                       // GET /api/me status override
 	force401       bool                      // when true, next API call returns 401
 }
 
@@ -134,6 +135,23 @@ func (s *e2eServerState) getBookmarks(itemID string) []abs.Bookmark {
 	return cp
 }
 
+func (s *e2eServerState) allBookmarks() []abs.Bookmark {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var all []abs.Bookmark
+	for itemID, bms := range s.bookmarks {
+		for _, bm := range bms {
+			cp := bm
+			if cp.LibraryItemID == "" {
+				cp.LibraryItemID = itemID
+			}
+			all = append(all, cp)
+		}
+	}
+	return all
+}
+
 func (s *e2eServerState) getProgressStatus(itemID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,6 +162,15 @@ func (s *e2eServerState) getProgressStatus(itemID string) int {
 		return status
 	}
 	return http.StatusOK
+}
+
+func (s *e2eServerState) getMeStatus() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.meStatus == 0 {
+		return http.StatusOK
+	}
+	return s.meStatus
 }
 
 func (s *e2eServerState) addBookmark(itemID string, bm abs.Bookmark) {
@@ -198,6 +225,19 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			resp := abs.LoginResponse{User: abs.LoginUser{
 				ID: "usr-001", Username: "alice", Token: "jwt-token-e2e",
 			}}
+			json.NewEncoder(w).Encode(resp)
+
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+			status := state.getMeStatus()
+			if status != http.StatusOK {
+				http.Error(w, `{"error":"boom"}`, status)
+				return
+			}
+			resp := struct {
+				Bookmarks []abs.Bookmark `json:"bookmarks"`
+			}{
+				Bookmarks: state.allBookmarks(),
+			}
 			json.NewEncoder(w).Encode(resp)
 
 		// --- Libraries ---

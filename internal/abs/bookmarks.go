@@ -14,22 +14,30 @@ type createBookmarkRequest struct {
 	Title string  `json:"title"`
 }
 
-// GetBookmarks returns bookmarks for a library item, extracted from media progress.
+type userBookmarksResponse struct {
+	Bookmarks []Bookmark `json:"bookmarks"`
+}
+
+// GetBookmarks returns bookmarks for a library item from the authenticated user's bookmark collection.
 func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]Bookmark, error) {
-	path := fmt.Sprintf("/api/me/progress/%s", itemID)
+	path := "/api/me"
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		if IsHTTPStatus(err, http.StatusNotFound) {
-			return []Bookmark{}, nil
-		}
 		return nil, fmt.Errorf("get bookmarks: %w", err)
 	}
 
-	var progress MediaProgressWithBookmarks
-	if err := json.Unmarshal(resp, &progress); err != nil {
+	var user userBookmarksResponse
+	if err := json.Unmarshal(resp, &user); err != nil {
 		return nil, fmt.Errorf("get bookmarks: unmarshal: %w", err)
 	}
-	return progress.Bookmarks, nil
+
+	bookmarks := make([]Bookmark, 0, len(user.Bookmarks))
+	for _, bookmark := range user.Bookmarks {
+		if bookmark.LibraryItemID == itemID {
+			bookmarks = append(bookmarks, bookmark)
+		}
+	}
+	return bookmarks, nil
 }
 
 // CreateBookmark creates a bookmark on a library item at the given time.
