@@ -109,6 +109,7 @@ type Model struct {
 	client          *abs.Client
 	libraries       []abs.Library
 	selectedLibrary int
+	itemCache       map[string][]abs.LibraryItem // libraryID → items
 }
 
 // New creates a new home screen model.
@@ -129,10 +130,12 @@ func New(styles ui.Styles, client *abs.Client) Model {
 	l.DisableQuitKeybindings()
 
 	return Model{
-		list:   l,
-		keys:   DefaultKeyMap(),
-		styles: styles,
-		client: client,
+		list:      l,
+		loading:   true,
+		keys:      DefaultKeyMap(),
+		styles:    styles,
+		client:    client,
+		itemCache: make(map[string][]abs.LibraryItem),
 	}
 }
 
@@ -161,6 +164,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.libraries = msg.Libraries
 		}
 		m.items = msg.Items
+		if libID := m.SelectedLibraryID(); libID != "" {
+			m.itemCache[libID] = msg.Items
+		}
 		items := make([]list.Item, len(msg.Items))
 		for i, item := range msg.Items {
 			items[i] = listItem{item: item}
@@ -203,8 +209,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
+				// Cache current library's items
+				if libID := m.SelectedLibraryID(); libID != "" {
+					m.itemCache[libID] = m.items
+				}
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.updateListTitle()
+				// Use cached items if available, fetch in background either way
+				newLibID := m.SelectedLibraryID()
+				if cached, ok := m.itemCache[newLibID]; ok {
+					m.items = cached
+					items := make([]list.Item, len(cached))
+					for i, item := range cached {
+						items[i] = listItem{item: item}
+					}
+					m.list.SetItems(items)
+				}
 				return m, m.fetchPersonalizedCmd()
 			}
 			return m, nil
@@ -225,7 +245,6 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 			return PersonalizedMsg{Err: fmt.Errorf("not authenticated")}
 		}
 	}
-	m.loading = true
 	client := m.client
 	selectedIdx := m.selectedLibrary
 	existingLibs := m.libraries

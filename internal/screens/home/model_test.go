@@ -50,8 +50,8 @@ func sampleItems() []abs.LibraryItem {
 
 func TestNew(t *testing.T) {
 	m := newTestModel()
-	if m.Loading() {
-		t.Error("expected loading to be false initially")
+	if !m.Loading() {
+		t.Error("expected loading to be true initially")
 	}
 	if m.Error() != nil {
 		t.Error("expected no error initially")
