@@ -36,7 +36,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		}
 		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
 		if err != nil {
-			return PlaybackErrorMsg{Err: err}
+			return detail.BookmarksUpdatedMsg{Err: err}
 		}
 		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
 		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
@@ -67,7 +67,7 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 		}
 		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
 		if err != nil {
-			return PlaybackErrorMsg{Err: err}
+			return detail.BookmarksUpdatedMsg{Err: err}
 		}
 		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
 		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
