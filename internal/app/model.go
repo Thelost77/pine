@@ -46,6 +46,8 @@ type Model struct {
 	lastSyncPos      float64
 	playGeneration   uint64
 	chapters         []abs.Chapter
+	chapterOverlayVisible bool
+	chapterOverlayIndex   int
 	trackStartOffset float64
 	trackDuration    float64
 	sleepDeadline    time.Time
@@ -344,9 +346,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.chapterOverlayVisible {
+			if key.Matches(msg, m.keys.Back) {
+				m.closeChapterOverlay()
+				return m, nil
+			}
+			if msg.String() == "j" || msg.String() == "down" {
+				m.moveChapterOverlaySelection(1)
+				return m, nil
+			}
+			if msg.String() == "k" || msg.String() == "up" {
+				m.moveChapterOverlaySelection(-1)
+				return m, nil
+			}
+		}
 		if m.err.HasError() {
 			m.err.Dismiss()
 			m.propagateSize()
+			return m, nil
+		}
+		if key.Matches(msg, m.keys.ChapterOverlay) {
+			if m.canOpenChapterOverlay() {
+				m.openChapterOverlay()
+			}
 			return m, nil
 		}
 		// Global quit: q always quits the app.
@@ -442,4 +464,38 @@ func formatSleepRemaining(d time.Duration) string {
 	m := int(d.Minutes())
 	s := int(d.Seconds()) % 60
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+func (m Model) canOpenChapterOverlay() bool {
+	return m.isPlaying() && len(m.chapters) > 0
+}
+
+func (m *Model) openChapterOverlay() {
+	if !m.canOpenChapterOverlay() {
+		return
+	}
+	if m.chapterOverlayIndex >= len(m.chapters) {
+		m.chapterOverlayIndex = len(m.chapters) - 1
+	}
+	if m.chapterOverlayIndex < 0 {
+		m.chapterOverlayIndex = 0
+	}
+	m.chapterOverlayVisible = true
+}
+
+func (m *Model) closeChapterOverlay() {
+	m.chapterOverlayVisible = false
+}
+
+func (m *Model) moveChapterOverlaySelection(delta int) {
+	if !m.chapterOverlayVisible || len(m.chapters) == 0 {
+		return
+	}
+	m.chapterOverlayIndex += delta
+	if m.chapterOverlayIndex < 0 {
+		m.chapterOverlayIndex = 0
+	}
+	if m.chapterOverlayIndex >= len(m.chapters) {
+		m.chapterOverlayIndex = len(m.chapters) - 1
+	}
 }

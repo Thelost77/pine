@@ -551,6 +551,75 @@ func TestBackWhilePlayingKeepsPlayback(t *testing.T) {
 	}
 }
 
+func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
+	m := newPlaybackTestModel()
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = result.(Model)
+	if m.chapterOverlayVisible {
+		t.Fatal("overlay should stay closed when not playing")
+	}
+
+	m.sessionID = "sess-123"
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = result.(Model)
+	if m.chapterOverlayVisible {
+		t.Fatal("overlay should stay closed without chapters")
+	}
+
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "One"},
+		{ID: 1, Start: 60, End: 120, Title: "Two"},
+	}
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = result.(Model)
+	if !m.chapterOverlayVisible {
+		t.Fatal("overlay should open during active playback when chapters exist")
+	}
+	if m.chapterOverlayIndex != 0 {
+		t.Fatalf("overlay index = %d, want 0", m.chapterOverlayIndex)
+	}
+}
+
+func TestEscClosesChapterOverlayBeforeBackNavigation(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
+	m.chapterOverlayVisible = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = result.(Model)
+
+	if m.chapterOverlayVisible {
+		t.Fatal("overlay should close on esc")
+	}
+	if m.ActiveScreen() != ScreenDetail {
+		t.Fatalf("screen = %v, want Detail when overlay closes", m.ActiveScreen())
+	}
+}
+
+func TestJKMovesChapterOverlaySelection(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "One"},
+		{ID: 1, Start: 60, End: 120, Title: "Two"},
+		{ID: 2, Start: 120, End: 180, Title: "Three"},
+	}
+	m.chapterOverlayVisible = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = result.(Model)
+
+	if m.chapterOverlayIndex != 1 {
+		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
+	}
+}
+
 func TestNavigateWhilePlayingKeepsPlayback(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.sessionID = "sess-123"
