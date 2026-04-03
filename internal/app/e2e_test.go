@@ -1538,3 +1538,121 @@ func TestE2E_QQuitsAndStopsPlayback(t *testing.T) {
 	// Verify close session API was called
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/close")
 }
+
+// ---------------------------------------------------------------------------
+// E2E: Within-track seek uses mpv.Seek directly (no session restart)
+// ---------------------------------------------------------------------------
+
+func TestE2E_WithinTrackSeek(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 500, duration: 1800}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up playback with explicit track boundaries
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 500.0  // book-global
+	m.player.Duration = 3600.0 // book total
+	m.trackStartOffset = 0
+	m.trackDuration = 1800.0 // track covers 0-1800
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 900, Title: "Chapter 1"},
+		{ID: 1, Start: 900, End: 1800, Title: "Chapter 2"},
+	}
+
+	apiCallsBefore := len(log.get())
+
+	// Press 'l' (seek forward 10s) — should NOT trigger session restart
+	m, cmd := e2ePressKey(m, 'l')
+	if cmd != nil {
+		m = feedCmdChain(m, cmd, 3)
+	}
+
+	if m.player.Position != 510.0 {
+		t.Errorf("position after 'l' = %f, want 510.0", m.player.Position)
+	}
+
+	// Verify mock player was seeked to track-relative position
+	mp.mu.Lock()
+	seekPos := mp.position
+	mp.mu.Unlock()
+	if seekPos != 510.0 {
+		t.Errorf("mpv seek position = %f, want 510.0 (track-relative)", seekPos)
+	}
+
+	// No new API calls should have been made (no session restart)
+	apiCallsAfter := len(log.get())
+	if apiCallsAfter != apiCallsBefore {
+		t.Errorf("expected no new API calls for within-track seek, got %d new calls", apiCallsAfter-apiCallsBefore)
+	}
+
+	// Press 'n' (next chapter) — chapter 2 starts at 900, within same track
+	m, cmd = e2ePressKey(m, 'n')
+	if cmd != nil {
+		m = feedCmdChain(m, cmd, 3)
+	}
+
+	if m.player.Position != 900.0 {
+		t.Errorf("position after 'n' = %f, want 900.0", m.player.Position)
+	}
+
+	mp.mu.Lock()
+	seekPos = mp.position
+	mp.mu.Unlock()
+	if seekPos != 900.0 {
+		t.Errorf("mpv seek position after chapter = %f, want 900.0", seekPos)
+	}
+
+	// Still no new API calls
+	apiCallsAfter = len(log.get())
+	if apiCallsAfter != apiCallsBefore {
+		t.Errorf("expected no new API calls for within-track chapter seek, got %d new calls", apiCallsAfter-apiCallsBefore)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// E2E: Within-track seek with trackDuration==0 (fallback)
+// ---------------------------------------------------------------------------
+
+func TestE2E_WithinTrackSeekZeroDuration(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 100, duration: 3600}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up playback WITHOUT trackDuration (zero value — single-file or missing)
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 0
+	m.trackDuration = 0 // not set
+
+	apiCallsBefore := len(log.get())
+
+	// Press 'l' — should still seek directly, not restart
+	m, cmd := e2ePressKey(m, 'l')
+	if cmd != nil {
+		m = feedCmdChain(m, cmd, 3)
+	}
+
+	if m.player.Position != 110.0 {
+		t.Errorf("position = %f, want 110.0", m.player.Position)
+	}
+
+	apiCallsAfter := len(log.get())
+	if apiCallsAfter != apiCallsBefore {
+		t.Errorf("expected no API calls for seek with trackDuration==0, got %d new calls", apiCallsAfter-apiCallsBefore)
+	}
+}
