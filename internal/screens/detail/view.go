@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // View renders the detail screen.
@@ -39,13 +38,6 @@ func (m Model) renderHeader() string {
 		sections = append(sections, dur)
 	}
 
-	// Chapter X/Y (if we have progress and chapters)
-	if m.item.UserMediaProgress != nil && len(meta.Chapters) > 0 {
-		currentTime := m.item.UserMediaProgress.CurrentTime
-		chapterInfo := m.renderChapterInfo(currentTime, meta.Chapters)
-		sections = append(sections, chapterInfo)
-	}
-
 	// Progress bar / Finished badge
 	if m.item.UserMediaProgress != nil {
 		if m.item.UserMediaProgress.IsFinished {
@@ -60,19 +52,6 @@ func (m Model) renderHeader() string {
 	sections = append(sections, "")
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
-}
-
-// renderChapterInfo returns "Chapter X/Y" text based on current playback position.
-func (m Model) renderChapterInfo(currentTime float64, chapters []abs.Chapter) string {
-	chapterNum := 0
-	totalChapters := len(chapters)
-	for _, ch := range chapters {
-		if currentTime >= ch.Start && currentTime < ch.End {
-			chapterNum = ch.ID + 1
-		}
-	}
-	chapterStr := m.styles.Muted.Render(fmt.Sprintf("Chapter %d/%d", chapterNum, totalChapters))
-	return chapterStr
 }
 
 // renderProgressBar renders a lipgloss-styled progress bar.
@@ -99,7 +78,7 @@ func (m Model) renderProgressBar(progress float64) string {
 	return bar + m.styles.Muted.Render(pct)
 }
 
-// buildContent builds the scrollable content: description + episodes (podcasts) / chapters (books) + bookmarks + help.
+// buildContent builds the scrollable content: description + episodes (podcasts) + bookmarks + help.
 func (m Model) buildContent() string {
 	meta := m.item.Media.Metadata
 	var sections []string
@@ -130,25 +109,6 @@ func (m Model) buildContent() string {
 	} else if m.item.MediaType == "podcast" && len(m.episodes) == 0 {
 		sections = append(sections, m.styles.Subtitle.Render("Episodes"))
 		sections = append(sections, m.styles.Muted.Render("  No episodes available"))
-		sections = append(sections, "")
-	}
-
-	// Chapters (for books)
-	if m.item.MediaType != "podcast" && len(meta.Chapters) > 0 {
-		chapLabel := m.styles.Subtitle.Render("Chapters")
-		if m.focusChapters {
-			chapLabel = m.styles.Accent.Render("▸ Chapters")
-		}
-		sections = append(sections, chapLabel)
-		for i, ch := range meta.Chapters {
-			dur := ui.FormatDuration(ch.End - ch.Start)
-			line := fmt.Sprintf("  %d. %s  %s",
-				ch.ID+1, ch.Title, m.styles.Muted.Render("("+dur+")"))
-			if m.focusChapters && i == m.selectedChapter {
-				line = m.styles.Selected.Render(fmt.Sprintf("▶ %d. %s  (%s)", ch.ID+1, ch.Title, dur))
-			}
-			sections = append(sections, line)
-		}
 		sections = append(sections, "")
 	}
 
@@ -191,19 +151,14 @@ func (m Model) helpText() string {
 	if m.item.MediaType == "podcast" && len(m.episodes) == 0 {
 		return "b bookmark • tab focus bookmarks • q/h back"
 	}
-	if m.focusChapters {
-		return "enter seek to chapter • j/k navigate • tab next section • q/h back"
-	}
 	if m.focusBookmarks {
 		return "enter seek • d delete • j/k navigate • tab unfocus • b bookmark • q/h back"
 	}
-	chapters := m.item.Media.Metadata.Chapters
-	if len(chapters) > 0 || len(m.bookmarks) > 0 {
-		return "space/p play • b bookmark • tab focus chapters/bookmarks • j/k scroll • q/h back"
+	if len(m.bookmarks) > 0 {
+		return "space/p play • b bookmark • tab focus bookmarks • j/k scroll • q/h back"
 	}
 	return "space/p play • b bookmark • f mark finished • j/k scroll • q/h back"
 }
-
 
 // wordWrap wraps text to the given width, breaking on spaces.
 func wordWrap(text string, width int) string {

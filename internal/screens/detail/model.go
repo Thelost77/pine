@@ -1,11 +1,11 @@
 package detail
 
 import (
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Thelost77/pine/internal/abs"
-	"github.com/Thelost77/pine/internal/ui"
 )
 
 // PlayCmd requests playback of the given library item.
@@ -60,12 +60,12 @@ type BackMsg struct{}
 
 // KeyMap defines keybindings for the detail screen.
 type KeyMap struct {
-	Play        key.Binding
-	Bookmark    key.Binding
-	Up          key.Binding
-	Down        key.Binding
-	Back        key.Binding
-	Enter       key.Binding
+	Play         key.Binding
+	Bookmark     key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Back         key.Binding
+	Enter        key.Binding
 	Delete       key.Binding
 	ToggleFocus  key.Binding
 	MarkFinished key.Binding
@@ -125,11 +125,9 @@ type Model struct {
 	bookmarks        []abs.Bookmark
 	selectedBookmark int
 	focusBookmarks   bool
-	selectedChapter int
-	focusChapters   bool
-	episodes        []abs.PodcastEpisode
-	selectedEpisode int
-	focusEpisodes   bool
+	episodes         []abs.PodcastEpisode
+	selectedEpisode  int
+	focusEpisodes    bool
 }
 
 // New creates a new detail screen model for the given library item.
@@ -226,11 +224,6 @@ func (m Model) FocusBookmarks() bool {
 	return m.focusBookmarks
 }
 
-// FocusChapters returns whether chapter navigation is focused.
-func (m Model) FocusChapters() bool {
-	return m.focusChapters
-}
-
 // Init returns the initial command (none needed).
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -304,19 +297,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return PlayEpisodeCmd{Item: item, Episode: ep}
 				}
 			}
-			if m.focusChapters && m.selectedChapter < len(m.item.Media.Metadata.Chapters) {
-				ch := m.item.Media.Metadata.Chapters[m.selectedChapter]
-				return m, func() tea.Msg {
-					return SeekToChapterCmd{Time: ch.Start}
-				}
-			}
 			if m.focusBookmarks && len(m.bookmarks) > 0 && m.selectedBookmark < len(m.bookmarks) {
 				bm := m.bookmarks[m.selectedBookmark]
 				return m, func() tea.Msg {
 					return SeekToBookmarkCmd{Time: bm.Time}
 				}
 			}
-			if !m.focusChapters && !m.focusBookmarks && !m.focusEpisodes {
+			if !m.focusBookmarks && !m.focusEpisodes {
 				item := m.item
 				return m, func() tea.Msg {
 					return PlayCmd{Item: item}
@@ -334,15 +321,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.focusEpisodes && len(m.episodes) > 0 {
 				if m.selectedEpisode > 0 {
 					m.selectedEpisode--
-				}
-				if m.ready {
-					m.viewport.SetContent(m.buildContent())
-				}
-				return m, nil
-			}
-			if m.focusChapters && len(m.item.Media.Metadata.Chapters) > 0 {
-				if m.selectedChapter > 0 {
-					m.selectedChapter--
 				}
 				if m.ready {
 					m.viewport.SetContent(m.buildContent())
@@ -368,15 +346,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.focusChapters && len(m.item.Media.Metadata.Chapters) > 0 {
-				if m.selectedChapter < len(m.item.Media.Metadata.Chapters)-1 {
-					m.selectedChapter++
-				}
-				if m.ready {
-					m.viewport.SetContent(m.buildContent())
-				}
-				return m, nil
-			}
 			if m.focusBookmarks && len(m.bookmarks) > 0 {
 				if m.selectedBookmark < len(m.bookmarks)-1 {
 					m.selectedBookmark++
@@ -395,27 +364,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // cycleFocus cycles focus between sections.
-// Podcasts: none → episodes → bookmarks → none
-// Books with chapters: none → chapters → bookmarks → none
-// Books without chapters: none → bookmarks → none
+// Podcasts: episodes → bookmarks → none → episodes
+// Books with bookmarks: none ↔ bookmarks
 func (m *Model) cycleFocus() {
-	chapters := m.item.Media.Metadata.Chapters
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if !m.focusEpisodes && !m.focusBookmarks {
 			m.focusEpisodes = true
 		} else if m.focusEpisodes {
 			m.focusEpisodes = false
-			if len(m.bookmarks) > 0 {
-				m.focusBookmarks = true
-			}
-		} else {
-			m.focusBookmarks = false
-		}
-	} else if len(chapters) > 0 {
-		if !m.focusChapters && !m.focusBookmarks {
-			m.focusChapters = true
-		} else if m.focusChapters {
-			m.focusChapters = false
 			if len(m.bookmarks) > 0 {
 				m.focusBookmarks = true
 			}
@@ -436,4 +392,3 @@ func (m Model) headerHeight() int {
 	}
 	return lines
 }
-

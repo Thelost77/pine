@@ -477,9 +477,8 @@ func TestE2E_BookmarkCRUD(t *testing.T) {
 		t.Errorf("detail bookmarks = %d, want 1", len(m.detail.Bookmarks()))
 	}
 
-	// --- Seek to bookmark: Tab past chapters, Tab to focus bookmarks, Enter to seek ---
-	m, _ = e2ePressSpecial(m, tea.KeyTab) // chapters
-	m, _ = e2ePressSpecial(m, tea.KeyTab) // bookmarks
+	// --- Seek to bookmark: Tab to focus bookmarks, Enter to seek ---
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
 
 	if !m.detail.FocusBookmarks() {
 		t.Error("expected bookmark focus after Tab")
@@ -1124,10 +1123,10 @@ func TestE2E_BookDetailNoEpisodes(t *testing.T) {
 		t.Errorf("book should have 0 episodes, got %d", len(m.detail.Episodes()))
 	}
 
-	// View should contain chapters, not episodes
+	// View should contain neither inline chapters nor episodes
 	v := m.View()
-	if !strings.Contains(v, "Chapter 1") {
-		t.Error("book view should contain chapters")
+	if strings.Contains(v, "Chapters") {
+		t.Error("book view should not contain inline chapters")
 	}
 	if strings.Contains(v, "Episodes") {
 		t.Error("book view should NOT contain 'Episodes' section")

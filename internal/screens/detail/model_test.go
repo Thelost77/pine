@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func sampleItem() abs.LibraryItem {
@@ -102,17 +102,17 @@ func TestView_ShowsDescription(t *testing.T) {
 	}
 }
 
-func TestView_ShowsChapters(t *testing.T) {
+func TestView_DoesNotShowInlineChapters(t *testing.T) {
 	m := newTestModel()
 	v := m.View()
-	if !strings.Contains(v, "The Beginning") {
-		t.Error("expected view to contain chapter title 'The Beginning'")
+	if strings.Contains(v, "Chapters") {
+		t.Error("expected view not to contain inline chapters section")
 	}
-	if !strings.Contains(v, "The Journey") {
-		t.Error("expected view to contain chapter title 'The Journey'")
+	if strings.Contains(v, "The Beginning") || strings.Contains(v, "The Journey") || strings.Contains(v, "The Return") {
+		t.Error("expected view not to contain inline chapter titles")
 	}
-	if !strings.Contains(v, "The Return") {
-		t.Error("expected view to contain chapter title 'The Return'")
+	if strings.Contains(v, "Chapter 2/3") {
+		t.Error("expected view not to contain chapter progress text derived from metadata chapters")
 	}
 }
 
@@ -370,33 +370,21 @@ func TestTabKey_TogglesFocusBookmarks(t *testing.T) {
 		t.Error("expected focusBookmarks=false initially")
 	}
 
-	// First tab focuses chapters (test item has chapters)
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if !m.FocusChapters() {
-		t.Error("expected focusChapters=true after first tab")
-	}
-
-	// Second tab focuses bookmarks
+	// First tab focuses bookmarks for books.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if !m.FocusBookmarks() {
-		t.Error("expected focusBookmarks=true after second tab")
+		t.Error("expected focusBookmarks=true after first tab")
 	}
 
-	// Third tab unfocuses all
+	// Second tab unfocuses all
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if m.FocusBookmarks() {
-		t.Error("expected focusBookmarks=false after third tab")
+		t.Error("expected focusBookmarks=false after second tab")
 	}
 }
 
 func TestTabKey_NoToggleWithoutBookmarks(t *testing.T) {
 	m := newTestModel() // no bookmarks
-	// First tab focuses chapters (test item has chapters)
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.FocusBookmarks() {
-		t.Error("expected focusBookmarks=false when no bookmarks")
-	}
-	// Second tab unfocuses chapters (no bookmarks to cycle to)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if m.FocusBookmarks() {
 		t.Error("expected focusBookmarks=false when no bookmarks")
@@ -405,8 +393,6 @@ func TestTabKey_NoToggleWithoutBookmarks(t *testing.T) {
 
 func TestJKKeys_NavigateBookmarks(t *testing.T) {
 	m := newTestModelWithBookmarks()
-	// Tab past chapters to bookmarks (test item has chapters)
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // bookmarks
 	if m.SelectedBookmark() != 0 {
 		t.Errorf("expected selectedBookmark=0, got %d", m.SelectedBookmark())
@@ -438,7 +424,6 @@ func TestJKKeys_NavigateBookmarks(t *testing.T) {
 
 func TestEnterKey_SeeksToBookmark(t *testing.T) {
 	m := newTestModelWithBookmarks()
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus bookmarks
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -471,7 +456,6 @@ func TestEnterKey_NoActionWithoutFocus(t *testing.T) {
 
 func TestDKey_DeletesBookmark(t *testing.T) {
 	m := newTestModelWithBookmarks()
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus bookmarks
 	// Move to second bookmark
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -525,7 +509,6 @@ func TestBookmarksUpdatedMsg_UpdatesList(t *testing.T) {
 
 func TestBookmarksUpdatedMsg_ClampsSelection(t *testing.T) {
 	m := newTestModelWithBookmarks()
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus bookmarks
 	// Select last bookmark (index 2)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -542,7 +525,6 @@ func TestBookmarksUpdatedMsg_ClampsSelection(t *testing.T) {
 
 func TestBookmarksUpdatedMsg_EmptyDisablesFocus(t *testing.T) {
 	m := newTestModelWithBookmarks()
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus bookmarks
 	if !m.FocusBookmarks() {
 		t.Fatal("expected focusBookmarks=true")
@@ -565,7 +547,6 @@ func TestSetBookmarks(t *testing.T) {
 
 func TestView_BookmarkFocusHighlights(t *testing.T) {
 	m := newTestModelWithBookmarks()
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus bookmarks
 	v := m.View()
 	// When focused, the header should show the focus indicator
@@ -577,11 +558,13 @@ func TestView_BookmarkFocusHighlights(t *testing.T) {
 func TestView_HelpTextChangesWithFocus(t *testing.T) {
 	m := newTestModelWithBookmarks()
 	v := m.View()
-	if !strings.Contains(v, "tab focus chapters/bookmarks") {
-		t.Error("expected help to mention 'tab focus chapters/bookmarks' when chapters and bookmarks present")
+	if !strings.Contains(v, "tab focus bookmarks") {
+		t.Error("expected help to mention 'tab focus bookmarks' when bookmarks are present")
+	}
+	if strings.Contains(v, "chapters") {
+		t.Error("expected help not to mention chapters for books")
 	}
 
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus chapters
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus bookmarks
 	v = m.View()
 	if !strings.Contains(v, "enter seek") {
@@ -589,6 +572,64 @@ func TestView_HelpTextChangesWithFocus(t *testing.T) {
 	}
 	if !strings.Contains(v, "d delete") {
 		t.Error("expected help to mention 'd delete' when bookmarks focused")
+	}
+}
+
+func TestPodcastTabKey_CyclesEpisodesAndBookmarks(t *testing.T) {
+	styles := ui.DefaultStyles()
+	desc := "Podcast description"
+	item := abs.LibraryItem{
+		ID:        "pod-001",
+		MediaType: "podcast",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title:       "Podcast Show",
+				Description: &desc,
+			},
+			Episodes: []abs.PodcastEpisode{
+				{ID: "ep-1", Title: "Episode One", Duration: 1800},
+				{ID: "ep-2", Title: "Episode Two", Duration: 2400},
+			},
+		},
+	}
+	m := New(styles, item)
+	m.SetSize(80, 24)
+	m.SetBookmarks(sampleBookmarks())
+
+	if !m.focusEpisodes {
+		t.Fatal("expected podcast episodes to start focused")
+	}
+	if m.FocusBookmarks() {
+		t.Fatal("expected podcast bookmarks to start unfocused")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focusEpisodes {
+		t.Fatal("expected first tab to leave episode focus")
+	}
+	if !m.FocusBookmarks() {
+		t.Fatal("expected first tab to focus bookmarks")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focusEpisodes || m.FocusBookmarks() {
+		t.Fatal("expected second tab to clear podcast focus")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if !m.focusEpisodes {
+		t.Fatal("expected third tab to return focus to episodes")
+	}
+	if m.FocusBookmarks() {
+		t.Fatal("expected bookmarks to be unfocused when episode focus returns")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focusEpisodes {
+		t.Fatal("expected fourth tab to leave episode focus again")
+	}
+	if !m.FocusBookmarks() {
+		t.Fatal("expected fourth tab to focus bookmarks again")
 	}
 }
 
