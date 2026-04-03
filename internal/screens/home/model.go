@@ -3,19 +3,24 @@ package home
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Thelost77/pine/internal/abs"
-	"github.com/Thelost77/pine/internal/ui"
 )
+
+const continueListeningLimit = 5
+const recentlyAddedLimit = 3
 
 // PersonalizedMsg carries the result of fetching personalized data.
 type PersonalizedMsg struct {
-	Items     []abs.LibraryItem
-	Libraries []abs.Library
-	Err       error
+	Items         []abs.LibraryItem
+	RecentlyAdded []abs.LibraryItem
+	Libraries     []abs.Library
+	Err           error
 }
 
 // listItem wraps a LibraryItem for the bubbles list component.
@@ -100,6 +105,7 @@ func DefaultKeyMap() KeyMap {
 type Model struct {
 	list            list.Model
 	items           []abs.LibraryItem
+	recentlyAdded   []abs.LibraryItem
 	loading         bool
 	err             error
 	keys            KeyMap
@@ -110,6 +116,7 @@ type Model struct {
 	libraries       []abs.Library
 	selectedLibrary int
 	itemCache       map[string][]abs.LibraryItem // libraryID → items
+	recentCache     map[string][]abs.LibraryItem // libraryID → recently added
 }
 
 // New creates a new home screen model.
@@ -130,12 +137,13 @@ func New(styles ui.Styles, client *abs.Client) Model {
 	l.DisableQuitKeybindings()
 
 	return Model{
-		list:      l,
-		loading:   true,
-		keys:      DefaultKeyMap(),
-		styles:    styles,
-		client:    client,
-		itemCache: make(map[string][]abs.LibraryItem),
+		list:        l,
+		loading:     true,
+		keys:        DefaultKeyMap(),
+		styles:      styles,
+		client:      client,
+		itemCache:   make(map[string][]abs.LibraryItem),
+		recentCache: make(map[string][]abs.LibraryItem),
 	}
 }
 
@@ -163,15 +171,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if len(msg.Libraries) > 0 {
 			m.libraries = msg.Libraries
 		}
-		m.items = msg.Items
+		m.items = limitItems(msg.Items, continueListeningLimit)
+		m.recentlyAdded = dedupeRecentlyAdded(m.items, msg.RecentlyAdded, recentlyAddedLimit)
 		if libID := m.SelectedLibraryID(); libID != "" {
-			m.itemCache[libID] = msg.Items
+			m.itemCache[libID] = m.items
+			m.recentCache[libID] = m.recentlyAdded
 		}
-		items := make([]list.Item, len(msg.Items))
-		for i, item := range msg.Items {
-			items[i] = listItem{item: item}
-		}
-		m.list.SetItems(items)
+		m.setListItems(m.items)
 		m.updateListTitle()
 		return m, nil
 
@@ -212,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				// Cache current library's items
 				if libID := m.SelectedLibraryID(); libID != "" {
 					m.itemCache[libID] = m.items
+					m.recentCache[libID] = m.recentlyAdded
 				}
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.updateListTitle()
@@ -219,11 +226,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				newLibID := m.SelectedLibraryID()
 				if cached, ok := m.itemCache[newLibID]; ok {
 					m.items = cached
-					items := make([]list.Item, len(cached))
-					for i, item := range cached {
-						items[i] = listItem{item: item}
-					}
-					m.list.SetItems(items)
+					m.setListItems(cached)
+				} else {
+					m.items = nil
+					m.setListItems(nil)
+				}
+				if cachedRecent, ok := m.recentCache[newLibID]; ok {
+					m.recentlyAdded = cachedRecent
+				} else {
+					m.recentlyAdded = nil
 				}
 				return m, m.fetchPersonalizedCmd()
 			}
@@ -273,15 +284,22 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 			return PersonalizedMsg{Err: fmt.Errorf("fetch personalized: %w", err), Libraries: libs}
 		}
 
-		// Find the "continue-listening" section
+		var continueListening []abs.LibraryItem
+		var recentlyAdded []abs.LibraryItem
 		for _, section := range sections {
-			if section.ID == "continue-listening" {
-				return PersonalizedMsg{Items: section.Entities, Libraries: libs}
+			switch section.ID {
+			case "continue-listening":
+				continueListening = section.Entities
+			case "recently-added":
+				recentlyAdded = section.Entities
 			}
 		}
 
-		// No continue-listening section found; return empty
-		return PersonalizedMsg{Items: nil, Libraries: libs}
+		return PersonalizedMsg{
+			Items:         continueListening,
+			RecentlyAdded: recentlyAdded,
+			Libraries:     libs,
+		}
 	}
 }
 
@@ -320,6 +338,11 @@ func (m Model) Items() []abs.LibraryItem {
 	return m.items
 }
 
+// RecentlyAdded returns the secondary recently added subsection items.
+func (m Model) RecentlyAdded() []abs.LibraryItem {
+	return m.recentlyAdded
+}
+
 // Libraries returns the available libraries.
 func (m Model) Libraries() []abs.Library {
 	return m.libraries
@@ -346,6 +369,53 @@ func (m *Model) updateListTitle() {
 	m.list.Title = title
 }
 
+func (m *Model) setListItems(items []abs.LibraryItem) {
+	listItems := make([]list.Item, len(items))
+	for i, item := range items {
+		listItems[i] = listItem{item: item}
+	}
+	m.list.SetItems(listItems)
+}
+
+func limitItems(items []abs.LibraryItem, limit int) []abs.LibraryItem {
+	if len(items) <= limit {
+		return append([]abs.LibraryItem(nil), items...)
+	}
+	return append([]abs.LibraryItem(nil), items[:limit]...)
+}
+
+func dedupeRecentlyAdded(primary, recent []abs.LibraryItem, limit int) []abs.LibraryItem {
+	if len(recent) == 0 {
+		return nil
+	}
+
+	seenTitles := make(map[string]struct{}, len(primary))
+	for _, item := range primary {
+		title := strings.TrimSpace(item.Media.Metadata.Title)
+		if title == "" {
+			continue
+		}
+		seenTitles[strings.ToLower(title)] = struct{}{}
+	}
+
+	result := make([]abs.LibraryItem, 0, limit)
+	for _, item := range recent {
+		title := strings.TrimSpace(item.Media.Metadata.Title)
+		key := strings.ToLower(title)
+		if title != "" {
+			if _, exists := seenTitles[key]; exists {
+				continue
+			}
+			seenTitles[key] = struct{}{}
+		}
+		result = append(result, item)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result
+}
+
 // Loading returns whether data is being fetched.
 func (m Model) Loading() bool {
 	return m.loading
@@ -355,4 +425,3 @@ func (m Model) Loading() bool {
 func (m Model) Error() error {
 	return m.err
 }
-

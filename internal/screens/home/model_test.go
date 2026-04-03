@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newTestModel() Model {
@@ -48,6 +48,56 @@ func sampleItems() []abs.LibraryItem {
 	}
 }
 
+func sampleRecentlyAddedItems() []abs.LibraryItem {
+	author := "Jane Author"
+	return []abs.LibraryItem{
+		{
+			ID:        "li-002",
+			MediaType: "book",
+			AddedAt:   1712222222222,
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:      "New Horizons",
+					AuthorName: &author,
+				},
+			},
+		},
+		{
+			ID:        "li-003",
+			MediaType: "book",
+			AddedAt:   1713333333333,
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:      "Hidden Empire",
+					AuthorName: &author,
+				},
+			},
+		},
+		{
+			ID:        "li-004",
+			MediaType: "book",
+			AddedAt:   1714444444444,
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:      "Leviathan Falls",
+					AuthorName: &author,
+				},
+			},
+		},
+		{
+			ID:        "li-005",
+			MediaType: "book",
+			AddedAt:   1715555555555,
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:      "Memory's Legion",
+					AuthorName: &author,
+				},
+			},
+		},
+	}
+}
+
 func TestNew(t *testing.T) {
 	m := newTestModel()
 	if !m.Loading() {
@@ -62,7 +112,7 @@ func TestPersonalizedMsg_Success(t *testing.T) {
 	m := newTestModel()
 	items := sampleItems()
 
-	m, _ = m.Update(PersonalizedMsg{Items: items})
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: sampleRecentlyAddedItems()})
 
 	if m.Loading() {
 		t.Error("expected loading to be false after receiving items")
@@ -72,6 +122,34 @@ func TestPersonalizedMsg_Success(t *testing.T) {
 	}
 	if len(m.Items()) != 2 {
 		t.Errorf("expected 2 items, got %d", len(m.Items()))
+	}
+	if len(m.RecentlyAdded()) != 3 {
+		t.Errorf("expected 3 recently added items, got %d", len(m.RecentlyAdded()))
+	}
+}
+
+func TestPersonalizedMsg_CapsContinueListeningAtFive(t *testing.T) {
+	m := newTestModel()
+	items := make([]abs.LibraryItem, 0, 7)
+	for i := 0; i < 7; i++ {
+		items = append(items, abs.LibraryItem{
+			ID:        fmt.Sprintf("li-%03d", i),
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title: fmt.Sprintf("Book %d", i),
+				},
+			},
+		})
+	}
+
+	m, _ = m.Update(PersonalizedMsg{Items: items})
+
+	if len(m.Items()) != 5 {
+		t.Fatalf("expected continue listening cap of 5, got %d", len(m.Items()))
+	}
+	if m.Items()[4].Media.Metadata.Title != "Book 4" {
+		t.Fatalf("expected fifth visible item to be Book 4, got %q", m.Items()[4].Media.Metadata.Title)
 	}
 }
 
@@ -136,7 +214,6 @@ func TestSlashKey_NavigateSearch(t *testing.T) {
 	}
 }
 
-
 func TestView_Loading(t *testing.T) {
 	m := newTestModel()
 	m.loading = true
@@ -159,7 +236,8 @@ func TestView_WithItems(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
 	items := sampleItems()
-	m, _ = m.Update(PersonalizedMsg{Items: items})
+	recent := sampleRecentlyAddedItems()
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: recent})
 	v := m.View()
 	if v == "" {
 		t.Error("expected non-empty view with items")
@@ -170,12 +248,20 @@ func TestView_WithItems(t *testing.T) {
 			t.Errorf("expected view to contain title %q", item.Media.Metadata.Title)
 		}
 	}
+	if !strings.Contains(v, "Recently Added") {
+		t.Error("expected view to contain Recently Added subsection")
+	}
+	for _, item := range m.RecentlyAdded() {
+		if !strings.Contains(v, item.Media.Metadata.Title) {
+			t.Errorf("expected view to contain recently added title %q", item.Media.Metadata.Title)
+		}
+	}
 }
 
 func TestJKey_MovesSelection(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
-	m, _ = m.Update(PersonalizedMsg{Items: sampleItems()})
+	m, _ = m.Update(PersonalizedMsg{Items: sampleItems(), RecentlyAdded: sampleRecentlyAddedItems()})
 
 	// Initial selection should be index 0
 	if m.list.Index() != 0 {
@@ -192,7 +278,7 @@ func TestJKey_MovesSelection(t *testing.T) {
 func TestKKey_MovesSelectionUp(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
-	m, _ = m.Update(PersonalizedMsg{Items: sampleItems()})
+	m, _ = m.Update(PersonalizedMsg{Items: sampleItems(), RecentlyAdded: sampleRecentlyAddedItems()})
 
 	// Move down first, then up
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -206,7 +292,7 @@ func TestEnterKey_NavigateDetail_SelectedItem(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
 	items := sampleItems()
-	m, _ = m.Update(PersonalizedMsg{Items: items})
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: sampleRecentlyAddedItems()})
 
 	// Move to second item with j, then press enter
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -291,5 +377,32 @@ func TestInit_NilClient(t *testing.T) {
 	}
 	if pm.Err == nil {
 		t.Error("expected error when client is nil")
+	}
+}
+
+func TestPersonalizedMsg_DedupesRecentlyAddedByTitle(t *testing.T) {
+	m := newTestModel()
+	items := sampleItems()
+	recent := append([]abs.LibraryItem{
+		{
+			ID:        "li-999",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title: "The Great Adventure",
+				},
+			},
+		},
+	}, sampleRecentlyAddedItems()...)
+
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: recent})
+
+	if len(m.RecentlyAdded()) != 3 {
+		t.Fatalf("expected 3 recently added items after dedupe/cap, got %d", len(m.RecentlyAdded()))
+	}
+	for _, item := range m.RecentlyAdded() {
+		if item.Media.Metadata.Title == "The Great Adventure" {
+			t.Fatal("expected duplicate title to be excluded from recently added")
+		}
 	}
 }
