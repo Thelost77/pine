@@ -480,6 +480,152 @@ func TestPlaybackPositionErrorTriggersCleanup(t *testing.T) {
 	}
 }
 
+func TestPlaybackPositionErrorAtTrackEndRestartsNextTrack(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-multitrack/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-next",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-multitrack/track0.mp3", Duration: 1800},
+					{Index: 1, StartOffset: 1800, ContentURL: "/s/item/item-multitrack/track1.mp3", Duration: 1800},
+				},
+				CurrentTime: 500,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-mt/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-multitrack":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 1799, duration: 1800}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-mt"
+	m.itemID = "item-multitrack"
+	m.player.Playing = true
+	m.player.Title = "Track Test"
+	m.player.Position = 1800
+	m.player.Duration = 3600
+	m.trackStartOffset = 0
+	m.trackDuration = 1800
+	m.playGeneration = 1
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	m = feedCmdChain(m, cmd, 5)
+
+	if m.sessionID != "sess-next" {
+		t.Fatalf("sessionID = %q, want sess-next", m.sessionID)
+	}
+	if m.trackStartOffset != 1800 {
+		t.Fatalf("trackStartOffset = %f, want 1800", m.trackStartOffset)
+	}
+	if m.player.Position != 1800 {
+		t.Fatalf("player.Position = %f, want 1800", m.player.Position)
+	}
+	if !m.isPlaying() {
+		t.Fatal("expected playback to continue after EOF rollover")
+	}
+	if !mp.quit {
+		t.Fatal("expected previous mpv instance to be quit during rollover")
+	}
+
+	reqs := log.get()
+	playCalls := 0
+	closeCalls := 0
+	for _, r := range reqs {
+		if r.Method == http.MethodPost && r.Path == "/api/items/item-multitrack/play" {
+			playCalls++
+		}
+		if r.Method == http.MethodPost && r.Path == "/api/session/sess-mt/close" {
+			closeCalls++
+		}
+	}
+	if playCalls != 1 {
+		t.Fatalf("expected 1 restart play call, got %d", playCalls)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("expected 1 session close call, got %d", closeCalls)
+	}
+}
+
+func TestPlaybackPositionErrorAtFinalTrackEndStopsPlayback(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-mt/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-multitrack":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 1799, duration: 1800}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-mt"
+	m.itemID = "item-multitrack"
+	m.player.Playing = true
+	m.player.Title = "Track Test"
+	m.player.Position = 3600
+	m.player.Duration = 3600
+	m.trackStartOffset = 1800
+	m.trackDuration = 1800
+	m.playGeneration = 1
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+
+	if m.sessionID != "" {
+		t.Fatalf("sessionID should be cleared at final EOF, got %q", m.sessionID)
+	}
+	if m.player.Playing {
+		t.Fatal("expected playback to stop at final EOF")
+	}
+
+	executeBatchCmds(cmd)
+
+	reqs := log.get()
+	for _, r := range reqs {
+		if r.Method == http.MethodPost && r.Path == "/api/items/item-multitrack/play" {
+			t.Fatal("did not expect restart play call at final EOF")
+		}
+	}
+}
+
 // TestPlaybackMultipleSyncCycles verifies that multiple sync ticks
 // accumulate correctly and update lastSyncPos.
 func TestPlaybackMultipleSyncCycles(t *testing.T) {

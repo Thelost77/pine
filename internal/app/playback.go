@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -12,6 +13,8 @@ import (
 	"github.com/Thelost77/pine/internal/screens/detail"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+const trackEndRolloverSlack = 1.0
 
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
@@ -204,6 +207,16 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if msg.Err != nil {
+		if targetPos, ok := m.trackEndRolloverTarget(msg.Err); ok {
+			if m.player.Duration > 0 && targetPos >= m.player.Duration-trackEndRolloverSlack {
+				m.player.Position = m.player.Duration
+				logger.Info("track ended on final segment, stopping playback", "position", m.player.Position, "trackEnd", targetPos, "duration", m.player.Duration)
+				return m.stopPlayback()
+			}
+			logger.Info("track ended, advancing playback", "from", m.player.Position, "to", targetPos, "trackStart", m.trackStartOffset, "trackDuration", m.trackDuration)
+			return m.restartPlaybackAt(targetPos)
+		}
+
 		// If mpv exited or errored, clean up session
 		logger.Warn("player position error, stopping playback", "err", msg.Err)
 		if m.isPlaying() {
@@ -237,6 +250,86 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		return m, player.TickCmd(m.mpv, m.playGeneration)
 	}
 	return m, nil
+}
+
+func (m Model) trackEndRolloverTarget(err error) (float64, bool) {
+	if err == nil || m.episodeID != "" || m.trackDuration <= 0 {
+		return 0, false
+	}
+	if !strings.Contains(err.Error(), "closed mpv client") {
+		return 0, false
+	}
+
+	targetPos := m.trackStartOffset + m.trackDuration
+	if m.player.Position < targetPos-trackEndRolloverSlack {
+		return 0, false
+	}
+	return targetPos, true
+}
+
+func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
+	client := m.client
+	itemID := m.itemID
+	sessionID := m.sessionID
+	currentTime := m.player.Position
+	timeListened := m.timeListened
+	duration := m.player.Duration
+	title := m.player.Title
+	mpvPlayer := m.mpv
+	targetPos := bookPos
+
+	// Bump generation so old position ticks get discarded.
+	m.playGeneration++
+	// Clear current session but keep itemID/chapters for the restart.
+	m.sessionID = ""
+	m.timeListened = 0
+
+	return m, func() tea.Msg {
+		if client != nil && sessionID != "" {
+			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
+		}
+		if mpvPlayer != nil {
+			_ = mpvPlayer.Quit()
+		}
+
+		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		session, err := client.StartPlaySession(context.Background(), itemID, device)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		if len(session.AudioTracks) == 0 {
+			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
+		}
+
+		// Use our target position for track selection, not session.CurrentTime
+		// (ABS may not have processed our progress update yet).
+		track := session.AudioTracks[0]
+		seekTime := targetPos
+		for _, t := range session.AudioTracks {
+			if targetPos >= t.StartOffset && targetPos < t.StartOffset+t.Duration {
+				track = t
+				seekTime = targetPos - t.StartOffset
+				break
+			}
+		}
+		logger.Info("track selected for restarted session", "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "seekTime", seekTime, "targetPosition", targetPos)
+
+		streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
+
+		return PlaySessionMsg{
+			Session: PlaySessionData{
+				SessionID:        session.ID,
+				ItemID:           itemID,
+				CurrentTime:      seekTime,
+				Duration:         duration,
+				Title:            title,
+				Chapters:         playSessionChapters(session),
+				TrackStartOffset: track.StartOffset,
+				TrackDuration:    track.Duration,
+			},
+			StreamURL: streamURL,
+		}
+	}
 }
 
 // handleSyncTick syncs progress with ABS and persists to DB.

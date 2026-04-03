@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
@@ -173,70 +172,7 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 
 	// Cross-track seek: restart playback at the new book-global position.
 	logger.Info("cross-track seek, restarting playback", "from", m.player.Position, "to", bookPos, "trackStart", m.trackStartOffset, "trackEnd", trackEnd)
-	client := m.client
-	itemID := m.itemID
-	sessionID := m.sessionID
-	currentTime := m.player.Position
-	timeListened := m.timeListened
-	duration := m.player.Duration
-	title := m.player.Title
-	mpvPlayer := m.mpv
-	targetPos := bookPos
-
-	// Bump generation so old position ticks get discarded
-	m.playGeneration++
-	// Clear current session but keep itemID/chapters for the restart
-	m.sessionID = ""
-	m.timeListened = 0
-
-	return m, func() tea.Msg {
-		// Close current session
-		if client != nil && sessionID != "" {
-			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
-		}
-		if mpvPlayer != nil {
-			_ = mpvPlayer.Quit()
-		}
-
-		// Start fresh session to get track URLs
-		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
-		session, err := client.StartPlaySession(context.Background(), itemID, device)
-		if err != nil {
-			return PlaybackErrorMsg{Err: err}
-		}
-		if len(session.AudioTracks) == 0 {
-			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
-		}
-
-		// Use our target position for track selection, not session.CurrentTime
-		// (ABS may not have processed our progress update yet)
-		track := session.AudioTracks[0]
-		seekTime := targetPos
-		for _, t := range session.AudioTracks {
-			if targetPos >= t.StartOffset && targetPos < t.StartOffset+t.Duration {
-				track = t
-				seekTime = targetPos - t.StartOffset
-				break
-			}
-		}
-		logger.Info("track selected for restarted session", "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "seekTime", seekTime, "targetPosition", targetPos)
-
-		streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
-
-		return PlaySessionMsg{
-			Session: PlaySessionData{
-				SessionID:        session.ID,
-				ItemID:           itemID,
-				CurrentTime:      seekTime,
-				Duration:         duration,
-				Title:            title,
-				Chapters:         playSessionChapters(session),
-				TrackStartOffset: track.StartOffset,
-				TrackDuration:    track.Duration,
-			},
-			StreamURL: streamURL,
-		}
-	}
+	return m.restartPlaybackAt(bookPos)
 }
 
 // handleSeek seeks by a delta (in seconds), crossing track boundaries if needed.
