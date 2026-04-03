@@ -47,6 +47,20 @@ func newTestModel() Model {
 	return m
 }
 
+func newSeriesTestModel() Model {
+	styles := ui.DefaultStyles()
+	item := sampleItem()
+	item.LibraryID = "lib-books-001"
+	item.Media.Metadata.Series = &abs.SeriesSequence{
+		ID:       "series-expanse",
+		Name:     "The Expanse",
+		Sequence: "2",
+	}
+	m := New(styles, item)
+	m.SetSize(80, 24)
+	return m
+}
+
 func TestNew(t *testing.T) {
 	styles := ui.DefaultStyles()
 	item := sampleItem()
@@ -192,6 +206,51 @@ func TestShiftA_FiresPlayNextCmdForBook(t *testing.T) {
 	}
 	if queueMsg.Episode != nil {
 		t.Fatal("expected no episode payload for a book queue action")
+	}
+}
+
+func TestView_ShowsSeriesRowWhenPresent(t *testing.T) {
+	m := newSeriesTestModel()
+	v := m.View()
+	if !strings.Contains(v, "Series") {
+		t.Fatal("expected view to contain Series section")
+	}
+	if !strings.Contains(v, "The Expanse #2") {
+		t.Fatalf("expected compact series row, got:\n%s", v)
+	}
+}
+
+func TestTabKey_FocusesSeriesBeforeBookmarks(t *testing.T) {
+	m := newSeriesTestModel()
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	if !m.FocusSeries() {
+		t.Fatal("expected series row to be focused after tab")
+	}
+}
+
+func TestEnterOnFocusedSeries_FiresNavigateSeriesMsg(t *testing.T) {
+	m := newSeriesTestModel()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected command when activating focused series row")
+	}
+	msg := cmd()
+	navMsg, ok := msg.(NavigateSeriesMsg)
+	if !ok {
+		t.Fatalf("expected NavigateSeriesMsg, got %T", msg)
+	}
+	if navMsg.LibraryID != "lib-books-001" {
+		t.Fatalf("libraryID = %q, want lib-books-001", navMsg.LibraryID)
+	}
+	if navMsg.SeriesID != "series-expanse" {
+		t.Fatalf("seriesID = %q, want series-expanse", navMsg.SeriesID)
+	}
+	if navMsg.CurrentItemID != "li-001" {
+		t.Fatalf("currentItemID = %q, want li-001", navMsg.CurrentItemID)
 	}
 }
 

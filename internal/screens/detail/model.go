@@ -39,6 +39,13 @@ type PlayNextCmd struct {
 	Episode *abs.PodcastEpisode
 }
 
+// NavigateSeriesMsg requests opening the current book's series list.
+type NavigateSeriesMsg struct {
+	LibraryID     string
+	SeriesID      string
+	CurrentItemID string
+}
+
 // SeekToBookmarkCmd requests seeking the player to a bookmark's timestamp.
 type SeekToBookmarkCmd struct {
 	Item abs.LibraryItem
@@ -135,7 +142,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		ToggleFocus: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "toggle bookmarks"),
+			key.WithHelp("tab", "toggle sections"),
 		),
 		MarkFinished: key.NewBinding(
 			key.WithKeys("f"),
@@ -166,6 +173,7 @@ type Model struct {
 	bookmarkLoadErr  error
 	selectedBookmark int
 	focusBookmarks   bool
+	focusSeries      bool
 	editingBookmark  bool
 	bookmarkEditErr  string
 	bookmarkInput    textinput.Model
@@ -197,6 +205,15 @@ func (m *Model) refreshContent() {
 	if m.ready {
 		m.viewport.SetContent(m.buildContent())
 	}
+}
+
+// SetItem updates the displayed item and refreshes the viewport content.
+func (m *Model) SetItem(item abs.LibraryItem) {
+	m.item = item
+	if !m.hasSeries() {
+		m.focusSeries = false
+	}
+	m.refreshContent()
 }
 
 // SetBookmarks updates the bookmark list and refreshes the viewport content.
@@ -294,6 +311,11 @@ func (m Model) SelectedBookmark() int {
 // FocusBookmarks returns whether bookmark navigation is focused.
 func (m Model) FocusBookmarks() bool {
 	return m.focusBookmarks
+}
+
+// FocusSeries returns whether the series row is focused.
+func (m Model) FocusSeries() bool {
+	return m.focusSeries
 }
 
 // EditingBookmark returns whether bookmark title editing is active.
@@ -404,6 +426,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return PlayEpisodeCmd{Item: item, Episode: ep}
 				}
 			}
+			if m.focusSeries && m.hasSeries() {
+				series := m.item.Media.Metadata.Series
+				libraryID := m.item.LibraryID
+				currentItemID := m.item.ID
+				return m, func() tea.Msg {
+					return NavigateSeriesMsg{
+						LibraryID:     libraryID,
+						SeriesID:      series.ID,
+						CurrentItemID: currentItemID,
+					}
+				}
+			}
 			if m.focusBookmarks && m.hasFocusableBookmarks() && m.selectedBookmark < len(m.bookmarks) {
 				item := m.item
 				bm := m.bookmarks[m.selectedBookmark]
@@ -411,7 +445,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return SeekToBookmarkCmd{Item: item, Time: bm.Time}
 				}
 			}
-			if !m.focusBookmarks && !m.focusEpisodes {
+			if !m.focusBookmarks && !m.focusEpisodes && !m.focusSeries {
 				item := m.item
 				return m, func() tea.Msg {
 					return PlayCmd{Item: item}
@@ -477,7 +511,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 // cycleFocus cycles focus between sections.
 // Podcasts: episodes → bookmarks → none → episodes
-// Books with bookmarks: none ↔ bookmarks
+// Books: none → series → bookmarks → none (skipping missing sections)
 func (m *Model) cycleFocus() {
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if !m.focusEpisodes && !m.focusBookmarks {
@@ -490,13 +524,37 @@ func (m *Model) cycleFocus() {
 		} else {
 			m.focusBookmarks = false
 		}
-	} else if m.hasFocusableBookmarks() {
-		m.focusBookmarks = !m.focusBookmarks
+		return
+	}
+
+	if m.focusBookmarks {
+		m.focusBookmarks = false
+		return
+	}
+	if m.focusSeries {
+		m.focusSeries = false
+		if m.hasFocusableBookmarks() {
+			m.focusBookmarks = true
+		}
+		return
+	}
+	if m.hasSeries() {
+		m.focusSeries = true
+		return
+	}
+	if m.hasFocusableBookmarks() {
+		m.focusBookmarks = true
 	}
 }
 
 func (m Model) hasFocusableBookmarks() bool {
 	return m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
+}
+
+func (m Model) hasSeries() bool {
+	return m.item.MediaType == "book" &&
+		m.item.Media.Metadata.Series != nil &&
+		m.item.Media.Metadata.Series.ID != ""
 }
 
 func (m Model) queueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {

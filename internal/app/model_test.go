@@ -96,6 +96,7 @@ func TestScreenString(t *testing.T) {
 		{ScreenLibrary, "Library"},
 		{ScreenDetail, "Detail"},
 		{ScreenSearch, "Search"},
+		{ScreenSeries, "Series"},
 		{Screen(99), "Unknown"},
 	}
 	for _, tt := range tests {
@@ -921,6 +922,62 @@ func TestPlayNextCmdPrependsEntry(t *testing.T) {
 	}
 	if rm.Queue()[1].Item.ID != "item-old" {
 		t.Fatalf("expected original queue entry to remain second, got %s", rm.Queue()[1].Item.ID)
+	}
+}
+
+func TestNavigateSeriesMsgOpensSeriesScreen(t *testing.T) {
+	m := newPlaybackTestModel()
+
+	result, cmd := m.Update(detail.NavigateSeriesMsg{
+		LibraryID:     "lib-books-001",
+		SeriesID:      "series-expanse",
+		CurrentItemID: "item-old",
+	})
+	rm := result.(Model)
+
+	if rm.ActiveScreen() != ScreenSeries {
+		t.Fatalf("screen = %v, want Series", rm.ActiveScreen())
+	}
+	if cmd == nil {
+		t.Fatal("expected init command when navigating to series screen")
+	}
+}
+
+func TestBookDetailLoadedMsgUpdatesDetailItem(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.detail = detail.New(m.styles, abs.LibraryItem{
+		ID:        "li-001",
+		MediaType: "book",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Caliban's War"}},
+	})
+
+	result, cmd := m.Update(BookDetailLoadedMsg{
+		Item: &abs.LibraryItem{
+			ID:        "li-001",
+			LibraryID: "lib-books-001",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title: "Caliban's War",
+					Series: &abs.SeriesSequence{
+						ID:       "series-expanse",
+						Name:     "The Expanse",
+						Sequence: "2",
+					},
+				},
+			},
+		},
+	})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command from BookDetailLoadedMsg")
+	}
+	if rm.detail.Item().Media.Metadata.Series == nil {
+		t.Fatal("expected detail item to be enriched with series data")
+	}
+	if rm.detail.Item().Media.Metadata.Series.Name != "The Expanse" {
+		t.Fatalf("series name = %q, want The Expanse", rm.detail.Item().Media.Metadata.Series.Name)
 	}
 }
 

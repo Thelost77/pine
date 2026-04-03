@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
@@ -129,6 +130,32 @@ func (m Model) fetchEpisodesCmd(itemID string) tea.Cmd {
 		}
 		return EpisodesLoadedMsg{Episodes: item.Media.Episodes}
 	}
+}
+
+// fetchBookDetailCmd returns a command that fetches an enriched book item from ABS.
+func (m Model) fetchBookDetailCmd(itemID string) tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	client := m.client
+	return func() tea.Msg {
+		item, err := client.GetLibraryItem(context.Background(), itemID)
+		if err != nil {
+			return BookDetailLoadedMsg{Err: err}
+		}
+		return BookDetailLoadedMsg{Item: item}
+	}
+}
+
+func (m Model) detailLoadCmds(item abs.LibraryItem, navCmd tea.Cmd) []tea.Cmd {
+	cmds := []tea.Cmd{navCmd, m.fetchBookmarksCmd(item.ID)}
+	if item.MediaType == "podcast" {
+		return append(cmds, m.fetchEpisodesCmd(item.ID))
+	}
+	if item.MediaType == "book" {
+		return append(cmds, m.fetchBookDetailCmd(item.ID))
+	}
+	return cmds
 }
 
 // nextChapter returns the start time of the next chapter after current position (book-global).

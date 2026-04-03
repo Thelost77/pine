@@ -90,6 +90,21 @@ func (m Model) buildContent() string {
 		sections = append(sections, descLabel, desc, "")
 	}
 
+	if meta.Series != nil && meta.Series.Name != "" {
+		seriesLabel := m.styles.Subtitle.Render("Series")
+		if m.focusSeries {
+			seriesLabel = m.styles.Accent.Render("▸ Series")
+		}
+		seriesLine := fmt.Sprintf("  %s #%s", meta.Series.Name, meta.Series.Sequence)
+		if meta.Series.Sequence == "" {
+			seriesLine = "  " + meta.Series.Name
+		}
+		if m.focusSeries {
+			seriesLine = m.styles.Selected.Render(strings.TrimSpace(seriesLine))
+		}
+		sections = append(sections, seriesLabel, seriesLine, "")
+	}
+
 	// Episodes (for podcasts)
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		epLabel := m.styles.Subtitle.Render("Episodes")
@@ -183,8 +198,17 @@ func (m Model) helpText() string {
 	if m.focusBookmarks && hasBookmarkFocus {
 		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark" + queueHints + " • q/h back"
 	}
+	if m.focusSeries && m.hasSeries() {
+		return "enter open series • tab next section • b bookmark" + queueHints + " • q/h back"
+	}
 	if hasBookmarkFocus {
+		if m.hasSeries() {
+			return "space/p play • b bookmark" + queueHints + " • tab focus series/bookmarks • j/k scroll • q/h back"
+		}
 		return "space/p play • b bookmark" + queueHints + " • tab focus bookmarks • j/k scroll • q/h back"
+	}
+	if m.hasSeries() {
+		return "space/p play • b bookmark • f mark finished" + queueHints + " • tab focus series • j/k scroll • q/h back"
 	}
 	return "space/p play • b bookmark • f mark finished" + queueHints + " • j/k scroll • q/h back"
 }

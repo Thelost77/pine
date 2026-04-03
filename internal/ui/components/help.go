@@ -89,6 +89,13 @@ func defaultGroups() []HelpGroup {
 				{Key: "f", Desc: "mark finished"},
 			},
 		},
+		{
+			Title: "Series",
+			Bindings: []HelpBinding{
+				{Key: "enter", Desc: "open selected book"},
+				{Key: "esc / ←", Desc: "back"},
+			},
+		},
 	}
 }
 

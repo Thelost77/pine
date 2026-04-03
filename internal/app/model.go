@@ -14,6 +14,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/screens/search"
+	"github.com/Thelost77/pine/internal/screens/series"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -36,6 +37,7 @@ type Model struct {
 	library library.Model
 	detail  detail.Model
 	search  search.Model
+	series  series.Model
 	player  player.Model
 
 	// Playback session state
@@ -87,6 +89,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		home:      home.New(styles, client),
 		library:   library.New(styles, client, "", nil),
 		search:    search.New(styles, client, ""),
+		series:    series.New(styles, client, "", "", ""),
 		player:    player.NewModel(mpv, cfg, styles),
 		keys:      DefaultKeyMap(cfg.Keybinds),
 		err:       components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
@@ -171,6 +174,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.home = home.New(m.styles, m.client)
 		m.library = library.New(m.styles, m.client, "", nil)
 		m.search = search.New(m.styles, m.client, "")
+		m.series = series.New(m.styles, m.client, "", "", "")
 		m.login, _ = m.login.Update(msg)
 		m.backStack = nil
 		m.screen = ScreenHome
@@ -182,11 +186,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Info("navigate to detail", "itemID", msg.Item.ID, "mediaType", msg.Item.MediaType, "title", msg.Item.Media.Metadata.Title)
 		m.detail = detail.New(m.styles, msg.Item)
 		m, navCmd := m.navigate(ScreenDetail)
-		cmds := []tea.Cmd{navCmd, m.fetchBookmarksCmd(msg.Item.ID)}
-		if msg.Item.MediaType == "podcast" {
-			cmds = append(cmds, m.fetchEpisodesCmd(msg.Item.ID))
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(m.detailLoadCmds(msg.Item, navCmd)...)
 
 	case home.PlayEpisodeMsg:
 		logger.Info("play episode from home", "itemID", msg.Item.ID, "episodeID", msg.Episode.ID, "title", msg.Episode.Title)
@@ -213,11 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case search.NavigateDetailMsg:
 		m.detail = detail.New(m.styles, msg.Item)
 		m, navCmd := m.navigate(ScreenDetail)
-		cmds := []tea.Cmd{navCmd, m.fetchBookmarksCmd(msg.Item.ID)}
-		if msg.Item.MediaType == "podcast" {
-			cmds = append(cmds, m.fetchEpisodesCmd(msg.Item.ID))
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(m.detailLoadCmds(msg.Item, navCmd)...)
 
 	case search.BackMsg:
 		return m.back()
@@ -225,11 +221,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case library.NavigateDetailMsg:
 		m.detail = detail.New(m.styles, msg.Item)
 		m, navCmd := m.navigate(ScreenDetail)
-		cmds := []tea.Cmd{navCmd, m.fetchBookmarksCmd(msg.Item.ID)}
-		if msg.Item.MediaType == "podcast" {
-			cmds = append(cmds, m.fetchEpisodesCmd(msg.Item.ID))
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(m.detailLoadCmds(msg.Item, navCmd)...)
 
 	case library.GoBackMsg:
 		if len(m.backStack) > 0 {
@@ -245,6 +237,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Err == nil && len(msg.Episodes) > 0 {
 			m.detail.SetEpisodes(msg.Episodes)
+		}
+		return m, nil
+
+	case BookDetailLoadedMsg:
+		if msg.Err != nil {
+			logger.Error("failed to load detail item", "err", msg.Err)
+			return m, nil
+		}
+		if msg.Item != nil {
+			m.detail.SetItem(*msg.Item)
 		}
 		return m, nil
 
@@ -269,6 +271,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, true)
 		return m, nil
 
+	case detail.NavigateSeriesMsg:
+		m.series = series.New(m.styles, m.client, msg.LibraryID, msg.SeriesID, msg.CurrentItemID)
+		return m.navigate(ScreenSeries)
+
 	case detail.MarkFinishedCmd:
 		return m.handleMarkFinished(msg)
 
@@ -291,6 +297,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case detail.BookmarksUpdatedMsg:
 		m.detail, _ = m.detail.Update(msg)
 		return m, nil
+
+	case series.NavigateDetailMsg:
+		m.detail = detail.New(m.styles, msg.Item)
+		m, navCmd := m.navigate(ScreenDetail)
+		return m, tea.Batch(m.detailLoadCmds(msg.Item, navCmd)...)
+
+	case series.BackMsg:
+		return m.back()
 
 	case PlaySessionMsg:
 		logger.Info("play session started", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)

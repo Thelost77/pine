@@ -11,6 +11,7 @@ const (
 	ScreenLibrary
 	ScreenDetail
 	ScreenSearch
+	ScreenSeries
 )
 
 // String returns the display name for a screen.
@@ -26,6 +27,8 @@ func (s Screen) String() string {
 		return "Detail"
 	case ScreenSearch:
 		return "Search"
+	case ScreenSeries:
+		return "Series"
 	default:
 		return "Unknown"
 	}
@@ -88,4 +91,10 @@ type SleepTimerExpiredMsg struct {
 type EpisodesLoadedMsg struct {
 	Episodes []abs.PodcastEpisode
 	Err      error
+}
+
+// BookDetailLoadedMsg carries an enriched library item fetched from ABS.
+type BookDetailLoadedMsg struct {
+	Item *abs.LibraryItem
+	Err  error
 }
