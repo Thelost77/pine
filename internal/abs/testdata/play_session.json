@@ -17,10 +17,10 @@
   "currentTime": 1234.56,
   "mediaMetadata": {
     "title": "The Great Adventure",
-    "authorName": "Jane Author",
-    "chapters": [
-      { "id": 0, "start": 0, "end": 1800.0, "title": "Chapter 1" },
-      { "id": 1, "start": 1800.0, "end": 3600.5, "title": "Chapter 2" }
-    ]
-  }
+    "authorName": "Jane Author"
+  },
+  "chapters": [
+    { "id": 0, "start": 0, "end": 1800.0, "title": "Chapter 1" },
+    { "id": 1, "start": 1800.0, "end": 3600.5, "title": "Chapter 2" }
+  ]
 }

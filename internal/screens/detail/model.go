@@ -316,6 +316,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return SeekToBookmarkCmd{Time: bm.Time}
 				}
 			}
+			if !m.focusChapters && !m.focusBookmarks && !m.focusEpisodes {
+				item := m.item
+				return m, func() tea.Msg {
+					return PlayCmd{Item: item}
+				}
+			}
 		case key.Matches(msg, m.keys.Delete):
 			if m.focusBookmarks && len(m.bookmarks) > 0 && m.selectedBookmark < len(m.bookmarks) {
 				bm := m.bookmarks[m.selectedBookmark]

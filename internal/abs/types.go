@@ -102,6 +102,7 @@ type PlaySession struct {
 	CurrentTime   float64       `json:"currentTime"`
 	EpisodeID     string        `json:"episodeId,omitempty"`
 	MediaMetadata MediaMetadata `json:"mediaMetadata"`
+	Chapters      []Chapter     `json:"chapters,omitempty"`
 }
 
 // AudioTrack represents a single audio track in a play session.

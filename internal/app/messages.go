@@ -48,13 +48,15 @@ type PlaySessionMsg struct {
 
 // PlaySessionData carries the data returned from ABS when starting a session.
 type PlaySessionData struct {
-	SessionID   string
-	ItemID      string
-	EpisodeID   string
-	CurrentTime float64
-	Duration    float64
-	Title       string
-	Chapters    []abs.Chapter
+	SessionID        string
+	ItemID           string
+	EpisodeID        string
+	CurrentTime      float64
+	Duration         float64
+	Title            string
+	Chapters         []abs.Chapter
+	TrackStartOffset float64
+	TrackDuration    float64
 }
 
 // PlayerReadyMsg signals that mpv has been launched and connected.

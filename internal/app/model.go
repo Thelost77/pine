@@ -39,16 +39,18 @@ type Model struct {
 	player  player.Model
 
 	// Playback session state
-	sessionID       string
-	itemID          string
-	episodeID       string
-	timeListened    float64
-	lastSyncPos     float64
-	playGeneration  uint64
-	chapters        []abs.Chapter
-	sleepDeadline   time.Time
-	sleepDuration   time.Duration
-	sleepGeneration uint64
+	sessionID        string
+	itemID           string
+	episodeID        string
+	timeListened     float64
+	lastSyncPos      float64
+	playGeneration   uint64
+	chapters         []abs.Chapter
+	trackStartOffset float64
+	trackDuration    float64
+	sleepDeadline    time.Time
+	sleepDuration    time.Duration
+	sleepGeneration  uint64
 
 	keys   KeyMap
 	err    components.ErrorBanner
@@ -288,6 +290,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.timeListened = 0
 		m.lastSyncPos = 0
 		m.chapters = nil
+		m.trackStartOffset = 0
+		m.trackDuration = 0
 		m.player.Playing = false
 		m.player.Title = ""
 		m.player.Position = 0
@@ -362,31 +366,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		// When playing, player seek keys (h/l) take priority over screen keys.
+		// When playing, playback keys take priority over screen keys.
 		if m.isPlaying() {
-			pm, pcmd := m.player.Update(msg)
-			m.player = pm
-			if pcmd != nil {
-				return m, pcmd
-			}
 			if len(m.chapters) > 0 {
 				if key.Matches(msg, m.keys.NextChapter) {
-					if target, ok := m.nextChapter(); ok {
-						m.player.Position = target
-						return m, player.SeekCmd(m.mpv, m.player.Position, 0, m.player.Duration)
-					}
-					return m, nil
+					return m.seekToChapter(m.nextChapter())
 				}
 				if key.Matches(msg, m.keys.PrevChapter) {
-					if target, ok := m.prevChapter(); ok {
-						m.player.Position = target
-						return m, player.SeekCmd(m.mpv, m.player.Position, 0, m.player.Duration)
-					}
-					return m, nil
+					return m.seekToChapter(m.prevChapter())
 				}
 			}
 			if key.Matches(msg, m.keys.SleepTimer) {
 				return m.cycleSleepTimer()
+			}
+			// Handle seek keys with offset conversion (player model doesn't know about track offsets)
+			if key.Matches(msg, m.player.SeekForwardKey()) {
+				return m.handleSeek(float64(m.config.Player.SeekSeconds))
+			}
+			if key.Matches(msg, m.player.SeekBackKey()) {
+				return m.handleSeek(-float64(m.config.Player.SeekSeconds))
+			}
+			pm, pcmd := m.player.Update(msg)
+			m.player = pm
+			if pcmd != nil {
+				return m, pcmd
 			}
 		}
 		return m.updateScreen(msg)

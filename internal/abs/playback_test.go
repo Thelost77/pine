@@ -42,8 +42,8 @@ func TestPlaySessionDeserialization(t *testing.T) {
 	if session.MediaMetadata.Title != "The Great Adventure" {
 		t.Errorf("Title = %q, want %q", session.MediaMetadata.Title, "The Great Adventure")
 	}
-	if len(session.MediaMetadata.Chapters) != 2 {
-		t.Fatalf("expected 2 chapters, got %d", len(session.MediaMetadata.Chapters))
+	if len(session.Chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d", len(session.Chapters))
 	}
 }
 

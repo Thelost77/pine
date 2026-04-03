@@ -76,12 +76,14 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 
 		return PlaySessionMsg{
 			Session: PlaySessionData{
-				SessionID:   session.ID,
-				ItemID:      item.ID,
-				CurrentTime: seekTime,
-				Duration:    dur,
-				Title:       item.Media.Metadata.Title,
-				Chapters:    session.MediaMetadata.Chapters,
+				SessionID:        session.ID,
+				ItemID:           item.ID,
+				CurrentTime:      seekTime,
+				Duration:         dur,
+				Title:            item.Media.Metadata.Title,
+				Chapters:         session.Chapters,
+				TrackStartOffset: track.StartOffset,
+				TrackDuration:    track.Duration,
 			},
 			StreamURL: streamURL,
 		}
@@ -137,13 +139,15 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 
 		return PlaySessionMsg{
 			Session: PlaySessionData{
-				SessionID:   session.ID,
-				ItemID:      item.ID,
-				EpisodeID:   episode.ID,
-				CurrentTime: session.CurrentTime,
-				Duration:    episode.Duration,
-				Title:       episode.Title,
-				Chapters:    session.MediaMetadata.Chapters,
+				SessionID:        session.ID,
+				ItemID:           item.ID,
+				EpisodeID:        episode.ID,
+				CurrentTime:      session.CurrentTime,
+				Duration:         episode.Duration,
+				Title:            episode.Title,
+				Chapters:         session.Chapters,
+				TrackStartOffset: session.AudioTracks[0].StartOffset,
+				TrackDuration:    session.AudioTracks[0].Duration,
 			},
 			StreamURL: streamURL,
 		}
@@ -162,12 +166,16 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.itemID = msg.Session.ItemID
 	m.episodeID = msg.Session.EpisodeID
 	m.chapters = msg.Session.Chapters
+	m.trackStartOffset = msg.Session.TrackStartOffset
+	m.trackDuration = msg.Session.TrackDuration
 	m.timeListened = 0
-	m.lastSyncPos = msg.Session.CurrentTime
+
+	bookPos := msg.Session.CurrentTime + m.trackStartOffset
+	m.lastSyncPos = bookPos
 
 	// Update player model title/state
 	m.player, _ = m.player.Update(player.StartPlayMsg{Title: msg.Session.Title})
-	m.player.Position = msg.Session.CurrentTime
+	m.player.Position = bookPos
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
 
@@ -200,13 +208,16 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Convert track-relative position to book-global
+	bookPos := msg.Position + m.trackStartOffset
+
 	// Track time listened (delta from last position)
-	if msg.Position > m.player.Position {
-		m.timeListened += msg.Position - m.player.Position
+	if bookPos > m.player.Position {
+		m.timeListened += bookPos - m.player.Position
 	}
 
-	pm, _ := m.player.Update(msg)
-	m.player = pm
+	m.player.Position = bookPos
+	m.player.Playing = !msg.Paused
 
 	// Update sleep timer display
 	if !m.sleepDeadline.IsZero() {
@@ -310,6 +321,8 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	m.timeListened = 0
 	m.lastSyncPos = 0
 	m.chapters = nil
+	m.trackStartOffset = 0
+	m.trackDuration = 0
 	m.sleepDeadline = time.Time{}
 	m.sleepDuration = 0
 	m.player.SleepRemaining = ""
