@@ -268,7 +268,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.selectedBookmark = max(0, len(m.bookmarks)-1)
 			}
 		}
-		if len(m.bookmarks) == 0 {
+		if !m.hasFocusableBookmarks() {
 			m.focusBookmarks = false
 		}
 		if m.ready {
@@ -319,7 +319,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return PlayEpisodeCmd{Item: item, Episode: ep}
 				}
 			}
-			if m.focusBookmarks && len(m.bookmarks) > 0 && m.selectedBookmark < len(m.bookmarks) {
+			if m.focusBookmarks && m.hasFocusableBookmarks() && m.selectedBookmark < len(m.bookmarks) {
 				bm := m.bookmarks[m.selectedBookmark]
 				return m, func() tea.Msg {
 					return SeekToBookmarkCmd{Time: bm.Time}
@@ -332,7 +332,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, m.keys.Delete):
-			if m.focusBookmarks && len(m.bookmarks) > 0 && m.selectedBookmark < len(m.bookmarks) {
+			if m.focusBookmarks && m.hasFocusableBookmarks() && m.selectedBookmark < len(m.bookmarks) {
 				bm := m.bookmarks[m.selectedBookmark]
 				itemID := m.item.ID
 				return m, func() tea.Msg {
@@ -349,7 +349,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.focusBookmarks && len(m.bookmarks) > 0 {
+			if m.focusBookmarks && m.hasFocusableBookmarks() {
 				if m.selectedBookmark > 0 {
 					m.selectedBookmark--
 				}
@@ -368,7 +368,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.focusBookmarks && len(m.bookmarks) > 0 {
+			if m.focusBookmarks && m.hasFocusableBookmarks() {
 				if m.selectedBookmark < len(m.bookmarks)-1 {
 					m.selectedBookmark++
 				}
@@ -394,15 +394,19 @@ func (m *Model) cycleFocus() {
 			m.focusEpisodes = true
 		} else if m.focusEpisodes {
 			m.focusEpisodes = false
-			if len(m.bookmarks) > 0 {
+			if m.hasFocusableBookmarks() {
 				m.focusBookmarks = true
 			}
 		} else {
 			m.focusBookmarks = false
 		}
-	} else if len(m.bookmarks) > 0 {
+	} else if m.hasFocusableBookmarks() {
 		m.focusBookmarks = !m.focusBookmarks
 	}
+}
+
+func (m Model) hasFocusableBookmarks() bool {
+	return m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
 }
 
 // headerHeight returns the number of lines used by the fixed header section.

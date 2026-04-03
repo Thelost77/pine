@@ -597,6 +597,31 @@ func TestBookmarksUpdatedMsg_ErrorStoresBookmarkLoadError(t *testing.T) {
 	}
 }
 
+func TestBookmarksUpdatedMsg_ErrorDisablesBookmarkFocus(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if !m.FocusBookmarks() {
+		t.Fatal("expected bookmark focus before error")
+	}
+
+	m, _ = m.Update(BookmarksUpdatedMsg{Err: errors.New("bookmark load failed")})
+
+	if m.FocusBookmarks() {
+		t.Error("expected bookmark focus to clear when bookmark load fails")
+	}
+}
+
+func TestBookmarkErrorState_DoesNotAllowRefocus(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(BookmarksUpdatedMsg{Err: errors.New("bookmark load failed")})
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	if m.FocusBookmarks() {
+		t.Error("expected bookmark focus to stay disabled while bookmark load error is active")
+	}
+}
+
 func TestSetBookmarks_ClearsBookmarkLoadError(t *testing.T) {
 	m := newTestModel()
 	m, _ = m.Update(BookmarksUpdatedMsg{Err: errors.New("bookmark load failed")})
