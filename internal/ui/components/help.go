@@ -83,6 +83,8 @@ func defaultGroups() []HelpGroup {
 			Bindings: []HelpBinding{
 				{Key: "enter / p", Desc: "play"},
 				{Key: "b", Desc: "add bookmark"},
+				{Key: "a", Desc: "add to queue"},
+				{Key: "A", Desc: "play next"},
 				{Key: "d", Desc: "delete bookmark"},
 				{Key: "f", Desc: "mark finished"},
 			},

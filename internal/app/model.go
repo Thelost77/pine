@@ -53,6 +53,7 @@ type Model struct {
 	sleepDeadline         time.Time
 	sleepDuration         time.Duration
 	sleepGeneration       uint64
+	queue                 []QueueEntry
 
 	keys   KeyMap
 	err    components.ErrorBanner
@@ -96,6 +97,15 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		client:    client,
 		mpv:       mpv,
 	}
+}
+
+// Queue returns a copy of the current playback queue.
+func (m Model) Queue() []QueueEntry {
+	cp := make([]QueueEntry, 0, len(m.queue))
+	for _, entry := range m.queue {
+		cp = append(cp, cloneQueueEntry(entry))
+	}
+	return cp
 }
 
 // Init returns the initial command for the active screen.
@@ -250,6 +260,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detail.AddBookmarkCmd:
 		return m.handleAddBookmark(msg)
+
+	case detail.AddToQueueCmd:
+		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, false)
+		return m, nil
+
+	case detail.PlayNextCmd:
+		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, true)
+		return m, nil
 
 	case detail.MarkFinishedCmd:
 		return m.handleMarkFinished(msg)

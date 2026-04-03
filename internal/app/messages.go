@@ -59,6 +59,12 @@ type PlaySessionData struct {
 	TrackDuration    float64
 }
 
+// QueueEntry represents a queued book or podcast episode.
+type QueueEntry struct {
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
+}
+
 // PlayerReadyMsg signals that mpv has been launched and connected.
 type PlayerReadyMsg struct{}
 

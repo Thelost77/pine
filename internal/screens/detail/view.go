@@ -155,15 +155,16 @@ func (m Model) buildContent() string {
 // helpText returns context-sensitive help text based on current state.
 func (m Model) helpText() string {
 	hasBookmarkFocus := m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
+	queueHints := " • a queue • A next"
 	if m.editingBookmark {
 		return "enter save • esc cancel • type bookmark title"
 	}
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if m.focusEpisodes {
 			if hasBookmarkFocus {
-				return "enter play episode • space/p pause • j/k navigate • tab next section • q/h back"
+				return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab next section • q/h back"
 			}
-			return "enter play episode • space/p pause • j/k navigate • tab unfocus • q/h back"
+			return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab unfocus • q/h back"
 		}
 		if m.focusBookmarks && hasBookmarkFocus {
 			return "enter seek • e edit • d delete • j/k navigate • tab unfocus • q/h back"
@@ -180,12 +181,12 @@ func (m Model) helpText() string {
 		return "b bookmark • q/h back"
 	}
 	if m.focusBookmarks && hasBookmarkFocus {
-		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark • q/h back"
+		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark" + queueHints + " • q/h back"
 	}
 	if hasBookmarkFocus {
-		return "space/p play • b bookmark • tab focus bookmarks • j/k scroll • q/h back"
+		return "space/p play • b bookmark" + queueHints + " • tab focus bookmarks • j/k scroll • q/h back"
 	}
-	return "space/p play • b bookmark • f mark finished • j/k scroll • q/h back"
+	return "space/p play • b bookmark • f mark finished" + queueHints + " • j/k scroll • q/h back"
 }
 
 // wordWrap wraps text to the given width, breaking on spaces.

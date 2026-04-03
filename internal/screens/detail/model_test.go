@@ -157,6 +157,44 @@ func TestBKey_FiresBookmarkCmd(t *testing.T) {
 	}
 }
 
+func TestAKey_FiresAddToQueueCmdForBook(t *testing.T) {
+	m := newTestModel()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if cmd == nil {
+		t.Fatal("expected a command from a key")
+	}
+	msg := cmd()
+	queueMsg, ok := msg.(AddToQueueCmd)
+	if !ok {
+		t.Fatalf("expected AddToQueueCmd, got %T", msg)
+	}
+	if queueMsg.Item.ID != "li-001" {
+		t.Errorf("expected item ID li-001, got %s", queueMsg.Item.ID)
+	}
+	if queueMsg.Episode != nil {
+		t.Fatal("expected no episode payload for a book queue action")
+	}
+}
+
+func TestShiftA_FiresPlayNextCmdForBook(t *testing.T) {
+	m := newTestModel()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	if cmd == nil {
+		t.Fatal("expected a command from A key")
+	}
+	msg := cmd()
+	queueMsg, ok := msg.(PlayNextCmd)
+	if !ok {
+		t.Fatalf("expected PlayNextCmd, got %T", msg)
+	}
+	if queueMsg.Item.ID != "li-001" {
+		t.Errorf("expected item ID li-001, got %s", queueMsg.Item.ID)
+	}
+	if queueMsg.Episode != nil {
+		t.Fatal("expected no episode payload for a book queue action")
+	}
+}
+
 func TestView_NoAuthor(t *testing.T) {
 	styles := ui.DefaultStyles()
 	item := abs.LibraryItem{

@@ -860,6 +860,99 @@ func TestPlayEpisodeCmdTogglesPauseWhilePlaying(t *testing.T) {
 	}
 }
 
+func TestAddToQueueCmdAppendsEntry(t *testing.T) {
+	m := newPlaybackTestModel()
+	item := abs.LibraryItem{
+		ID:        "item-queue",
+		MediaType: "book",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Queued Book"},
+		},
+	}
+
+	result, cmd := m.Update(detail.AddToQueueCmd{Item: item})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command when adding to queue")
+	}
+	if len(rm.Queue()) != 1 {
+		t.Fatalf("expected queue length 1, got %d", len(rm.Queue()))
+	}
+	if rm.Queue()[0].Item.ID != "item-queue" {
+		t.Fatalf("expected queued item item-queue, got %s", rm.Queue()[0].Item.ID)
+	}
+	if rm.Queue()[0].Episode != nil {
+		t.Fatal("expected queued book entry to have no episode")
+	}
+}
+
+func TestPlayNextCmdPrependsEntry(t *testing.T) {
+	m := newPlaybackTestModel()
+	first := QueueEntry{
+		Item: abs.LibraryItem{
+			ID:        "item-old",
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Old Queue"}},
+		},
+	}
+	m.queue = []QueueEntry{first}
+	nextEpisode := abs.PodcastEpisode{ID: "ep-1", Title: "Episode 1", Duration: 1800}
+	item := abs.LibraryItem{
+		ID:        "pod-1",
+		MediaType: "podcast",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast"}},
+	}
+
+	result, cmd := m.Update(detail.PlayNextCmd{Item: item, Episode: &nextEpisode})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command when queueing play next")
+	}
+	if len(rm.Queue()) != 2 {
+		t.Fatalf("expected queue length 2, got %d", len(rm.Queue()))
+	}
+	if rm.Queue()[0].Item.ID != "pod-1" {
+		t.Fatalf("expected play-next item at head, got %s", rm.Queue()[0].Item.ID)
+	}
+	if rm.Queue()[0].Episode == nil || rm.Queue()[0].Episode.ID != "ep-1" {
+		t.Fatal("expected episode payload at queue head")
+	}
+	if rm.Queue()[1].Item.ID != "item-old" {
+		t.Fatalf("expected original queue entry to remain second, got %s", rm.Queue()[1].Item.ID)
+	}
+}
+
+func TestManualPlayPreservesQueue(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.queue = []QueueEntry{
+		{
+			Item: abs.LibraryItem{
+				ID:        "queued-item",
+				MediaType: "book",
+				Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Queued Book"}},
+			},
+		},
+	}
+
+	dur := 3600.0
+	result, _ := m.Update(detail.PlayCmd{Item: abs.LibraryItem{
+		ID: "item-now",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Play Now", Duration: &dur},
+		},
+	}})
+	rm := result.(Model)
+
+	if len(rm.Queue()) != 1 {
+		t.Fatalf("expected queue length 1 after manual play, got %d", len(rm.Queue()))
+	}
+	if rm.Queue()[0].Item.ID != "queued-item" {
+		t.Fatalf("expected queued-item to remain queued, got %s", rm.Queue()[0].Item.ID)
+	}
+}
+
 func TestViewIncludesPlayerWhenActive(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.sessionID = "sess-123"

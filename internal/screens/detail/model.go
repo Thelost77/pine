@@ -27,6 +27,18 @@ type AddBookmarkCmd struct {
 	Item abs.LibraryItem
 }
 
+// AddToQueueCmd requests appending the item or selected episode to the queue.
+type AddToQueueCmd struct {
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
+}
+
+// PlayNextCmd requests inserting the item or selected episode at the front of the queue.
+type PlayNextCmd struct {
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
+}
+
 // SeekToBookmarkCmd requests seeking the player to a bookmark's timestamp.
 type SeekToBookmarkCmd struct {
 	Item abs.LibraryItem
@@ -82,6 +94,8 @@ type KeyMap struct {
 	Edit         key.Binding
 	ToggleFocus  key.Binding
 	MarkFinished key.Binding
+	AddToQueue   key.Binding
+	PlayNext     key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings for the detail screen.
@@ -126,6 +140,14 @@ func DefaultKeyMap() KeyMap {
 		MarkFinished: key.NewBinding(
 			key.WithKeys("f"),
 			key.WithHelp("f", "mark finished"),
+		),
+		AddToQueue: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "add to queue"),
+		),
+		PlayNext: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", "play next"),
 		),
 	}
 }
@@ -347,6 +369,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return AddBookmarkCmd{Item: item}
 			}
+		case key.Matches(msg, m.keys.AddToQueue):
+			item, episode, ok := m.queueTarget()
+			if !ok {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return AddToQueueCmd{Item: item, Episode: episode}
+			}
+		case key.Matches(msg, m.keys.PlayNext):
+			item, episode, ok := m.queueTarget()
+			if !ok {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return PlayNextCmd{Item: item, Episode: episode}
+			}
 		case key.Matches(msg, m.keys.MarkFinished):
 			item := m.item
 			return m, func() tea.Msg {
@@ -459,6 +497,17 @@ func (m *Model) cycleFocus() {
 
 func (m Model) hasFocusableBookmarks() bool {
 	return m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
+}
+
+func (m Model) queueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {
+	if m.item.MediaType == "podcast" {
+		if !m.focusEpisodes || len(m.episodes) == 0 || m.selectedEpisode >= len(m.episodes) {
+			return m.item, nil, false
+		}
+		ep := m.episodes[m.selectedEpisode]
+		return m.item, &ep, true
+	}
+	return m.item, nil, true
 }
 
 func (m Model) bookmarkEditWidth() int {
