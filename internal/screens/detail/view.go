@@ -113,19 +113,26 @@ func (m Model) buildContent() string {
 	}
 
 	// Bookmarks
-	if len(m.bookmarks) > 0 {
+	if m.bookmarksLoaded {
 		bmLabel := m.styles.Subtitle.Render("Bookmarks")
 		if m.focusBookmarks {
 			bmLabel = m.styles.Accent.Render("▸ Bookmarks")
 		}
 		sections = append(sections, bmLabel)
-		for i, bm := range m.bookmarks {
-			ts := ui.FormatTimestamp(bm.Time)
-			line := fmt.Sprintf("  🔖 %s  %s", ts, bm.Title)
-			if m.focusBookmarks && i == m.selectedBookmark {
-				line = m.styles.Selected.Render(fmt.Sprintf("🔖 %s  %s", ts, bm.Title))
+		switch {
+		case m.bookmarkLoadErr != nil:
+			sections = append(sections, m.styles.Muted.Render("  "+m.bookmarkLoadErr.Error()))
+		case len(m.bookmarks) == 0:
+			sections = append(sections, m.styles.Muted.Render("  No bookmarks yet"))
+		default:
+			for i, bm := range m.bookmarks {
+				ts := ui.FormatTimestamp(bm.Time)
+				line := fmt.Sprintf("  🔖 %s  %s", ts, bm.Title)
+				if m.focusBookmarks && i == m.selectedBookmark {
+					line = m.styles.Selected.Render(fmt.Sprintf("🔖 %s  %s", ts, bm.Title))
+				}
+				sections = append(sections, line)
 			}
-			sections = append(sections, line)
 		}
 		sections = append(sections, "")
 	}
@@ -139,22 +146,32 @@ func (m Model) buildContent() string {
 
 // helpText returns context-sensitive help text based on current state.
 func (m Model) helpText() string {
+	hasBookmarkFocus := m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if m.focusEpisodes {
-			return "enter play episode • space/p pause • j/k navigate • tab next section • q/h back"
+			if hasBookmarkFocus {
+				return "enter play episode • space/p pause • j/k navigate • tab next section • q/h back"
+			}
+			return "enter play episode • space/p pause • j/k navigate • tab unfocus • q/h back"
 		}
-		if m.focusBookmarks {
+		if m.focusBookmarks && hasBookmarkFocus {
 			return "enter seek • d delete • j/k navigate • tab unfocus • q/h back"
 		}
-		return "space/p play • tab focus episodes/bookmarks • b bookmark • q/h back"
+		if hasBookmarkFocus {
+			return "space/p play • tab focus episodes/bookmarks • b bookmark • q/h back"
+		}
+		return "space/p play • tab focus episodes • b bookmark • q/h back"
 	}
 	if m.item.MediaType == "podcast" && len(m.episodes) == 0 {
-		return "b bookmark • tab focus bookmarks • q/h back"
+		if hasBookmarkFocus {
+			return "b bookmark • tab focus bookmarks • q/h back"
+		}
+		return "b bookmark • q/h back"
 	}
-	if m.focusBookmarks {
+	if m.focusBookmarks && hasBookmarkFocus {
 		return "enter seek • d delete • j/k navigate • tab unfocus • b bookmark • q/h back"
 	}
-	if len(m.bookmarks) > 0 {
+	if hasBookmarkFocus {
 		return "space/p play • b bookmark • tab focus bookmarks • j/k scroll • q/h back"
 	}
 	return "space/p play • b bookmark • f mark finished • j/k scroll • q/h back"

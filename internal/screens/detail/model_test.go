@@ -361,7 +361,33 @@ func TestView_NoBookmarks(t *testing.T) {
 	m := newTestModel()
 	v := m.View()
 	if strings.Contains(v, "Bookmarks") {
-		t.Error("expected no 'Bookmarks' section when no bookmarks")
+		t.Error("expected no 'Bookmarks' section before bookmarks finish loading")
+	}
+}
+
+func TestView_ShowsEmptyBookmarkStateAfterLoadedEmpty(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(BookmarksUpdatedMsg{Bookmarks: []abs.Bookmark{}})
+
+	v := m.View()
+	if !strings.Contains(v, "Bookmarks") {
+		t.Fatal("expected bookmark section when bookmarks load empty")
+	}
+	if !strings.Contains(v, "No bookmarks yet") {
+		t.Error("expected empty bookmark state text")
+	}
+}
+
+func TestView_ShowsBookmarkLoadError(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(BookmarksUpdatedMsg{Err: errors.New("bookmark load failed")})
+
+	v := m.View()
+	if !strings.Contains(v, "Bookmarks") {
+		t.Fatal("expected bookmark section when bookmark load fails")
+	}
+	if !strings.Contains(v, "bookmark load failed") {
+		t.Error("expected bookmark load error text")
 	}
 }
 
@@ -624,6 +650,31 @@ func TestView_HelpTextChangesWithFocus(t *testing.T) {
 	}
 	if !strings.Contains(v, "d delete") {
 		t.Error("expected help to mention 'd delete' when bookmarks focused")
+	}
+}
+
+func TestPodcastHelp_DoesNotAdvertiseBookmarkFocusWhenBookmarksEmpty(t *testing.T) {
+	styles := ui.DefaultStyles()
+	desc := "Podcast description"
+	item := abs.LibraryItem{
+		ID:        "pod-help-001",
+		MediaType: "podcast",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title:       "Podcast Help",
+				Description: &desc,
+			},
+			Episodes: []abs.PodcastEpisode{{ID: "ep-001", Index: 1, Title: "Episode 1", Duration: 1800}},
+		},
+	}
+
+	m := New(styles, item)
+	m.SetSize(80, 24)
+	m, _ = m.Update(BookmarksUpdatedMsg{Bookmarks: []abs.Bookmark{}})
+
+	v := m.View()
+	if strings.Contains(v, "episodes/bookmarks") {
+		t.Error("expected podcast help not to advertise bookmark focus when bookmark list is empty")
 	}
 }
 
