@@ -54,24 +54,6 @@ func TogglePauseCmd(p Player, shouldPlay bool) tea.Cmd {
 	}
 }
 
-// SeekCmd sends a relative seek command to mpv.
-func SeekCmd(p Player, currentPos, seconds, duration float64) tea.Cmd {
-	return func() tea.Msg {
-		target := currentPos + seconds
-		if target < 0 {
-			target = 0
-		}
-		if duration > 0 && target > duration {
-			target = duration
-		}
-		err := p.Seek(target)
-		if err != nil {
-			return PositionMsg{Err: err}
-		}
-		return nil
-	}
-}
-
 // SetSpeedCmd sends a speed change to mpv.
 func SetSpeedCmd(p Player, speed float64) tea.Cmd {
 	return func() tea.Msg {
