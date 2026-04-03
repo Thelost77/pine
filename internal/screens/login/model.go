@@ -3,17 +3,18 @@ package login
 import (
 	"context"
 
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/logger"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Thelost77/pine/internal/abs"
-	"github.com/Thelost77/pine/internal/ui"
 )
 
 const (
 	fieldServer   = 0
-	fieldUsername  = 1
-	fieldPassword  = 2
-	numFields      = 3
+	fieldUsername = 1
+	fieldPassword = 2
+	numFields     = 3
 )
 
 // LoginSuccessMsg is sent when authentication succeeds.
@@ -139,9 +140,11 @@ func (m *Model) loginCmd() tea.Cmd {
 	m.loading = true
 
 	return func() tea.Msg {
+		logger.Info("login attempt started", "server", serverURL, "username", username)
 		client := abs.NewClient(serverURL, "")
 		token, err := client.Login(context.Background(), username, password)
 		if err != nil {
+			logger.Warn("login attempt failed", "server", serverURL, "username", username, "err", err)
 			return LoginFailedMsg{Err: err}
 		}
 		return LoginSuccessMsg{Token: token, ServerURL: serverURL, Username: username}

@@ -100,6 +100,7 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Li
 		return libs, nil
 	}
 
+	logger.Debug("filtering audio libraries", "inputCount", len(libs))
 	result := make([]Library, 0, len(libs))
 	for _, lib := range libs {
 		// Always keep podcasts
@@ -125,6 +126,7 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Li
 		}
 	}
 
+	logger.Info("audio libraries filtered", "inputCount", len(libs), "outputCount", len(result))
 	return result, nil
 }
 
@@ -141,20 +143,25 @@ func (c *Client) libraryHasAudio(ctx context.Context, libraryID string) (bool, e
 		return false, err
 	}
 
-	for _, item := range resp.Results {
+	for i, item := range resp.Results {
 		if item.Media.Duration != nil && *item.Media.Duration > 0 {
+			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "media.duration")
 			return true, nil
 		}
 		if item.Media.Metadata.Duration != nil && *item.Media.Metadata.Duration > 0 {
+			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "metadata.duration")
 			return true, nil
 		}
 		if item.Media.NumAudioFiles != nil && *item.Media.NumAudioFiles > 0 {
+			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "numAudioFiles")
 			return true, nil
 		}
 		if item.Media.NumTracks != nil && *item.Media.NumTracks > 0 {
+			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "numTracks")
 			return true, nil
 		}
 	}
 
+	logger.Debug("library audio not detected in sample", "libraryID", libraryID, "sampleSize", len(resp.Results))
 	return false, nil
 }

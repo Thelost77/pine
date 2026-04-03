@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Thelost77/pine/internal/logger"
 	_ "modernc.org/sqlite"
 )
 
@@ -20,6 +21,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
 
+	logger.Info("opening database", "path", path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
@@ -35,6 +37,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("setting WAL mode: %w", err)
 	}
+	logger.Debug("database WAL mode enabled", "path", path)
 
 	s := &Store{DB: db}
 	if err := s.migrate(); err != nil {
@@ -42,6 +45,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
+	logger.Info("database ready", "path", path)
 	return s, nil
 }
 
@@ -51,8 +55,13 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	migrations := []string{
-		`CREATE TABLE IF NOT EXISTS accounts (
+	migrations := []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "create accounts table",
+			query: `CREATE TABLE IF NOT EXISTS accounts (
 			id         TEXT PRIMARY KEY,
 			server_url TEXT NOT NULL,
 			username   TEXT NOT NULL,
@@ -60,7 +69,10 @@ func (s *Store) migrate() error {
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL
 		)`,
-		`CREATE TABLE IF NOT EXISTS sessions (
+		},
+		{
+			name: "create sessions table",
+			query: `CREATE TABLE IF NOT EXISTS sessions (
 			id           TEXT PRIMARY KEY,
 			item_id      TEXT NOT NULL,
 			session_id   TEXT NOT NULL,
@@ -68,16 +80,21 @@ func (s *Store) migrate() error {
 			duration     REAL NOT NULL DEFAULT 0,
 			created_at   TEXT NOT NULL
 		)`,
+		},
 	}
 
 	for _, m := range migrations {
-		if _, err := s.DB.Exec(m); err != nil {
+		if _, err := s.DB.Exec(m.query); err != nil {
+			logger.Error("database migration failed", "migration", m.name, "err", err)
 			return fmt.Errorf("migration failed: %w", err)
 		}
+		logger.Debug("database migration applied", "migration", m.name)
 	}
 
 	// Rename legacy column; ignore error if already renamed or column doesn't exist.
-	s.DB.Exec(`ALTER TABLE accounts RENAME COLUMN token_encrypted TO token`)
+	if _, err := s.DB.Exec(`ALTER TABLE accounts RENAME COLUMN token_encrypted TO token`); err == nil {
+		logger.Info("database migration applied", "migration", "rename token_encrypted column")
+	}
 
 	return nil
 }

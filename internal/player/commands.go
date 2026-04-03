@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/logger"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // PositionMsg carries the current playback position polled from mpv.
@@ -90,7 +90,7 @@ type PlayerQuitMsg struct{}
 // LaunchCmd spawns mpv and connects via IPC. Returns PlayerReadyMsg on success.
 func LaunchCmd(p Player, url string, startTime float64) tea.Cmd {
 	return func() tea.Msg {
-		logger.Info("launching mpv", "url", url, "startTime", startTime, "socketDir", MpvSocketDir())
+		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
 		socketPath := fmt.Sprintf("%s/pine-mpv-%d.sock", MpvSocketDir(), os.Getpid())
 		// Remove stale socket
 		os.Remove(socketPath)

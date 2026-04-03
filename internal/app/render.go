@@ -175,12 +175,12 @@ func (m Model) viewChapterOverlay() string {
 		m.styles.Title.PaddingBottom(0).Render("Chapter Navigation"),
 		m.styles.Muted.Render("Current playback"),
 		m.styles.Subtitle.Render(ansi.Truncate(playbackTitle, titleWidth, "…")),
-		m.styles.Muted.Render(fmt.Sprintf("%d chapters • j/k navigate • esc close", len(m.chapters))),
+		m.styles.Muted.Render(fmt.Sprintf("%d chapters • j/k navigate • H/L top/bottom • esc close", len(m.chapters))),
 		"",
 	}
 
 	for i := start; i < end; i++ {
-		line := ansi.Truncate(m.chapters[i].Title, titleWidth, "…")
+		line := ansi.Truncate(fmt.Sprintf("%d. %s", i+1, m.chapters[i].Title), titleWidth, "…")
 		if i == selected {
 			lines = append(lines, m.styles.Selected.Render("› "+line))
 			continue

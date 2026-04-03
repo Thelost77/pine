@@ -1,9 +1,13 @@
 package app
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"github.com/Thelost77/pine/internal/logger"
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // navigate pushes the current screen onto the back stack and switches.
 func (m Model) navigate(target Screen) (Model, tea.Cmd) {
+	logger.Debug("screen transition", "from", m.screen, "to", target, "backStackDepth", len(m.backStack)+1)
 	m.backStack = append(m.backStack, m.screen)
 	m.screen = target
 	m.propagateSize()
@@ -14,10 +18,12 @@ func (m Model) navigate(target Screen) (Model, tea.Cmd) {
 // back pops the back stack. No-op if empty.
 func (m Model) back() (Model, tea.Cmd) {
 	if len(m.backStack) == 0 {
+		logger.Debug("back navigation ignored", "screen", m.screen)
 		return m, nil
 	}
 	last := m.backStack[len(m.backStack)-1]
 	m.backStack = m.backStack[:len(m.backStack)-1]
+	logger.Debug("screen transition", "from", m.screen, "to", last, "backStackDepth", len(m.backStack))
 	m.screen = last
 	m.propagateSize()
 	return m, nil

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/dexterlb/mpvipc"
 )
 
@@ -91,6 +92,7 @@ func NewMpv() *Mpv {
 func (m *Mpv) Launch(url, startTime, socketPath string) error {
 	// Clean up any existing mpv process to avoid orphans
 	if m.cmd != nil && m.cmd.Process != nil {
+		logger.Warn("killing previous mpv process", "pid", m.cmd.Process.Pid)
 		_ = m.cmd.Process.Kill()
 		_ = m.cmd.Wait()
 	}
@@ -104,8 +106,10 @@ func (m *Mpv) Launch(url, startTime, socketPath string) error {
 		url,
 	)
 	if err := m.cmd.Start(); err != nil {
+		logger.Error("failed to start mpv subprocess", "socketPath", socketPath, "startTime", startTime, "err", err)
 		return fmt.Errorf("failed to launch mpv: %w", err)
 	}
+	logger.Info("mpv subprocess started", "pid", m.cmd.Process.Pid, "socketPath", socketPath, "startTime", startTime)
 	m.conn = m.newConn(socketPath)
 	return nil
 }
@@ -115,7 +119,12 @@ func (m *Mpv) Connect() error {
 	if m.conn == nil {
 		return fmt.Errorf("no connection: call Launch first")
 	}
-	return m.conn.Open()
+	if err := m.conn.Open(); err != nil {
+		logger.Debug("failed to open mpv ipc connection", "err", err)
+		return err
+	}
+	logger.Info("mpv ipc connected")
+	return nil
 }
 
 // GetPosition returns the current playback position in seconds.
@@ -132,10 +141,12 @@ func (m *Mpv) GetDuration() (float64, error) {
 func (m *Mpv) GetPaused() (bool, error) {
 	val, err := m.conn.Get("pause")
 	if err != nil {
+		logger.Debug("failed to query mpv property", "property", "pause", "err", err)
 		return false, fmt.Errorf("get pause: %w", err)
 	}
 	b, ok := val.(bool)
 	if !ok {
+		logger.Warn("unexpected mpv property type", "property", "pause", "type", fmt.Sprintf("%T", val))
 		return false, fmt.Errorf("unexpected type for pause: %T", val)
 	}
 	return b, nil
@@ -143,23 +154,38 @@ func (m *Mpv) GetPaused() (bool, error) {
 
 // SetPause pauses or resumes playback.
 func (m *Mpv) SetPause(paused bool) error {
-	return m.conn.Set("pause", paused)
+	if err := m.conn.Set("pause", paused); err != nil {
+		logger.Warn("failed to set mpv pause", "paused", paused, "err", err)
+		return err
+	}
+	return nil
 }
 
 // Seek seeks to an absolute position in seconds.
 func (m *Mpv) Seek(seconds float64) error {
 	_, err := m.conn.Call("seek", seconds, "absolute")
+	if err != nil {
+		logger.Warn("failed to seek mpv", "seconds", seconds, "err", err)
+	}
 	return err
 }
 
 // SetSpeed sets the playback speed multiplier.
 func (m *Mpv) SetSpeed(speed float64) error {
-	return m.conn.Set("speed", speed)
+	if err := m.conn.Set("speed", speed); err != nil {
+		logger.Warn("failed to set mpv speed", "speed", speed, "err", err)
+		return err
+	}
+	return nil
 }
 
 // SetVolume sets the playback volume (0-150).
 func (m *Mpv) SetVolume(vol int) error {
-	return m.conn.Set("volume", float64(vol))
+	if err := m.conn.Set("volume", float64(vol)); err != nil {
+		logger.Warn("failed to set mpv volume", "volume", vol, "err", err)
+		return err
+	}
+	return nil
 }
 
 // GetVolume returns the current volume level.
@@ -178,6 +204,7 @@ func (m *Mpv) Quit() error {
 		_ = m.conn.Close()
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
+		logger.Info("stopping mpv subprocess", "pid", m.cmd.Process.Pid)
 		_ = m.cmd.Process.Kill()
 		_ = m.cmd.Wait()
 	}
@@ -187,6 +214,7 @@ func (m *Mpv) Quit() error {
 func (m *Mpv) getFloat(property string) (float64, error) {
 	val, err := m.conn.Get(property)
 	if err != nil {
+		logger.Debug("failed to query mpv property", "property", property, "err", err)
 		return 0, fmt.Errorf("get %s: %w", property, err)
 	}
 	switch v := val.(type) {
@@ -197,6 +225,7 @@ func (m *Mpv) getFloat(property string) (float64, error) {
 	case int64:
 		return float64(v), nil
 	default:
+		logger.Warn("unexpected mpv property type", "property", property, "type", fmt.Sprintf("%T", val))
 		return 0, fmt.Errorf("unexpected type for %s: %T", property, val)
 	}
 }

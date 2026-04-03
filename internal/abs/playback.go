@@ -45,7 +45,7 @@ func (c *Client) StartPlaySession(ctx context.Context, itemID string, device Dev
 		logger.Error("decode play session failed", "itemID", itemID, "err", err, "body", string(data))
 		return nil, fmt.Errorf("decode play session: %w", err)
 	}
-	logger.Info("play session created", "sessionID", session.ID, "tracks", len(session.AudioTracks), "currentTime", session.CurrentTime)
+	logger.Info("play session created", "sessionID", session.ID, "tracks", len(session.AudioTracks), "chapters", len(session.Chapters), "mediaMetadataChapters", len(session.MediaMetadata.Chapters), "currentTime", session.CurrentTime)
 	return &session, nil
 }
 
@@ -67,7 +67,7 @@ func (c *Client) StartEpisodePlaySession(ctx context.Context, itemID, episodeID 
 		logger.Error("decode episode play session failed", "itemID", itemID, "episodeID", episodeID, "err", err, "body", string(data))
 		return nil, fmt.Errorf("decode episode play session: %w", err)
 	}
-	logger.Info("episode play session created", "sessionID", session.ID, "tracks", len(session.AudioTracks), "currentTime", session.CurrentTime, "episodeID", session.EpisodeID)
+	logger.Info("episode play session created", "sessionID", session.ID, "tracks", len(session.AudioTracks), "chapters", len(session.Chapters), "mediaMetadataChapters", len(session.MediaMetadata.Chapters), "currentTime", session.CurrentTime, "episodeID", session.EpisodeID)
 	return &session, nil
 }
 
@@ -78,6 +78,7 @@ func (c *Client) SyncSession(ctx context.Context, sessionID string, currentTime,
 		CurrentTime:  currentTime,
 		TimeListened: timeListened,
 	}
+	logger.Debug("syncing playback session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 	_, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return fmt.Errorf("sync session: %w", err)
@@ -92,6 +93,7 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string, currentTime
 		CurrentTime:  currentTime,
 		TimeListened: timeListened,
 	}
+	logger.Debug("closing playback session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 	_, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return fmt.Errorf("close session: %w", err)

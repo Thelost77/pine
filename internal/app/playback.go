@@ -69,6 +69,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 				break
 			}
 		}
+		logger.Info("track selected for playback", "itemID", item.ID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", session.CurrentTime, "seekTime", seekTime)
 
 		streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
 
@@ -81,7 +82,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 				CurrentTime:      seekTime,
 				Duration:         dur,
 				Title:            item.Media.Metadata.Title,
-				Chapters:         session.Chapters,
+				Chapters:         playSessionChapters(session),
 				TrackStartOffset: track.StartOffset,
 				TrackDuration:    track.Duration,
 			},
@@ -136,6 +137,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 		}
 
 		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL + "?token=" + client.Token()
+		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
 
 		return PlaySessionMsg{
 			Session: PlaySessionData{
@@ -145,7 +147,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				CurrentTime:      session.CurrentTime,
 				Duration:         episode.Duration,
 				Title:            episode.Title,
-				Chapters:         session.Chapters,
+				Chapters:         playSessionChapters(session),
 				TrackStartOffset: session.AudioTracks[0].StartOffset,
 				TrackDuration:    session.AudioTracks[0].Duration,
 			},
@@ -179,6 +181,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
+	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters))
 
 	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime)
 }
@@ -257,7 +260,9 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 		func() tea.Msg {
 			if client != nil {
 				if err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened); err != nil {
-					logger.Warn("failed to sync session", "err", err)
+					logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+				} else {
+					logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 				}
 			}
 			return nil
@@ -270,7 +275,9 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 					CurrentTime: currentTime,
 					Duration:    duration,
 				}); err != nil {
-					logger.Warn("failed to save listening session", "err", err)
+					logger.Warn("failed to save listening session", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+				} else {
+					logger.Debug("listening session saved", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration)
 				}
 			}
 			return nil
@@ -334,7 +341,9 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 					err = client.UpdateProgress(context.Background(), itemID, currentTime, progress, false)
 				}
 				if err != nil {
-					logger.Warn("failed to update progress on stop", "err", err)
+					logger.Warn("failed to update progress on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress, "err", err)
+				} else {
+					logger.Debug("progress updated on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress)
 				}
 			}
 			return nil
@@ -342,7 +351,9 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 		func() tea.Msg {
 			if client != nil && sessionID != "" {
 				if err := client.CloseSession(context.Background(), sessionID, currentTime, timeListened); err != nil {
-					logger.Warn("failed to close session", "err", err)
+					logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+				} else {
+					logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 				}
 			}
 			return nil
@@ -355,7 +366,9 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 					CurrentTime: currentTime,
 					Duration:    duration,
 				}); err != nil {
-					logger.Warn("failed to save listening session on stop", "err", err)
+					logger.Warn("failed to save listening session on stop", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+				} else {
+					logger.Debug("listening session saved on stop", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration)
 				}
 			}
 			return nil
@@ -364,6 +377,16 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func playSessionChapters(session *abs.PlaySession) []abs.Chapter {
+	if session == nil {
+		return nil
+	}
+	if len(session.MediaMetadata.Chapters) > len(session.Chapters) {
+		return session.MediaMetadata.Chapters
+	}
+	return session.Chapters
 }
 
 // Cleanup performs synchronous cleanup of playback resources.
@@ -390,7 +413,9 @@ func (m Model) Cleanup() {
 
 	if m.client != nil && m.sessionID != "" {
 		if err := m.client.CloseSession(ctx, m.sessionID, currentTime, timeListened); err != nil {
-			logger.Warn("cleanup: failed to close session", "err", err)
+			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+		} else {
+			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened)
 		}
 	}
 
@@ -402,7 +427,9 @@ func (m Model) Cleanup() {
 			err = m.client.UpdateProgress(ctx, m.itemID, currentTime, progress, false)
 		}
 		if err != nil {
-			logger.Warn("cleanup: failed to update progress", "err", err)
+			logger.Warn("cleanup: failed to update progress", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress, "err", err)
+		} else {
+			logger.Debug("cleanup: progress updated", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress)
 		}
 	}
 
@@ -413,7 +440,9 @@ func (m Model) Cleanup() {
 			CurrentTime: currentTime,
 			Duration:    duration,
 		}); err != nil {
-			logger.Warn("cleanup: failed to save listening session", "err", err)
+			logger.Warn("cleanup: failed to save listening session", "itemID", m.itemID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+		} else {
+			logger.Debug("cleanup: listening session saved", "itemID", m.itemID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration)
 		}
 	}
 }

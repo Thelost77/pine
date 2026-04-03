@@ -26,9 +26,37 @@ func TestViewRendersChapterOverlay(t *testing.T) {
 	for _, want := range []string{
 		"Chapter Navigation",
 		"Test Book",
-		"  Opening Credits",
-		"› Chapter One",
-		"  Chapter Two",
+		"  1. Opening Credits",
+		"› 2. Chapter One",
+		"  3. Chapter Two",
+	} {
+		if !containsString(view, want) {
+			t.Fatalf("View() missing %q\n%s", want, view)
+		}
+	}
+}
+
+func TestViewRendersChapterOrdinalsAlongsideRawTitles(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 100
+	m.height = 30
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "01-Poziom-smierci"},
+		{ID: 1, Start: 60, End: 120, Title: "04-Poziom-smierci"},
+		{ID: 2, Start: 120, End: 180, Title: "98-Poziom-smierci"},
+	}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 2
+
+	view := m.View()
+
+	for _, want := range []string{
+		"  1. 01-Poziom-smierci",
+		"  2. 04-Poziom-smierci",
+		"› 3. 98-Poziom-smierci",
 	} {
 		if !containsString(view, want) {
 			t.Fatalf("View() missing %q\n%s", want, view)

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/Thelost77/pine/internal/logger"
 )
 
 // Client is an HTTP client for the Audiobookshelf API.
@@ -30,6 +32,7 @@ func NewClient(baseURL, token string) *Client {
 
 // do executes an authenticated HTTP request and returns the response body.
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
+	start := time.Now()
 	var bodyReader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -51,19 +54,23 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logger.Error("http request failed", "method", method, "path", path, "err", err, "duration", time.Since(start))
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.Error("http response read failed", "method", method, "path", path, "status", resp.StatusCode, "err", err, "duration", time.Since(start))
 		return nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Error("http request returned unexpected status", "method", method, "path", path, "status", resp.StatusCode, "body", truncateLogBody(data), "duration", time.Since(start))
 		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(data))
 	}
 
+	logger.Debug("http request completed", "method", method, "path", path, "status", resp.StatusCode, "duration", time.Since(start))
 	return data, nil
 }
 
@@ -99,4 +106,12 @@ func (c *Client) BaseURL() string {
 // Token returns the auth token.
 func (c *Client) Token() string {
 	return c.token
+}
+
+func truncateLogBody(data []byte) string {
+	const max = 500
+	if len(data) <= max {
+		return string(data)
+	}
+	return string(data[:max]) + "..."
 }

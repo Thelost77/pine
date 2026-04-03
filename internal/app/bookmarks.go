@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // handleAddBookmark creates a bookmark at the current playback position.
@@ -39,6 +39,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
 		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
 	}
 }
@@ -69,6 +70,7 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
 		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
 	}
 }
@@ -158,6 +160,7 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 	trackEnd := m.trackStartOffset + trackDur
 	if bookPos >= m.trackStartOffset && bookPos < trackEnd {
 		trackRelative := bookPos - m.trackStartOffset
+		logger.Debug("in-track seek", "bookPosition", bookPos, "trackStart", m.trackStartOffset, "trackEnd", trackEnd, "trackRelative", trackRelative)
 		m.player.Position = bookPos
 		mpvPlayer := m.mpv
 		return m, func() tea.Msg {
@@ -169,7 +172,7 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 	}
 
 	// Cross-track seek: restart playback at the new book-global position.
-	logger.Info("cross-track seek, restarting playback", "from", m.player.Position, "to", bookPos)
+	logger.Info("cross-track seek, restarting playback", "from", m.player.Position, "to", bookPos, "trackStart", m.trackStartOffset, "trackEnd", trackEnd)
 	client := m.client
 	itemID := m.itemID
 	sessionID := m.sessionID
@@ -216,6 +219,7 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 				break
 			}
 		}
+		logger.Info("track selected for restarted session", "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "seekTime", seekTime, "targetPosition", targetPos)
 
 		streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
 
@@ -226,7 +230,7 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 				CurrentTime:      seekTime,
 				Duration:         duration,
 				Title:            title,
-				Chapters:         session.Chapters,
+				Chapters:         playSessionChapters(session),
 				TrackStartOffset: track.StartOffset,
 				TrackDuration:    track.Duration,
 			},

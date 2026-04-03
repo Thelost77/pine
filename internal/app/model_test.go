@@ -620,13 +620,14 @@ func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
 		{ID: 0, Start: 0, End: 60, Title: "One"},
 		{ID: 1, Start: 60, End: 120, Title: "Two"},
 	}
+	m.player.Position = 70.0
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	m = result.(Model)
 	if !m.chapterOverlayVisible {
 		t.Fatal("overlay should open during active playback when chapters exist")
 	}
-	if m.chapterOverlayIndex != 0 {
-		t.Fatalf("overlay index = %d, want 0", m.chapterOverlayIndex)
+	if m.chapterOverlayIndex != 1 {
+		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
 	}
 }
 
@@ -666,6 +667,30 @@ func TestJKMovesChapterOverlaySelection(t *testing.T) {
 
 	if m.chapterOverlayIndex != 1 {
 		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
+	}
+}
+
+func TestHLJumpToOverlayExtremes(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 60, Title: "One"},
+		{ID: 1, Start: 60, End: 120, Title: "Two"},
+		{ID: 2, Start: 120, End: 180, Title: "Three"},
+	}
+	m.chapterOverlayVisible = true
+	m.chapterOverlayIndex = 1
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	m = result.(Model)
+	if m.chapterOverlayIndex != 2 {
+		t.Fatalf("overlay index after L = %d, want 2", m.chapterOverlayIndex)
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	m = result.(Model)
+	if m.chapterOverlayIndex != 0 {
+		t.Fatalf("overlay index after H = %d, want 0", m.chapterOverlayIndex)
 	}
 }
 

@@ -274,6 +274,75 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	}
 }
 
+func TestPlayCmdPrefersLongerMediaMetadataChapters(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/api/items/item-001/play" {
+			resp := abs.PlaySession{
+				ID: "sess-abc",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, ContentURL: "/s/item/item-001/audio.mp3", Duration: 3600},
+				},
+				CurrentTime: 42.0,
+				MediaMetadata: abs.MediaMetadata{
+					Title: "Test Audiobook",
+					Chapters: []abs.Chapter{
+						{ID: 0, Start: 0, End: 10, Title: "One"},
+						{ID: 1, Start: 10, End: 20, Title: "Two"},
+						{ID: 2, Start: 20, End: 30, Title: "Three"},
+					},
+				},
+				Chapters: []abs.Chapter{
+					{ID: 0, Start: 0, End: 10, Title: "One"},
+					{ID: 1, Start: 10, End: 20, Title: "Two"},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient(srv.URL, "tok")
+	cfg := config.Default()
+	m := NewWithPlayer(cfg, nil, client, mp)
+	m.screen = ScreenDetail
+	m.backStack = []Screen{ScreenHome}
+
+	dur := 3600.0
+	result, cmd := m.Update(detail.PlayCmd{Item: abs.LibraryItem{
+		ID: "item-001",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title:    "Test Audiobook",
+				Duration: &dur,
+			},
+		},
+	}})
+	m = result.(Model)
+
+	msg := cmd()
+	psMsg, ok := msg.(PlaySessionMsg)
+	if !ok {
+		t.Fatalf("expected PlaySessionMsg, got %T", msg)
+	}
+	if len(psMsg.Session.Chapters) != 3 {
+		t.Fatalf("chapters len = %d, want 3", len(psMsg.Session.Chapters))
+	}
+	if psMsg.Session.Chapters[2].Title != "Three" {
+		t.Fatalf("last chapter title = %q, want Three", psMsg.Session.Chapters[2].Title)
+	}
+}
+
 // TestPlaybackSeekBackwardThenForward tests that backward seeks don't inflate timeListened,
 // and subsequent forward movement resumes tracking.
 func TestPlaybackSeekBackwardThenForward(t *testing.T) {

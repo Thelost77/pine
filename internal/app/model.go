@@ -357,6 +357,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.moveChapterOverlaySelection(-1)
 				return m, nil
 			}
+			if msg.String() == "H" {
+				m.setChapterOverlaySelection(0)
+				return m, nil
+			}
+			if msg.String() == "L" {
+				m.setChapterOverlaySelection(len(m.chapters) - 1)
+				return m, nil
+			}
 		}
 		if m.err.HasError() {
 			m.err.Dismiss()
@@ -472,12 +480,7 @@ func (m *Model) openChapterOverlay() {
 	if !m.canOpenChapterOverlay() {
 		return
 	}
-	if m.chapterOverlayIndex >= len(m.chapters) {
-		m.chapterOverlayIndex = len(m.chapters) - 1
-	}
-	if m.chapterOverlayIndex < 0 {
-		m.chapterOverlayIndex = 0
-	}
+	m.chapterOverlayIndex = m.currentChapterOverlayIndex()
 	m.chapterOverlayVisible = true
 }
 
@@ -494,13 +497,37 @@ func (m *Model) moveChapterOverlaySelection(delta int) {
 	if !m.chapterOverlayVisible || len(m.chapters) == 0 {
 		return
 	}
-	m.chapterOverlayIndex += delta
-	if m.chapterOverlayIndex < 0 {
+	m.setChapterOverlaySelection(m.chapterOverlayIndex + delta)
+}
+
+func (m *Model) setChapterOverlaySelection(index int) {
+	if len(m.chapters) == 0 {
 		m.chapterOverlayIndex = 0
+		return
 	}
-	if m.chapterOverlayIndex >= len(m.chapters) {
-		m.chapterOverlayIndex = len(m.chapters) - 1
+	if index < 0 {
+		index = 0
 	}
+	if index >= len(m.chapters) {
+		index = len(m.chapters) - 1
+	}
+	m.chapterOverlayIndex = index
+}
+
+func (m Model) currentChapterOverlayIndex() int {
+	if len(m.chapters) == 0 {
+		return 0
+	}
+	current := 0
+	for i, ch := range m.chapters {
+		if m.player.Position >= ch.Start {
+			current = i
+		}
+		if m.player.Position >= ch.Start && m.player.Position < ch.End {
+			return i
+		}
+	}
+	return current
 }
 
 func (m *Model) clearPlaybackSessionState() {
