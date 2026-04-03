@@ -567,6 +567,71 @@ func TestPlaybackPositionErrorAtTrackEndRestartsNextTrack(t *testing.T) {
 	}
 }
 
+func TestPlaybackPositionErrorNearTrackEndWithinTwoSecondsRestartsNextTrack(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-multitrack/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-next-realish",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 7, StartOffset: 1679.773766, ContentURL: "/s/item/item-multitrack/track7.mp3", Duration: 828.951689},
+					{Index: 8, StartOffset: 2508.725455, ContentURL: "/s/item/item-multitrack/track8.mp3", Duration: 863.172067},
+				},
+				CurrentTime: 2209.0,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-mt-realish/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-multitrack":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, &mockPlayer{})
+	m.sessionID = "sess-mt-realish"
+	m.itemID = "item-multitrack"
+	m.player.Playing = true
+	m.player.Title = "Track Test"
+	m.player.Position = 2507.353147
+	m.player.Duration = 17590.934698999998
+	m.trackStartOffset = 1679.773766
+	m.trackDuration = 828.951689
+	m.playGeneration = 1
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	m = feedCmdChain(m, cmd, 5)
+
+	if m.sessionID != "sess-next-realish" {
+		t.Fatalf("sessionID = %q, want sess-next-realish", m.sessionID)
+	}
+	if m.trackStartOffset != 2508.725455 {
+		t.Fatalf("trackStartOffset = %f, want 2508.725455", m.trackStartOffset)
+	}
+	if m.player.Position != 2508.725455 {
+		t.Fatalf("player.Position = %f, want 2508.725455", m.player.Position)
+	}
+	if !m.isPlaying() {
+		t.Fatal("expected playback to continue for near-end closed-client rollover")
+	}
+}
+
 func TestPlaybackPositionErrorAtFinalTrackEndStopsPlayback(t *testing.T) {
 	log := &apiLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -14,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const trackEndRolloverSlack = 1.0
+const trackEndRolloverSlack = 2.0
 
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {

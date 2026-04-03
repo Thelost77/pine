@@ -18,11 +18,11 @@ type PositionMsg struct {
 	Generation uint64 // ties this tick to a specific play session
 }
 
-// TickCmd returns a command that fires after 1 second and polls mpv state.
+// TickCmd returns a command that fires twice per second and polls mpv state.
 // The generation parameter ties the tick to a specific play session so stale
 // ticks from a previous session can be safely ignored.
 func TickCmd(p Player, generation uint64) tea.Cmd {
-	return tea.Tick(time.Second, func(_ time.Time) tea.Msg {
+	return tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg {
 		pos, posErr := p.GetPosition()
 		dur, durErr := p.GetDuration()
 		paused, pauseErr := p.GetPaused()

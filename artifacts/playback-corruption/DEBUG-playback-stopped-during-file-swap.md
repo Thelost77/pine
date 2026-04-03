@@ -39,3 +39,51 @@
 - Attempt 1: Investigate whether the book or track data was corrupted → rejected. ABS repeatedly returns valid track/session data, and manual cross-track restarts succeed.
 - Attempt 2: Investigate whether the “file swap” itself fails inside mpv → partially true but not root cause. mpv closes at EOF as expected for a single-file launch; the real bug is that pine treats that closure as a fatal stop instead of advancing.
 - Attempt 3: Investigate whether explicit seeks were causing the stop → separated into a second pattern. Earlier log bursts are user-driven cross-track jumps to chapter-like positions; they are noisy but distinct from the passive EOF stop.
+
+## Follow-up Session: EOF rollover implementation and tuning
+
+### Implemented changes
+- Extracted the existing cross-track restart logic into a shared restart helper so both manual cross-track seeks and natural EOF rollover use the same path.
+- Added EOF rollover handling in `handlePositionMsg`: if mpv closes near the end of the current track, pine now restarts playback at the next book-global track boundary instead of immediately stopping.
+- Increased mpv polling frequency from **1.0s** to **0.5s**.
+- Increased EOF rollover tolerance from **1.0s** before track end to **2.0s**.
+- Added playback tests for:
+  1. rollover at track end,
+  2. final-track EOF stop,
+  3. a “realish” near-boundary failure matching the observed `~1.37s` miss.
+
+### What the follow-up logs showed
+- The first implementation worked, but the **1.0s** tolerance was still too narrow in real usage.
+- In the rebuilt binary, the failing session at `20:58:59` showed:
+  1. `trackStart=1679.773766`
+  2. `trackDuration=828.951689`
+  3. track end = `2508.725455`
+  4. last known position before closed mpv client = `2507.353147`
+  5. miss distance = `1.372308s`
+- Because that miss was larger than the original **1.0s** slack, pine still fell through to:
+  - `player position error, stopping playback`
+  - `stopping playback`
+
+### Why a later run succeeded
+- The sampling interval had **not** changed yet during the earlier successful retry; that success happened because the final sampled position happened to land inside the current tolerance window.
+- Example from the later successful rollover:
+  1. track end = `2508.725455`
+  2. last sampled position = `2507.769237`
+  3. miss distance = `0.956218s`
+  4. pine logged `track ended, advancing playback`
+- That proved the EOF rollover path worked, but that it was still borderline.
+
+### Numbers after tuning to 500ms polling + 2s slack
+- In the latest session after both changes:
+  1. previous track end = `2508.725455`
+  2. last sampled position before rollover = `2508.213148`
+  3. miss distance = `0.512307s`
+- Pine then logged:
+  - `track ended, advancing playback`
+  - followed by a fresh `play session started` / `playback session loaded` for the next track at `trackStart=2508.725455`
+- This is the desired outcome: fresher last-known position plus more generous EOF tolerance.
+
+### Current assessment
+- The issue appears **practically much less likely** now.
+- It is still **theoretically possible** under extreme event-loop stalls or heavy system lag, because rollover still depends on inferred EOF from polling rather than a dedicated end-of-track signal.
+- For now the system is acceptable: the logs show successful automatic rollover on the same audiobook that previously stopped at EOF.
