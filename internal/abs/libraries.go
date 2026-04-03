@@ -41,6 +41,26 @@ func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]Perso
 	return sections, nil
 }
 
+// GetRecentlyAdded fetches and merges the "recently-added" personalized shelf for the given libraries.
+func (c *Client) GetRecentlyAdded(ctx context.Context, libraries []Library) ([]LibraryItem, error) {
+	items := make([]LibraryItem, 0)
+	for _, lib := range libraries {
+		sections, err := c.GetPersonalized(ctx, lib.ID)
+		if err != nil {
+			return nil, fmt.Errorf("get recently added for library %s: %w", lib.ID, err)
+		}
+		for _, section := range sections {
+			if section.ID != "recently-added" {
+				continue
+			}
+			items = append(items, section.Entities...)
+			break
+		}
+	}
+	SortRecentlyAdded(items)
+	return items, nil
+}
+
 // GetLibraryItems returns a paginated list of items in a library.
 func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, limit int) (*LibraryItemsResponse, error) {
 	path := fmt.Sprintf("/api/libraries/%s/items?page=%d&limit=%d", libraryID, page, limit)
@@ -88,6 +108,21 @@ func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*LibraryIte
 	}
 	logger.Info("library item fetched", "itemID", item.ID, "mediaType", item.MediaType, "episodes", len(item.Media.Episodes))
 	return &item, nil
+}
+
+// GetSeries returns an ordered series payload scoped to a library.
+func (c *Client) GetSeries(ctx context.Context, libraryID, seriesID string) (*Series, error) {
+	path := fmt.Sprintf("/api/libraries/%s/series/%s", libraryID, seriesID)
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get series: %w", err)
+	}
+
+	var series Series
+	if err := json.Unmarshal(data, &series); err != nil {
+		return nil, fmt.Errorf("decode series response: %w", err)
+	}
+	return &series, nil
 }
 
 const audioCheckSampleSize = 10

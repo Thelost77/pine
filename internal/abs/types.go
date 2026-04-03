@@ -1,5 +1,10 @@
 package abs
 
+import (
+	"cmp"
+	"slices"
+)
+
 // LoginResponse is returned by POST /login.
 type LoginResponse struct {
 	User LoginUser `json:"user"`
@@ -22,10 +27,22 @@ type Library struct {
 // LibraryItem represents a book or podcast in a library.
 type LibraryItem struct {
 	ID                string             `json:"id"`
+	LibraryID         string             `json:"libraryId,omitempty"`
+	AddedAt           int64              `json:"addedAt,omitempty"`
 	MediaType         string             `json:"mediaType"` // "book" or "podcast"
 	Media             Media              `json:"media"`
 	UserMediaProgress *UserMediaProgress `json:"userMediaProgress,omitempty"`
 	RecentEpisode     *PodcastEpisode    `json:"recentEpisode,omitempty"`
+}
+
+// SortRecentlyAdded sorts library items by descending addedAt and then title.
+func SortRecentlyAdded(items []LibraryItem) {
+	slices.SortFunc(items, func(a, b LibraryItem) int {
+		if byAddedAt := cmp.Compare(b.AddedAt, a.AddedAt); byAddedAt != 0 {
+			return byAddedAt
+		}
+		return cmp.Compare(a.Media.Metadata.Title, b.Media.Metadata.Title)
+	})
 }
 
 // Media contains the media content and metadata of a library item.
@@ -73,11 +90,32 @@ type PodcastEpisode struct {
 
 // MediaMetadata holds descriptive information about a media item.
 type MediaMetadata struct {
-	Title       string    `json:"title"`
-	AuthorName  *string   `json:"authorName,omitempty"`
-	Description *string   `json:"description,omitempty"`
-	Duration    *float64  `json:"duration,omitempty"` // seconds
-	Chapters    []Chapter `json:"chapters,omitempty"`
+	Title       string          `json:"title"`
+	AuthorName  *string         `json:"authorName,omitempty"`
+	Description *string         `json:"description,omitempty"`
+	Duration    *float64        `json:"duration,omitempty"` // seconds
+	Chapters    []Chapter       `json:"chapters,omitempty"`
+	Series      *SeriesSequence `json:"series,omitempty"`
+}
+
+// SeriesSequence is the minimal series context attached to a library item.
+type SeriesSequence struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Sequence string `json:"sequence,omitempty"`
+}
+
+// SeriesBook is a library item embedded in a series response with sequence info.
+type SeriesBook struct {
+	LibraryItem
+	Sequence string `json:"sequence,omitempty"`
+}
+
+// Series contains ordered books for a given series.
+type Series struct {
+	ID    string       `json:"id"`
+	Name  string       `json:"name"`
+	Books []SeriesBook `json:"books"`
 }
 
 // Chapter represents a chapter within a media item.
@@ -143,9 +181,9 @@ type PersonalizedResponse struct {
 // Bookmark represents a user bookmark within a media item.
 type Bookmark struct {
 	LibraryItemID string  `json:"libraryItemId,omitempty"`
-	Title     string  `json:"title"`
-	Time      float64 `json:"time"`      // seconds
-	CreatedAt int64   `json:"createdAt"` // unix timestamp ms
+	Title         string  `json:"title"`
+	Time          float64 `json:"time"`      // seconds
+	CreatedAt     int64   `json:"createdAt"` // unix timestamp ms
 }
 
 // MediaProgressWithBookmarks extends progress with bookmark data.

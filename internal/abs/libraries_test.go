@@ -251,6 +251,181 @@ func TestGetLibraryItemHTTP(t *testing.T) {
 	}
 }
 
+func TestGetLibraryItemHTTP_WithSeriesMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/items/li-book-001" {
+			t.Errorf("path = %q, want /api/items/li-book-001", r.URL.Path)
+		}
+		if r.URL.Query().Get("expanded") != "1" {
+			t.Error("expected expanded=1 query param")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"id": "li-book-001",
+			"libraryId": "lib-books-001",
+			"addedAt": 1711111111111,
+			"mediaType": "book",
+			"media": {
+				"metadata": {
+					"title": "Caliban's War",
+					"series": {
+						"id": "series-expanse",
+						"name": "The Expanse",
+						"sequence": "2"
+					}
+				}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	item, err := c.GetLibraryItem(context.Background(), "li-book-001")
+	if err != nil {
+		t.Fatalf("GetLibraryItem() error: %v", err)
+	}
+	if item.LibraryID != "lib-books-001" {
+		t.Errorf("libraryID = %q, want lib-books-001", item.LibraryID)
+	}
+	if item.AddedAt != 1711111111111 {
+		t.Errorf("addedAt = %d, want 1711111111111", item.AddedAt)
+	}
+	if item.Media.Metadata.Series == nil {
+		t.Fatal("expected series metadata to be set")
+	}
+	if item.Media.Metadata.Series.ID != "series-expanse" {
+		t.Errorf("series ID = %q, want series-expanse", item.Media.Metadata.Series.ID)
+	}
+	if item.Media.Metadata.Series.Sequence != "2" {
+		t.Errorf("sequence = %q, want 2", item.Media.Metadata.Series.Sequence)
+	}
+}
+
+func TestGetSeriesHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/libraries/lib-books-001/series/series-expanse" {
+			t.Errorf("path = %q, want /api/libraries/lib-books-001/series/series-expanse", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"id": "series-expanse",
+			"name": "The Expanse",
+			"books": [
+				{
+					"id": "li-book-001",
+					"libraryId": "lib-books-001",
+					"addedAt": 1711111111111,
+					"mediaType": "book",
+					"sequence": "2",
+					"media": {
+						"metadata": {
+							"title": "Caliban's War"
+						}
+					}
+				},
+				{
+					"id": "li-book-002",
+					"libraryId": "lib-books-001",
+					"addedAt": 1711111112222,
+					"mediaType": "book",
+					"sequence": "3",
+					"media": {
+						"metadata": {
+							"title": "Abaddon's Gate"
+						}
+					}
+				}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	series, err := c.GetSeries(context.Background(), "lib-books-001", "series-expanse")
+	if err != nil {
+		t.Fatalf("GetSeries() error: %v", err)
+	}
+	if series.ID != "series-expanse" {
+		t.Errorf("series ID = %q, want series-expanse", series.ID)
+	}
+	if len(series.Books) != 2 {
+		t.Fatalf("expected 2 books, got %d", len(series.Books))
+	}
+	if series.Books[0].Sequence != "2" {
+		t.Errorf("book[0] sequence = %q, want 2", series.Books[0].Sequence)
+	}
+	if series.Books[1].LibraryItem.Media.Metadata.Title != "Abaddon's Gate" {
+		t.Errorf("book[1] title = %q, want Abaddon's Gate", series.Books[1].LibraryItem.Media.Metadata.Title)
+	}
+}
+
+func TestGetRecentlyAddedHTTP(t *testing.T) {
+	responses := map[string]string{
+		"/api/libraries/lib-books-001/personalized": `[
+			{
+				"id": "recently-added",
+				"entities": [
+					{
+						"id": "li-book-001",
+						"libraryId": "lib-books-001",
+						"addedAt": 1711111111111,
+						"mediaType": "book",
+						"media": {"metadata": {"title": "Caliban's War"}}
+					}
+				]
+			}
+		]`,
+		"/api/libraries/lib-pods-002/personalized": `[
+			{
+				"id": "recently-added",
+				"entities": [
+					{
+						"id": "li-pod-001",
+						"libraryId": "lib-pods-002",
+						"addedAt": 1712222222222,
+						"mediaType": "podcast",
+						"media": {"metadata": {"title": "My Podcast"}}
+					}
+				]
+			}
+		]`,
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := responses[r.URL.Path]
+		if !ok {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	items, err := c.GetRecentlyAdded(context.Background(), []Library{
+		{ID: "lib-books-001", MediaType: "book"},
+		{ID: "lib-pods-002", MediaType: "podcast"},
+	})
+	if err != nil {
+		t.Fatalf("GetRecentlyAdded() error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].ID != "li-pod-001" {
+		t.Errorf("items[0].ID = %q, want li-pod-001", items[0].ID)
+	}
+	if items[1].ID != "li-book-001" {
+		t.Errorf("items[1].ID = %q, want li-book-001", items[1].ID)
+	}
+}
+
 func TestSearchLibraryHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/libraries/lib-1/search" {
