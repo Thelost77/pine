@@ -157,8 +157,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.totalItems = msg.Total
 		m.page = msg.Page
 
-		// Append new items
-		m.items = append(m.items, msg.Items...)
+		if msg.Page == 0 {
+			m.items = msg.Items
+		} else {
+			m.items = append(m.items, msg.Items...)
+		}
 		items := make([]list.Item, len(m.items))
 		for i, item := range m.items {
 			items[i] = ui.ListItem{Item: item}
