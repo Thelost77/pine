@@ -346,6 +346,96 @@ func TestE2E_DetailToPlayback(t *testing.T) {
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/sync")
 }
 
+func TestE2E_ChapterOverlayRequiresPlayback(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	item := testLibraryItem("item-001", "The Great Gatsby")
+	m.detail = detail.New(m.styles, item)
+	m, _ = m.navigate(ScreenDetail)
+	m = e2eSetSize(m, 120, 40)
+
+	m, _ = e2ePressKey(m, 'c')
+
+	if m.chapterOverlayVisible {
+		t.Fatal("chapter overlay should stay closed before playback starts")
+	}
+	if strings.Contains(m.View(), "Chapter Navigation") {
+		t.Fatal("view should not render chapter overlay before playback starts")
+	}
+}
+
+func TestE2E_ChapterOverlayOpenCloseAndSeek(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 42, duration: 3600}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	item := testLibraryItem("item-001", "The Great Gatsby")
+	m.detail = detail.New(m.styles, item)
+	m, _ = m.navigate(ScreenDetail)
+	m = e2eSetSize(m, 120, 40)
+
+	m, cmd := e2ePressKey(m, 'p')
+	m, cmd = feedCmd(m, cmd)
+	m, cmd = feedCmd(m, cmd)
+
+	if !m.isPlaying() {
+		t.Fatal("expected playback to be active after play flow")
+	}
+	if len(m.chapters) != 2 {
+		t.Fatalf("chapters len = %d, want 2", len(m.chapters))
+	}
+
+	m, _ = e2ePressKey(m, 'c')
+	if !m.chapterOverlayVisible {
+		t.Fatal("expected chapter overlay to open")
+	}
+	assertViewContains(t, m, "Chapter Navigation")
+	assertViewContains(t, m, "Chapter 1")
+
+	m, _ = e2ePressSpecial(m, tea.KeyEsc)
+	if m.chapterOverlayVisible {
+		t.Fatal("expected esc to close chapter overlay")
+	}
+	if m.ActiveScreen() != ScreenDetail {
+		t.Fatalf("screen = %v, want Detail after closing overlay", m.ActiveScreen())
+	}
+
+	m, _ = e2ePressKey(m, 'c')
+	m, _ = e2ePressKey(m, 'j')
+	if m.chapterOverlayIndex != 1 {
+		t.Fatalf("chapter overlay index = %d, want 1", m.chapterOverlayIndex)
+	}
+
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	if m.chapterOverlayVisible {
+		t.Fatal("expected enter to close chapter overlay")
+	}
+	if m.player.Position != 1800.0 {
+		t.Fatalf("player position = %f, want 1800.0", m.player.Position)
+	}
+
+	m, _ = feedCmd(m, cmd)
+
+	mp.mu.Lock()
+	pos := mp.position
+	mp.mu.Unlock()
+	if pos != 1800.0 {
+		t.Fatalf("mock player position = %f, want 1800.0", pos)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E2E: Playback cleanup on back
 // ---------------------------------------------------------------------------
