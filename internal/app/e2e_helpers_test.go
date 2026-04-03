@@ -355,18 +355,32 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			// /api/items/{id}/play
 			parts := strings.Split(r.URL.Path, "/")
 			itemID := parts[3]
-			resp := abs.PlaySession{
-				ID: "sess-e2e",
-				AudioTracks: []abs.AudioTrack{
-					{Index: 0, ContentURL: fmt.Sprintf("/s/item/%s/audio.mp3", itemID), Duration: 3600},
-				},
-				CurrentTime: 42.0,
-				MediaMetadata: abs.MediaMetadata{
+			var resp abs.PlaySession
+			if itemID == "item-multitrack" {
+				resp = abs.PlaySession{
+					ID: "sess-mt-e2e",
+					AudioTracks: []abs.AudioTrack{
+						{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-multitrack/track0.mp3", Duration: 1800},
+						{Index: 1, StartOffset: 1800, ContentURL: "/s/item/item-multitrack/track1.mp3", Duration: 1800},
+					},
+					CurrentTime: 500.0,
 					Chapters: []abs.Chapter{
 						{ID: 0, Start: 0, End: 1800, Title: "Chapter 1"},
 						{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
 					},
-				},
+				}
+			} else {
+				resp = abs.PlaySession{
+					ID: "sess-e2e",
+					AudioTracks: []abs.AudioTrack{
+						{Index: 0, ContentURL: fmt.Sprintf("/s/item/%s/audio.mp3", itemID), Duration: 3600},
+					},
+					CurrentTime: 42.0,
+					Chapters: []abs.Chapter{
+						{ID: 0, Start: 0, End: 1800, Title: "Chapter 1"},
+						{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
+					},
+				}
 			}
 			json.NewEncoder(w).Encode(resp)
 

@@ -178,20 +178,13 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 	duration := m.player.Duration
 	title := m.player.Title
 	mpvPlayer := m.mpv
+	targetPos := bookPos
 
 	// Clear current session but keep itemID/chapters for the restart
 	m.sessionID = ""
 	m.timeListened = 0
 
 	return m, func() tea.Msg {
-		// Update progress to target position so new session starts there
-		if client != nil && itemID != "" {
-			var progress float64
-			if duration > 0 {
-				progress = bookPos / duration
-			}
-			_ = client.UpdateProgress(context.Background(), itemID, bookPos, progress, false)
-		}
 		// Close current session
 		if client != nil && sessionID != "" {
 			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
@@ -200,7 +193,7 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 			_ = mpvPlayer.Quit()
 		}
 
-		// Start fresh session — ABS picks up from the updated progress
+		// Start fresh session to get track URLs
 		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
 		session, err := client.StartPlaySession(context.Background(), itemID, device)
 		if err != nil {
@@ -210,12 +203,14 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
 		}
 
+		// Use our target position for track selection, not session.CurrentTime
+		// (ABS may not have processed our progress update yet)
 		track := session.AudioTracks[0]
-		seekTime := session.CurrentTime
+		seekTime := targetPos
 		for _, t := range session.AudioTracks {
-			if session.CurrentTime >= t.StartOffset && session.CurrentTime < t.StartOffset+t.Duration {
+			if targetPos >= t.StartOffset && targetPos < t.StartOffset+t.Duration {
 				track = t
-				seekTime = session.CurrentTime - t.StartOffset
+				seekTime = targetPos - t.StartOffset
 				break
 			}
 		}

@@ -1656,3 +1656,52 @@ func TestE2E_WithinTrackSeekZeroDuration(t *testing.T) {
 		t.Errorf("expected no API calls for seek with trackDuration==0, got %d new calls", apiCallsAfter-apiCallsBefore)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// E2E: Cross-track chapter seek lands on correct position
+// ---------------------------------------------------------------------------
+
+func TestE2E_CrossTrackChapterSeek(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 500, duration: 1800}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up playback: position 500 in track 1 (0-1800)
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-multitrack"
+	m.player.Playing = true
+	m.player.Position = 500.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 0
+	m.trackDuration = 1800.0
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 1800, Title: "Chapter 1"},
+		{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
+	}
+
+	// Press 'n' → chapter 2 at position 2000 is beyond current track (0-1800)
+	// This should trigger a cross-track restart
+	m, cmd := e2ePressKey(m, 'n')
+
+	// Feed the cross-track restart command chain
+	m = feedCmdChain(m, cmd, 10)
+
+	// Verify: new session started on the correct track
+	if m.trackStartOffset != 1800.0 {
+		t.Errorf("trackStartOffset = %f, want 1800.0", m.trackStartOffset)
+	}
+	if m.player.Position != 1800.0 {
+		t.Errorf("player.Position = %f, want 1800.0 (chapter 2 start)", m.player.Position)
+	}
+	if !m.isPlaying() {
+		t.Error("should still be playing after cross-track seek")
+	}
+
+	// Verify: API call was made for new play session
+	assertAPICallMade(t, log, "POST", "/api/items/item-multitrack/play")
+}
