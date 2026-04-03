@@ -1,6 +1,7 @@
 package detail
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -536,12 +537,63 @@ func TestBookmarksUpdatedMsg_EmptyDisablesFocus(t *testing.T) {
 	}
 }
 
+func TestBookmarksUpdatedMsg_EmptyMarksBookmarksLoaded(t *testing.T) {
+	m := newTestModel()
+
+	if m.BookmarksLoaded() {
+		t.Fatal("expected bookmarks to start unloaded")
+	}
+
+	m, _ = m.Update(BookmarksUpdatedMsg{Bookmarks: []abs.Bookmark{}})
+
+	if !m.BookmarksLoaded() {
+		t.Error("expected bookmarks to be marked loaded after empty update")
+	}
+	if m.BookmarkLoadError() != nil {
+		t.Errorf("expected no bookmark load error, got %v", m.BookmarkLoadError())
+	}
+}
+
+func TestBookmarksUpdatedMsg_ErrorStoresBookmarkLoadError(t *testing.T) {
+	m := newTestModel()
+	wantErr := errors.New("bookmark load failed")
+
+	m, _ = m.Update(BookmarksUpdatedMsg{Err: wantErr})
+
+	if !m.BookmarksLoaded() {
+		t.Error("expected bookmarks to be marked loaded after error")
+	}
+	if m.BookmarkLoadError() == nil {
+		t.Fatal("expected bookmark load error to be stored")
+	}
+	if m.BookmarkLoadError().Error() != wantErr.Error() {
+		t.Errorf("bookmark load error = %v, want %v", m.BookmarkLoadError(), wantErr)
+	}
+}
+
+func TestSetBookmarks_ClearsBookmarkLoadError(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(BookmarksUpdatedMsg{Err: errors.New("bookmark load failed")})
+
+	m.SetBookmarks(sampleBookmarks())
+
+	if !m.BookmarksLoaded() {
+		t.Error("expected bookmarks to stay marked loaded after SetBookmarks")
+	}
+	if m.BookmarkLoadError() != nil {
+		t.Errorf("expected bookmark load error to be cleared, got %v", m.BookmarkLoadError())
+	}
+}
+
 func TestSetBookmarks(t *testing.T) {
 	m := newTestModel()
 	bms := sampleBookmarks()
 	m.SetBookmarks(bms)
 	if len(m.Bookmarks()) != 3 {
 		t.Errorf("expected 3 bookmarks, got %d", len(m.Bookmarks()))
+	}
+	if !m.BookmarksLoaded() {
+		t.Error("expected bookmarks to be marked loaded after SetBookmarks")
 	}
 }
 

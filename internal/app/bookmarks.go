@@ -83,7 +83,7 @@ func (m Model) fetchBookmarksCmd(itemID string) tea.Cmd {
 	return func() tea.Msg {
 		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
 		if err != nil {
-			return detail.BookmarksUpdatedMsg{Bookmarks: nil}
+			return detail.BookmarksUpdatedMsg{Err: err}
 		}
 		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
 	}

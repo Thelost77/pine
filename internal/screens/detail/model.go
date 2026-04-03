@@ -53,6 +53,7 @@ type MarkFinishedMsg struct {
 // BookmarksUpdatedMsg updates the bookmark list after an add/delete operation.
 type BookmarksUpdatedMsg struct {
 	Bookmarks []abs.Bookmark
+	Err       error
 }
 
 // BackMsg signals that the user wants to go back from the detail screen.
@@ -123,6 +124,8 @@ type Model struct {
 	height           int
 	styles           ui.Styles
 	bookmarks        []abs.Bookmark
+	bookmarksLoaded  bool
+	bookmarkLoadErr  error
 	selectedBookmark int
 	focusBookmarks   bool
 	episodes         []abs.PodcastEpisode
@@ -146,8 +149,13 @@ func New(styles ui.Styles, item abs.LibraryItem) Model {
 // SetBookmarks updates the bookmark list and refreshes the viewport content.
 func (m *Model) SetBookmarks(bookmarks []abs.Bookmark) {
 	m.bookmarks = bookmarks
+	m.bookmarksLoaded = true
+	m.bookmarkLoadErr = nil
 	if m.selectedBookmark >= len(bookmarks) {
 		m.selectedBookmark = max(0, len(bookmarks)-1)
+	}
+	if len(bookmarks) == 0 {
+		m.focusBookmarks = false
 	}
 	if m.ready {
 		m.viewport.SetContent(m.buildContent())
@@ -214,6 +222,16 @@ func (m Model) Bookmarks() []abs.Bookmark {
 	return m.bookmarks
 }
 
+// BookmarksLoaded returns whether bookmark loading has completed.
+func (m Model) BookmarksLoaded() bool {
+	return m.bookmarksLoaded
+}
+
+// BookmarkLoadError returns the last bookmark load error, if any.
+func (m Model) BookmarkLoadError() error {
+	return m.bookmarkLoadErr
+}
+
 // SelectedBookmark returns the currently selected bookmark index.
 func (m Model) SelectedBookmark() int {
 	return m.selectedBookmark
@@ -242,9 +260,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case BookmarksUpdatedMsg:
-		m.bookmarks = msg.Bookmarks
-		if m.selectedBookmark >= len(m.bookmarks) {
-			m.selectedBookmark = max(0, len(m.bookmarks)-1)
+		m.bookmarksLoaded = true
+		m.bookmarkLoadErr = msg.Err
+		if msg.Err == nil {
+			m.bookmarks = msg.Bookmarks
+			if m.selectedBookmark >= len(m.bookmarks) {
+				m.selectedBookmark = max(0, len(m.bookmarks)-1)
+			}
 		}
 		if len(m.bookmarks) == 0 {
 			m.focusBookmarks = false
