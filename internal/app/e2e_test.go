@@ -1705,3 +1705,87 @@ func TestE2E_CrossTrackChapterSeek(t *testing.T) {
 	// Verify: API call was made for new play session
 	assertAPICallMade(t, log, "POST", "/api/items/item-multitrack/play")
 }
+
+// ---------------------------------------------------------------------------
+// E2E: Position tick converts track-relative to book-global
+// ---------------------------------------------------------------------------
+
+func TestE2E_MultiTrackPositionTick(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 200, duration: 1800}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up: playing track 2 (startOffset=1800)
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 2000.0 // book-global
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 1800.0
+	m.trackDuration = 1800.0
+	m.playGeneration = 1
+
+	// mpv reports position 250 (track-relative, i.e. 250s into track 2)
+	res, _ := m.Update(player.PositionMsg{Position: 250.0, Duration: 1800.0, Paused: false, Generation: 1})
+	m = res.(Model)
+
+	// Player position should be book-global: 250 + 1800 = 2050
+	if m.player.Position != 2050.0 {
+		t.Errorf("position = %f, want 2050.0 (book-global)", m.player.Position)
+	}
+
+	// Duration should NOT be overwritten by mpv's track duration
+	if m.player.Duration != 3600.0 {
+		t.Errorf("duration = %f, want 3600.0 (book-global, not track duration)", m.player.Duration)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// E2E: Sync sends book-global position for multi-track
+// ---------------------------------------------------------------------------
+
+func TestE2E_MultiTrackSyncPosition(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 300, duration: 1800}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up: playing track 2 (startOffset=1800), book-global position 2100
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 2100.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 1800.0
+	m.trackDuration = 1800.0
+
+	// Trigger sync
+	res, cmd := m.Update(SyncTickMsg{})
+	m = res.(Model)
+	executeBatchCmds(cmd)
+
+	// Verify sync API was called
+	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/sync")
+
+	// Verify the synced position is book-global (2100, not track-relative 300)
+	reqs := log.get()
+	for _, r := range reqs {
+		if r.Method == "POST" && strings.Contains(r.Path, "/sync") {
+			if ct, ok := r.Body["currentTime"].(float64); ok {
+				if ct != 2100.0 {
+					t.Errorf("synced currentTime = %f, want 2100.0 (book-global)", ct)
+				}
+			}
+			break
+		}
+	}
+}
