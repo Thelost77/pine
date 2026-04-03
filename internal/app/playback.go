@@ -188,10 +188,14 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			if m.player.Duration > 0 && targetPos >= m.player.Duration-trackEndRolloverSlack {
 				m.player.Position = m.player.Duration
 				logger.Info("track ended on final segment, stopping playback", "position", m.player.Position, "trackEnd", targetPos, "duration", m.player.Duration)
-				return m.stopPlayback()
+				return m.handlePlaybackCompleted()
 			}
 			logger.Info("track ended, advancing playback", "from", m.player.Position, "to", targetPos, "trackStart", m.trackStartOffset, "trackDuration", m.trackDuration)
 			return m.restartPlaybackAt(targetPos)
+		}
+		if m.didPlaybackComplete(msg.Err) {
+			logger.Info("playback completed, advancing queue if available", "position", m.player.Position, "duration", m.player.Duration)
+			return m.handlePlaybackCompleted()
 		}
 
 		// If mpv exited or errored, clean up session
@@ -242,6 +246,16 @@ func (m Model) trackEndRolloverTarget(err error) (float64, bool) {
 		return 0, false
 	}
 	return targetPos, true
+}
+
+func (m Model) didPlaybackComplete(err error) bool {
+	if err == nil || m.player.Duration <= 0 {
+		return false
+	}
+	if !strings.Contains(err.Error(), "closed mpv client") {
+		return false
+	}
+	return m.player.Position >= m.player.Duration-trackEndRolloverSlack
 }
 
 func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
@@ -303,6 +317,32 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 		}
 		return playMsg
 	}
+}
+
+func (m Model) handlePlaybackCompleted() (Model, tea.Cmd) {
+	next, hasNext := m.dequeueQueueEntry()
+	m, stopCmd := m.stopPlayback()
+	if !hasNext {
+		return m, stopCmd
+	}
+
+	var nextCmd tea.Cmd
+	if next.Episode != nil {
+		m, nextCmd = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
+			Item:    next.Item,
+			Episode: *next.Episode,
+		})
+	} else {
+		m, nextCmd = m.handlePlayCmd(detail.PlayCmd{Item: next.Item})
+	}
+
+	if stopCmd == nil {
+		return m, nextCmd
+	}
+	if nextCmd == nil {
+		return m, stopCmd
+	}
+	return m, tea.Batch(stopCmd, nextCmd)
 }
 
 func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemID, title string, duration, bookPos float64) (PlaySessionMsg, error) {

@@ -691,6 +691,175 @@ func TestPlaybackPositionErrorAtFinalTrackEndStopsPlayback(t *testing.T) {
 	}
 }
 
+func TestPlaybackCompletionStartsNextQueuedItem(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-next/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-next",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-next/audio.mp3", Duration: 5400},
+				},
+				CurrentTime: 0,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	nextDuration := 5400.0
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Title = "Current Book"
+	m.player.Position = 3600
+	m.player.Duration = 3600
+	m.trackStartOffset = 1800
+	m.trackDuration = 1800
+	m.playGeneration = 1
+	m.queue = []QueueEntry{{
+		Item: abs.LibraryItem{
+			ID:        "item-next",
+			LibraryID: "lib-books-001",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:    "Next Book",
+					Duration: &nextDuration,
+				},
+			},
+		},
+	}}
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	m = feedCmdChain(m, cmd, 5)
+
+	if m.sessionID != "sess-next" {
+		t.Fatalf("sessionID = %q, want sess-next", m.sessionID)
+	}
+	if m.itemID != "item-next" {
+		t.Fatalf("itemID = %q, want item-next", m.itemID)
+	}
+	if len(m.queue) != 0 {
+		t.Fatalf("queue len = %d, want 0 after consuming next item", len(m.queue))
+	}
+}
+
+func TestManualStopPreservesQueue(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Position = 120
+	m.player.Duration = 3600
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "item-next"}}}
+
+	m, cmd := m.stopPlayback()
+	executeBatchCmds(cmd)
+
+	if len(m.queue) != 1 {
+		t.Fatalf("queue len = %d, want 1", len(m.queue))
+	}
+	if m.queue[0].Item.ID != "item-next" {
+		t.Fatalf("queued item = %q, want item-next", m.queue[0].Item.ID)
+	}
+}
+
+func TestPlaybackErrorDoesNotConsumeQueue(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Position = 120
+	m.player.Duration = 3600
+	m.playGeneration = 1
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "item-next"}}}
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("socket disconnected"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	executeBatchCmds(cmd)
+
+	if len(m.queue) != 1 {
+		t.Fatalf("queue len = %d, want 1", len(m.queue))
+	}
+	if m.itemID != "" {
+		t.Fatalf("itemID = %q, want playback to stop", m.itemID)
+	}
+}
+
 // TestPlaybackMultipleSyncCycles verifies that multiple sync ticks
 // accumulate correctly and update lastSyncPos.
 func TestPlaybackMultipleSyncCycles(t *testing.T) {

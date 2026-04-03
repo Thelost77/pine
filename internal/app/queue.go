@@ -22,6 +22,15 @@ func (m *Model) enqueueQueueEntry(entry QueueEntry, front bool) {
 	m.queue = append(filtered, cloneQueueEntry(entry))
 }
 
+func (m *Model) dequeueQueueEntry() (QueueEntry, bool) {
+	if len(m.queue) == 0 {
+		return QueueEntry{}, false
+	}
+	entry := cloneQueueEntry(m.queue[0])
+	m.queue = append([]QueueEntry(nil), m.queue[1:]...)
+	return entry, true
+}
+
 func queueEntryKey(entry QueueEntry) string {
 	if entry.Episode != nil {
 		return entry.Item.ID + "::" + entry.Episode.ID
