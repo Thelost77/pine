@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,23 @@ import (
 
 	"github.com/Thelost77/pine/internal/logger"
 )
+
+// HTTPStatusError wraps a non-2xx HTTP response status.
+type HTTPStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("unexpected status %d: %s", e.StatusCode, e.Body)
+}
+
+// IsHTTPStatus reports whether err or one of its wrapped errors is an HTTPStatusError
+// for the given status code.
+func IsHTTPStatus(err error, statusCode int) bool {
+	var statusErr *HTTPStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == statusCode
+}
 
 // Client is an HTTP client for the Audiobookshelf API.
 type Client struct {
@@ -67,7 +85,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logger.Error("http request returned unexpected status", "method", method, "path", path, "status", resp.StatusCode, "body", truncateLogBody(data), "duration", time.Since(start))
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(data))
+		return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Body: string(data)}
 	}
 
 	logger.Debug("http request completed", "method", method, "path", path, "status", resp.StatusCode, "duration", time.Since(start))

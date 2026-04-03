@@ -19,6 +19,9 @@ func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]Bookmark, e
 	path := fmt.Sprintf("/api/me/progress/%s", itemID)
 	resp, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
+		if IsHTTPStatus(err, http.StatusNotFound) {
+			return []Bookmark{}, nil
+		}
 		return nil, fmt.Errorf("get bookmarks: %w", err)
 	}
 

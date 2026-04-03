@@ -144,3 +144,46 @@ func TestGetBookmarksEmptyResponse(t *testing.T) {
 		t.Errorf("expected 0 bookmarks, got %d", len(bookmarks))
 	}
 }
+
+func TestGetBookmarksNotFoundReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	bookmarks, err := c.GetBookmarks(context.Background(), "li-404")
+	if err != nil {
+		t.Fatalf("GetBookmarks() error: %v", err)
+	}
+	if len(bookmarks) != 0 {
+		t.Errorf("expected 0 bookmarks, got %d", len(bookmarks))
+	}
+}
+
+func TestGetBookmarksServerErrorReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	_, err := c.GetBookmarks(context.Background(), "li-500")
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestGetBookmarksMalformedResponseReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"bookmarks":`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	_, err := c.GetBookmarks(context.Background(), "li-bad")
+	if err == nil {
+		t.Fatal("expected error for malformed response")
+	}
+}
