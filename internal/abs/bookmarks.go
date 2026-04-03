@@ -54,6 +54,20 @@ func (c *Client) CreateBookmark(ctx context.Context, itemID string, time float64
 	return nil
 }
 
+// UpdateBookmark updates the title of an existing bookmark.
+func (c *Client) UpdateBookmark(ctx context.Context, itemID string, time float64, title string) error {
+	path := fmt.Sprintf("/api/me/item/%s/bookmark", itemID)
+	body := createBookmarkRequest{
+		Time:  time,
+		Title: title,
+	}
+	_, err := c.do(ctx, http.MethodPatch, path, body)
+	if err != nil {
+		return fmt.Errorf("update bookmark: %w", err)
+	}
+	return nil
+}
+
 // DeleteBookmark deletes a bookmark from a library item at the given time.
 func (c *Client) DeleteBookmark(ctx context.Context, itemID string, time float64) error {
 	timeStr := strconv.FormatFloat(time, 'f', -1, 64)

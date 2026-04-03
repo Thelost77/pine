@@ -56,41 +56,18 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		if len(session.AudioTracks) == 0 {
-			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
+		playMsg, err := buildBookPlaySessionMsg(
+			client,
+			session,
+			item.ID,
+			item.Media.Metadata.Title,
+			item.Media.TotalDuration(),
+			session.CurrentTime,
+		)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
 		}
-
-		// Find the correct track for the current position.
-		// For multi-track audiobooks, currentTime is the total book position
-		// and each track has a StartOffset within the book.
-		track := session.AudioTracks[0]
-		seekTime := session.CurrentTime
-		for _, t := range session.AudioTracks {
-			if session.CurrentTime >= t.StartOffset && session.CurrentTime < t.StartOffset+t.Duration {
-				track = t
-				seekTime = session.CurrentTime - t.StartOffset
-				break
-			}
-		}
-		logger.Info("track selected for playback", "itemID", item.ID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", session.CurrentTime, "seekTime", seekTime)
-
-		streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
-
-		dur := item.Media.TotalDuration()
-
-		return PlaySessionMsg{
-			Session: PlaySessionData{
-				SessionID:        session.ID,
-				ItemID:           item.ID,
-				CurrentTime:      seekTime,
-				Duration:         dur,
-				Title:            item.Media.Metadata.Title,
-				Chapters:         playSessionChapters(session),
-				TrackStartOffset: track.StartOffset,
-				TrackDuration:    track.Duration,
-			},
-			StreamURL: streamURL,
-		}
+		return playMsg
 	}
 
 	if stopCmd != nil {
@@ -297,39 +274,68 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		if len(session.AudioTracks) == 0 {
-			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
+		playMsg, err := buildBookPlaySessionMsg(client, session, itemID, title, duration, targetPos)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
 		}
+		return playMsg
+	}
+}
 
-		// Use our target position for track selection, not session.CurrentTime
-		// (ABS may not have processed our progress update yet).
-		track := session.AudioTracks[0]
-		seekTime := targetPos
-		for _, t := range session.AudioTracks {
-			if targetPos >= t.StartOffset && targetPos < t.StartOffset+t.Duration {
-				track = t
-				seekTime = targetPos - t.StartOffset
-				break
-			}
+func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos float64) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		session, err := client.StartPlaySession(context.Background(), item.ID, device)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
 		}
-		logger.Info("track selected for restarted session", "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "seekTime", seekTime, "targetPosition", targetPos)
+		playMsg, err := buildBookPlaySessionMsg(
+			client,
+			session,
+			item.ID,
+			item.Media.Metadata.Title,
+			item.Media.TotalDuration(),
+			bookPos,
+		)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		return playMsg
+	}
+}
 
-		streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
+func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemID, title string, duration, bookPos float64) (PlaySessionMsg, error) {
+	if len(session.AudioTracks) == 0 {
+		return PlaySessionMsg{}, fmt.Errorf("no audio tracks")
+	}
 
-		return PlaySessionMsg{
-			Session: PlaySessionData{
-				SessionID:        session.ID,
-				ItemID:           itemID,
-				CurrentTime:      seekTime,
-				Duration:         duration,
-				Title:            title,
-				Chapters:         playSessionChapters(session),
-				TrackStartOffset: track.StartOffset,
-				TrackDuration:    track.Duration,
-			},
-			StreamURL: streamURL,
+	track := session.AudioTracks[0]
+	seekTime := bookPos
+	for _, t := range session.AudioTracks {
+		if bookPos >= t.StartOffset && bookPos < t.StartOffset+t.Duration {
+			track = t
+			seekTime = bookPos - t.StartOffset
+			break
 		}
 	}
+	logger.Info("track selected for playback", "itemID", itemID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", bookPos, "seekTime", seekTime)
+
+	streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
+
+	return PlaySessionMsg{
+		Session: PlaySessionData{
+			SessionID:        session.ID,
+			ItemID:           itemID,
+			CurrentTime:      seekTime,
+			Duration:         duration,
+			Title:            title,
+			Chapters:         playSessionChapters(session),
+			TrackStartOffset: track.StartOffset,
+			TrackDuration:    track.Duration,
+		},
+		StreamURL: streamURL,
+	}, nil
 }
 
 // handleSyncTick syncs progress with ABS and persists to DB.

@@ -1,9 +1,12 @@
 package detail
 
 import (
+	"strings"
+
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -26,6 +29,7 @@ type AddBookmarkCmd struct {
 
 // SeekToBookmarkCmd requests seeking the player to a bookmark's timestamp.
 type SeekToBookmarkCmd struct {
+	Item abs.LibraryItem
 	Time float64
 }
 
@@ -33,6 +37,13 @@ type SeekToBookmarkCmd struct {
 type DeleteBookmarkCmd struct {
 	ItemID   string
 	Bookmark abs.Bookmark
+}
+
+// UpdateBookmarkCmd requests updating a bookmark title.
+type UpdateBookmarkCmd struct {
+	ItemID   string
+	Bookmark abs.Bookmark
+	Title    string
 }
 
 // SeekToChapterCmd requests seeking the player to a chapter's start time.
@@ -68,6 +79,7 @@ type KeyMap struct {
 	Back         key.Binding
 	Enter        key.Binding
 	Delete       key.Binding
+	Edit         key.Binding
 	ToggleFocus  key.Binding
 	MarkFinished key.Binding
 }
@@ -103,6 +115,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("d"),
 			key.WithHelp("d", "delete bookmark"),
 		),
+		Edit: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit bookmark"),
+		),
 		ToggleFocus: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "toggle bookmarks"),
@@ -128,6 +144,9 @@ type Model struct {
 	bookmarkLoadErr  error
 	selectedBookmark int
 	focusBookmarks   bool
+	editingBookmark  bool
+	bookmarkEditErr  string
+	bookmarkInput    textinput.Model
 	episodes         []abs.PodcastEpisode
 	selectedEpisode  int
 	focusEpisodes    bool
@@ -135,14 +154,26 @@ type Model struct {
 
 // New creates a new detail screen model for the given library item.
 func New(styles ui.Styles, item abs.LibraryItem) Model {
+	input := textinput.New()
+	input.Placeholder = "Bookmark title"
+	input.CharLimit = 256
+	input.Prompt = ""
+
 	return Model{
 		item:             item,
 		keys:             DefaultKeyMap(),
 		styles:           styles,
+		bookmarkInput:    input,
 		selectedBookmark: 0,
 		episodes:         item.Media.Episodes,
 		selectedEpisode:  0,
 		focusEpisodes:    item.MediaType == "podcast" && len(item.Media.Episodes) > 0,
+	}
+}
+
+func (m *Model) refreshContent() {
+	if m.ready {
+		m.viewport.SetContent(m.buildContent())
 	}
 }
 
@@ -151,15 +182,15 @@ func (m *Model) SetBookmarks(bookmarks []abs.Bookmark) {
 	m.bookmarks = bookmarks
 	m.bookmarksLoaded = true
 	m.bookmarkLoadErr = nil
+	m.bookmarkEditErr = ""
 	if m.selectedBookmark >= len(bookmarks) {
 		m.selectedBookmark = max(0, len(bookmarks)-1)
 	}
 	if len(bookmarks) == 0 {
 		m.focusBookmarks = false
+		m.editingBookmark = false
 	}
-	if m.ready {
-		m.viewport.SetContent(m.buildContent())
-	}
+	m.refreshContent()
 }
 
 // SetSize updates the terminal dimensions for the detail screen.
@@ -186,6 +217,7 @@ func (m *Model) SetSize(width, height int) {
 		m.viewport.Height = vpHeight
 		m.viewport.SetContent(m.buildContent())
 	}
+	m.bookmarkInput.Width = m.bookmarkEditWidth()
 }
 
 // Item returns the library item being displayed.
@@ -242,6 +274,16 @@ func (m Model) FocusBookmarks() bool {
 	return m.focusBookmarks
 }
 
+// EditingBookmark returns whether bookmark title editing is active.
+func (m Model) EditingBookmark() bool {
+	return m.editingBookmark
+}
+
+// BookmarkEditError returns the current bookmark edit validation error.
+func (m Model) BookmarkEditError() string {
+	return m.bookmarkEditErr
+}
+
 // Init returns the initial command (none needed).
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -264,19 +306,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.bookmarkLoadErr = msg.Err
 		if msg.Err == nil {
 			m.bookmarks = msg.Bookmarks
+			m.editingBookmark = false
+			m.bookmarkEditErr = ""
 			if m.selectedBookmark >= len(m.bookmarks) {
 				m.selectedBookmark = max(0, len(m.bookmarks)-1)
 			}
 		}
 		if !m.hasFocusableBookmarks() {
 			m.focusBookmarks = false
+			m.editingBookmark = false
+			m.bookmarkEditErr = ""
 		}
-		if m.ready {
-			m.viewport.SetContent(m.buildContent())
-		}
+		m.refreshContent()
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.editingBookmark {
+			return m.updateBookmarkEditor(msg)
+		}
 		switch {
 		case key.Matches(msg, m.keys.Back):
 			return m, func() tea.Msg {
@@ -320,9 +367,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 			if m.focusBookmarks && m.hasFocusableBookmarks() && m.selectedBookmark < len(m.bookmarks) {
+				item := m.item
 				bm := m.bookmarks[m.selectedBookmark]
 				return m, func() tea.Msg {
-					return SeekToBookmarkCmd{Time: bm.Time}
+					return SeekToBookmarkCmd{Item: item, Time: bm.Time}
 				}
 			}
 			if !m.focusBookmarks && !m.focusEpisodes {
@@ -339,23 +387,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return DeleteBookmarkCmd{ItemID: itemID, Bookmark: bm}
 				}
 			}
+		case key.Matches(msg, m.keys.Edit):
+			if m.focusBookmarks && m.hasFocusableBookmarks() && m.selectedBookmark < len(m.bookmarks) {
+				cmd := m.startBookmarkEdit()
+				return m, cmd
+			}
 		case key.Matches(msg, m.keys.Up):
 			if m.focusEpisodes && len(m.episodes) > 0 {
 				if m.selectedEpisode > 0 {
 					m.selectedEpisode--
 				}
-				if m.ready {
-					m.viewport.SetContent(m.buildContent())
-				}
+				m.refreshContent()
 				return m, nil
 			}
 			if m.focusBookmarks && m.hasFocusableBookmarks() {
 				if m.selectedBookmark > 0 {
 					m.selectedBookmark--
 				}
-				if m.ready {
-					m.viewport.SetContent(m.buildContent())
-				}
+				m.refreshContent()
 				return m, nil
 			}
 		case key.Matches(msg, m.keys.Down):
@@ -363,21 +412,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				if m.selectedEpisode < len(m.episodes)-1 {
 					m.selectedEpisode++
 				}
-				if m.ready {
-					m.viewport.SetContent(m.buildContent())
-				}
+				m.refreshContent()
 				return m, nil
 			}
 			if m.focusBookmarks && m.hasFocusableBookmarks() {
 				if m.selectedBookmark < len(m.bookmarks)-1 {
 					m.selectedBookmark++
 				}
-				if m.ready {
-					m.viewport.SetContent(m.buildContent())
-				}
+				m.refreshContent()
 				return m, nil
 			}
 		}
+	}
+
+	if m.editingBookmark {
+		var cmd tea.Cmd
+		m.bookmarkInput, cmd = m.bookmarkInput.Update(msg)
+		m.refreshContent()
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -407,6 +459,74 @@ func (m *Model) cycleFocus() {
 
 func (m Model) hasFocusableBookmarks() bool {
 	return m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
+}
+
+func (m Model) bookmarkEditWidth() int {
+	width := m.width - 20
+	if width < 12 {
+		width = 12
+	}
+	if width > 48 {
+		width = 48
+	}
+	return width
+}
+
+func (m *Model) startBookmarkEdit() tea.Cmd {
+	if !m.hasFocusableBookmarks() || m.selectedBookmark >= len(m.bookmarks) {
+		return nil
+	}
+
+	ti := textinput.New()
+	ti.Placeholder = "Bookmark title"
+	ti.CharLimit = 256
+	ti.Prompt = ""
+	ti.Width = m.bookmarkEditWidth()
+	ti.SetValue(m.bookmarks[m.selectedBookmark].Title)
+
+	m.bookmarkInput = ti
+	m.editingBookmark = true
+	m.bookmarkEditErr = ""
+	m.refreshContent()
+	return m.bookmarkInput.Focus()
+}
+
+func (m Model) updateBookmarkEditor(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		m.editingBookmark = false
+		m.bookmarkEditErr = ""
+		m.refreshContent()
+		return m, nil
+	case key.Matches(msg, m.keys.Enter):
+		title := strings.TrimSpace(m.bookmarkInput.Value())
+		if title == "" {
+			m.bookmarkEditErr = "Bookmark title cannot be empty"
+			m.refreshContent()
+			return m, nil
+		}
+		bm := m.bookmarks[m.selectedBookmark]
+		if title == bm.Title {
+			m.editingBookmark = false
+			m.bookmarkEditErr = ""
+			m.refreshContent()
+			return m, nil
+		}
+		itemID := m.item.ID
+		m.bookmarkEditErr = ""
+		m.refreshContent()
+		return m, func() tea.Msg {
+			return UpdateBookmarkCmd{ItemID: itemID, Bookmark: bm, Title: title}
+		}
+	default:
+		if msg.Type != tea.KeyCtrlC {
+			m.bookmarkEditErr = ""
+		}
+		var cmd tea.Cmd
+		m.bookmarkInput, cmd = m.bookmarkInput.Update(msg)
+		m.refreshContent()
+		return m, cmd
+	}
 }
 
 // headerHeight returns the number of lines used by the fixed header section.

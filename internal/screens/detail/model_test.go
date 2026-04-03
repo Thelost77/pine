@@ -465,6 +465,9 @@ func TestEnterKey_SeeksToBookmark(t *testing.T) {
 	if seekMsg.Time != 3600 {
 		t.Errorf("expected seek time 3600, got %f", seekMsg.Time)
 	}
+	if seekMsg.Item.ID != "li-001" {
+		t.Errorf("expected seek item ID li-001, got %s", seekMsg.Item.ID)
+	}
 }
 
 func TestEnterKey_NoActionWithoutFocus(t *testing.T) {
@@ -504,6 +507,83 @@ func TestDKey_DeletesBookmark(t *testing.T) {
 	}
 	if delMsg.Bookmark.Title != "Key moment" {
 		t.Errorf("expected bookmark title 'Key moment', got %s", delMsg.Bookmark.Title)
+	}
+}
+
+func TestEKey_StartsBookmarkEdit(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	if !m.EditingBookmark() {
+		t.Fatal("expected bookmark editing to start")
+	}
+	if m.bookmarkInput.Value() != "Start of journey" {
+		t.Fatalf("edit value = %q, want Start of journey", m.bookmarkInput.Value())
+	}
+	if cmd == nil {
+		t.Fatal("expected focus command when bookmark editing starts")
+	}
+}
+
+func TestEnterKey_UpdatesBookmarkTitleWhileEditing(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m.bookmarkInput.SetValue("Renamed moment")
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected update bookmark command")
+	}
+	msg := cmd()
+	updateMsg, ok := msg.(UpdateBookmarkCmd)
+	if !ok {
+		t.Fatalf("expected UpdateBookmarkCmd, got %T", msg)
+	}
+	if updateMsg.ItemID != "li-001" {
+		t.Fatalf("itemID = %q, want li-001", updateMsg.ItemID)
+	}
+	if updateMsg.Bookmark.Time != 3600 {
+		t.Fatalf("bookmark time = %f, want 3600", updateMsg.Bookmark.Time)
+	}
+	if updateMsg.Title != "Renamed moment" {
+		t.Fatalf("title = %q, want Renamed moment", updateMsg.Title)
+	}
+}
+
+func TestEscKey_CancelsBookmarkEdit(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.EditingBookmark() {
+		t.Fatal("expected bookmark editing to stop on esc")
+	}
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(BackMsg); ok {
+			t.Fatal("expected esc to cancel bookmark edit, not navigate back")
+		}
+	}
+}
+
+func TestEnterKey_RejectsEmptyBookmarkTitleWhileEditing(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m.bookmarkInput.SetValue("   ")
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("expected no command for empty bookmark title")
+	}
+	if !m.EditingBookmark() {
+		t.Fatal("expected bookmark editing to remain active on validation error")
+	}
+	if m.BookmarkEditError() == "" {
+		t.Fatal("expected validation error for empty bookmark title")
 	}
 }
 
@@ -673,8 +753,25 @@ func TestView_HelpTextChangesWithFocus(t *testing.T) {
 	if !strings.Contains(v, "enter seek") {
 		t.Error("expected help to mention 'enter seek' when bookmarks focused")
 	}
+	if !strings.Contains(v, "e edit") {
+		t.Error("expected help to mention 'e edit' when bookmarks focused")
+	}
 	if !strings.Contains(v, "d delete") {
 		t.Error("expected help to mention 'd delete' when bookmarks focused")
+	}
+}
+
+func TestView_ShowsBookmarkEditInput(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+	v := m.View()
+	if !strings.Contains(v, "✎ 1:00:00") {
+		t.Fatal("expected bookmark edit row in view")
+	}
+	if !strings.Contains(v, "enter save") {
+		t.Fatal("expected edit help text in view")
 	}
 }
 

@@ -262,10 +262,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSeekToBookmark(msg)
 
 	case detail.SeekToChapterCmd:
-		return m.handleSeekToBookmark(detail.SeekToBookmarkCmd{Time: msg.Time})
+		return m.handleSeekToBookmark(detail.SeekToBookmarkCmd{Item: m.detail.Item(), Time: msg.Time})
 
 	case detail.DeleteBookmarkCmd:
 		return m.handleDeleteBookmark(msg)
+
+	case detail.UpdateBookmarkCmd:
+		return m.handleUpdateBookmark(msg)
 
 	case detail.BookmarksUpdatedMsg:
 		m.detail, _ = m.detail.Update(msg)

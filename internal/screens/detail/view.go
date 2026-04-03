@@ -127,6 +127,14 @@ func (m Model) buildContent() string {
 		default:
 			for i, bm := range m.bookmarks {
 				ts := ui.FormatTimestamp(bm.Time)
+				if m.editingBookmark && i == m.selectedBookmark {
+					line := fmt.Sprintf("  ✎ %s  %s", ts, m.bookmarkInput.View())
+					sections = append(sections, line)
+					if m.bookmarkEditErr != "" {
+						sections = append(sections, "  "+m.styles.Error.Render(m.bookmarkEditErr))
+					}
+					continue
+				}
 				line := fmt.Sprintf("  🔖 %s  %s", ts, bm.Title)
 				if m.focusBookmarks && i == m.selectedBookmark {
 					line = m.styles.Selected.Render(fmt.Sprintf("🔖 %s  %s", ts, bm.Title))
@@ -147,6 +155,9 @@ func (m Model) buildContent() string {
 // helpText returns context-sensitive help text based on current state.
 func (m Model) helpText() string {
 	hasBookmarkFocus := m.bookmarkLoadErr == nil && len(m.bookmarks) > 0
+	if m.editingBookmark {
+		return "enter save • esc cancel • type bookmark title"
+	}
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if m.focusEpisodes {
 			if hasBookmarkFocus {
@@ -155,7 +166,7 @@ func (m Model) helpText() string {
 			return "enter play episode • space/p pause • j/k navigate • tab unfocus • q/h back"
 		}
 		if m.focusBookmarks && hasBookmarkFocus {
-			return "enter seek • d delete • j/k navigate • tab unfocus • q/h back"
+			return "enter seek • e edit • d delete • j/k navigate • tab unfocus • q/h back"
 		}
 		if hasBookmarkFocus {
 			return "space/p play • tab focus episodes/bookmarks • b bookmark • q/h back"
@@ -169,7 +180,7 @@ func (m Model) helpText() string {
 		return "b bookmark • q/h back"
 	}
 	if m.focusBookmarks && hasBookmarkFocus {
-		return "enter seek • d delete • j/k navigate • tab unfocus • b bookmark • q/h back"
+		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark • q/h back"
 	}
 	if hasBookmarkFocus {
 		return "space/p play • b bookmark • tab focus bookmarks • j/k scroll • q/h back"

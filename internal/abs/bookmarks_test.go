@@ -126,6 +126,42 @@ func TestCreateBookmarkHTTP(t *testing.T) {
 	}
 }
 
+func TestUpdateBookmarkHTTP(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me/item/li-001/bookmark" {
+			t.Errorf("path = %q, want /api/me/item/li-001/bookmark", r.URL.Path)
+		}
+		if r.Method != http.MethodPatch {
+			t.Errorf("method = %q, want PATCH", r.Method)
+		}
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(userBookmarksFixture)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	err := c.UpdateBookmark(context.Background(), "li-001", 300.5, "Renamed passage")
+	if err != nil {
+		t.Fatalf("UpdateBookmark() error: %v", err)
+	}
+
+	var body struct {
+		Time  float64 `json:"time"`
+		Title string  `json:"title"`
+	}
+	if err := json.Unmarshal(capturedBody, &body); err != nil {
+		t.Fatalf("failed to unmarshal request body: %v", err)
+	}
+	if body.Time != 300.5 {
+		t.Errorf("time = %f, want 300.5", body.Time)
+	}
+	if body.Title != "Renamed passage" {
+		t.Errorf("title = %q, want %q", body.Title, "Renamed passage")
+	}
+}
+
 func TestDeleteBookmarkHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/me/item/li-001/bookmark/300.5" {

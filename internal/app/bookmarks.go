@@ -46,7 +46,10 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 // handleSeekToBookmark seeks the player to a bookmark's timestamp (book-global).
 func (m Model) handleSeekToBookmark(msg detail.SeekToBookmarkCmd) (Model, tea.Cmd) {
 	if !m.isPlaying() {
-		return m, nil
+		if m.client == nil || msg.Item.ID == "" {
+			return m, nil
+		}
+		return m, m.startPlaybackAtBookPositionCmd(msg.Item, msg.Time)
 	}
 	return m.seekToBookGlobalPosition(msg.Time)
 }
@@ -62,6 +65,30 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 
 	return m, func() tea.Msg {
 		err := client.DeleteBookmark(context.Background(), itemID, bmTime)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
+		if err != nil {
+			return detail.BookmarksUpdatedMsg{Err: err}
+		}
+		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
+		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
+	}
+}
+
+// handleUpdateBookmark updates a bookmark title and refreshes the list.
+func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cmd) {
+	if m.client == nil {
+		return m, nil
+	}
+	client := m.client
+	itemID := msg.ItemID
+	bmTime := msg.Bookmark.Time
+	title := msg.Title
+
+	return m, func() tea.Msg {
+		err := client.UpdateBookmark(context.Background(), itemID, bmTime, title)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}

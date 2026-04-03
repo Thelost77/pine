@@ -191,6 +191,17 @@ func (s *e2eServerState) deleteBookmark(itemID string, bmTime float64) {
 	}
 }
 
+func (s *e2eServerState) updateBookmark(itemID string, bmTime float64, title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.bookmarks[itemID] {
+		if s.bookmarks[itemID][i].Time == bmTime {
+			s.bookmarks[itemID][i].Title = title
+			return
+		}
+	}
+}
+
 // newFullMockABSServer creates a comprehensive mock ABS server handling all endpoints.
 func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 	items := []abs.LibraryItem{
@@ -376,6 +387,18 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 					Time:      bmTime,
 					CreatedAt: time.Now().UnixMilli(),
 				})
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+
+		// --- Update bookmark ---
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/bookmark"):
+			parts := strings.Split(r.URL.Path, "/")
+			if len(parts) >= 6 {
+				itemID := parts[4]
+				bmTime, _ := body["time"].(float64)
+				bmTitle, _ := body["title"].(string)
+				state.updateBookmark(itemID, bmTime, bmTitle)
 			}
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("{}"))

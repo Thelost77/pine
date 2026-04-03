@@ -608,6 +608,94 @@ func TestE2E_BookmarkCRUD(t *testing.T) {
 	}
 }
 
+func TestE2E_BookmarkEnterStartsPlaybackWhenStopped(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-multitrack"] = []abs.Bookmark{
+		testBookmark("Track Two", 2200.0),
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 1800}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	item := testLibraryItem("item-multitrack", "Multi Track Book")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+	m = feedCmdChain(m, cmd, 5)
+
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	if !m.detail.FocusBookmarks() {
+		t.Fatal("expected bookmark focus after Tab")
+	}
+
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
+
+	assertAPICallMade(t, log, "POST", "/api/items/item-multitrack/play")
+	if m.sessionID != "sess-mt-e2e" {
+		t.Fatalf("sessionID = %q, want sess-mt-e2e", m.sessionID)
+	}
+	if m.player.Position != 2200.0 {
+		t.Fatalf("player position = %f, want 2200.0", m.player.Position)
+	}
+	if m.trackStartOffset != 1800.0 {
+		t.Fatalf("trackStartOffset = %f, want 1800.0", m.trackStartOffset)
+	}
+	if !mp.launched {
+		t.Fatal("expected player launch after bookmark enter")
+	}
+}
+
+func TestE2E_BookmarkTitleEdit(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-001"] = []abs.Bookmark{
+		testBookmark("Old title", 300.0),
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 3600}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	item := testLibraryItem("item-001", "The Great Gatsby")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+	m = feedCmdChain(m, cmd, 5)
+
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	m, _ = e2ePressKey(m, 'e')
+	for i := 0; i < len("Old title"); i++ {
+		m, _ = e2ePressSpecial(m, tea.KeyBackspace)
+	}
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Renamed title")})
+	m = res.(Model)
+
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 3)
+
+	assertAPICallMade(t, log, "PATCH", "/api/me/item/item-001/bookmark")
+
+	bms := state.getBookmarks("item-001")
+	if len(bms) != 1 {
+		t.Fatalf("expected 1 bookmark, got %d", len(bms))
+	}
+	if bms[0].Title != "Renamed title" {
+		t.Fatalf("server bookmark title = %q, want Renamed title", bms[0].Title)
+	}
+	if m.detail.Bookmarks()[0].Title != "Renamed title" {
+		t.Fatalf("detail bookmark title = %q, want Renamed title", m.detail.Bookmarks()[0].Title)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E2E: Bookmarks fetched on detail entry
 // ---------------------------------------------------------------------------
