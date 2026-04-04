@@ -105,6 +105,16 @@ func TestViewHintsAdvertiseQueueActionsAndCountOnDetail(t *testing.T) {
 	}
 }
 
+func TestViewHintsAdvertiseSearchOnLibrary(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenLibrary
+
+	hints := m.viewHints()
+	if !containsString(hints, "/ search") {
+		t.Fatalf("library hints should advertise search\n%s", hints)
+	}
+}
+
 func TestHelpOverlayDocumentsChapterOverlay(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.help.Toggle()

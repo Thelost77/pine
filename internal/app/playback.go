@@ -125,7 +125,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				ItemID:           item.ID,
 				EpisodeID:        episode.ID,
 				CurrentTime:      session.CurrentTime,
-				Duration:         episode.Duration,
+				Duration:         resolveEpisodeDuration(episode, session),
 				Title:            episode.Title,
 				Chapters:         playSessionChapters(session),
 				TrackStartOffset: session.AudioTracks[0].StartOffset,
@@ -391,6 +391,27 @@ func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemI
 		},
 		StreamURL: streamURL,
 	}, nil
+}
+
+func resolveEpisodeDuration(episode abs.PodcastEpisode, session *abs.PlaySession) float64 {
+	if episode.Duration > 0 {
+		return episode.Duration
+	}
+	if session != nil && session.MediaMetadata.Duration != nil && *session.MediaMetadata.Duration > 0 {
+		return *session.MediaMetadata.Duration
+	}
+	if session == nil {
+		return 0
+	}
+
+	var duration float64
+	for _, track := range session.AudioTracks {
+		end := track.StartOffset + track.Duration
+		if end > duration {
+			duration = end
+		}
+	}
+	return duration
 }
 
 // handleSyncTick syncs progress with ABS and persists to DB.

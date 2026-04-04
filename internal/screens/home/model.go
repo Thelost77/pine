@@ -229,8 +229,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Search):
 			libID := m.SelectedLibraryID()
+			libMediaType := m.SelectedLibraryMediaType()
 			return m, func() tea.Msg {
-				return NavigateSearchMsg{LibraryID: libID}
+				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
 			}
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
@@ -361,7 +362,8 @@ type NavigateLibraryMsg struct {
 
 // NavigateSearchMsg requests navigation to the search screen.
 type NavigateSearchMsg struct {
-	LibraryID string
+	LibraryID        string
+	LibraryMediaType string
 }
 
 // GoBackMsg requests navigating back from the home screen.
@@ -392,6 +394,18 @@ func (m Model) SelectedLibraryID() string {
 		idx = 0
 	}
 	return m.libraries[idx].ID
+}
+
+// SelectedLibraryMediaType returns the media type of the current library, or empty string.
+func (m Model) SelectedLibraryMediaType() string {
+	if len(m.libraries) == 0 {
+		return ""
+	}
+	idx := m.selectedLibrary
+	if idx >= len(m.libraries) {
+		idx = 0
+	}
+	return m.libraries[idx].MediaType
 }
 
 // updateListTitle updates the list title to show the selected library name.

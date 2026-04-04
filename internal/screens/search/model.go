@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Thelost77/pine/internal/abs"
-	"github.com/Thelost77/pine/internal/ui"
 )
 
-const debounceDelay = 300 * time.Millisecond
+const debounceDelay = 50 * time.Millisecond
 
-// inputHeight is the number of lines reserved for the text input area.
-const inputHeight = 3
+// inputHeight is the number of lines reserved above the results body.
+const inputHeight = 2
 
 // SearchResultsMsg carries the results of a search query.
 type SearchResultsMsg struct {
@@ -30,6 +30,10 @@ type debounceTickMsg struct {
 	seq int
 }
 
+type cachePreparedMsg struct {
+	Err error
+}
+
 // NavigateDetailMsg requests navigation to the detail screen for an item.
 type NavigateDetailMsg struct {
 	Item abs.LibraryItem
@@ -37,7 +41,6 @@ type NavigateDetailMsg struct {
 
 // BackMsg signals that the user wants to leave the search screen.
 type BackMsg struct{}
-
 
 // KeyMap defines keybindings for the search screen.
 type KeyMap struct {
@@ -61,24 +64,25 @@ func DefaultKeyMap() KeyMap {
 
 // Model is the bubbletea model for the search screen.
 type Model struct {
-	input       textinput.Model
-	list        list.Model
-	items       []abs.LibraryItem
-	query       string
-	debounceSeq int
-	loading     bool
-	searched    bool
-	err         error
-	keys        KeyMap
-	width       int
-	height      int
-	styles      ui.Styles
-	client      *abs.Client
-	libraryID   string
+	input            textinput.Model
+	list             list.Model
+	items            []abs.LibraryItem
+	query            string
+	debounceSeq      int
+	loading          bool
+	searched         bool
+	err              error
+	keys             KeyMap
+	width            int
+	height           int
+	styles           ui.Styles
+	cache            *Cache
+	libraryID        string
+	libraryMediaType string
 }
 
 // New creates a new search screen model.
-func New(styles ui.Styles, client *abs.Client, libraryID string) Model {
+func New(styles ui.Styles, cache *Cache, libraryID, libraryMediaType string) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Search audiobooks…"
 	ti.CharLimit = 256
@@ -94,18 +98,20 @@ func New(styles ui.Styles, client *abs.Client, libraryID string) Model {
 
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = "Results"
+	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
 
 	return Model{
-		input:     ti,
-		list:      l,
-		keys:      DefaultKeyMap(),
-		styles:    styles,
-		client:    client,
-		libraryID: libraryID,
+		input:            ti,
+		list:             l,
+		keys:             DefaultKeyMap(),
+		styles:           styles,
+		cache:            cache,
+		libraryID:        libraryID,
+		libraryMediaType: libraryMediaType,
 	}
 }
 
@@ -122,17 +128,28 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command (focus text input cursor).
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	cmds := []tea.Cmd{textinput.Blink}
+	if prepareCmd := m.prepareCmd(); prepareCmd != nil {
+		cmds = append(cmds, prepareCmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages for the search screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case cachePreparedMsg:
+		if msg.Err != nil && m.query != "" {
+			m.err = msg.Err
+			m.loading = false
+		}
+		return m, nil
+
 	case SearchResultsMsg:
-		m.loading = false
 		if msg.Query != m.query {
 			return m, nil
 		}
+		m.loading = false
 		if msg.Err != nil {
 			m.err = msg.Err
 			return m, nil
@@ -188,12 +205,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	if newQuery != prevQuery {
 		m.query = newQuery
-		if m.query == "" {
+		if normalizeQuery(m.query) == "" {
 			m.items = nil
 			m.list.SetItems(nil)
+			m.loading = false
 			m.searched = false
 			m.err = nil
 		} else {
+			m.loading = true
+			m.err = nil
 			m.debounceSeq++
 			seq := m.debounceSeq
 			cmds = append(cmds, tea.Tick(debounceDelay, func(t time.Time) tea.Msg {
@@ -208,44 +228,34 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// searchCmd creates a command that performs a server-side search.
+func (m Model) prepareCmd() tea.Cmd {
+	if m.cache == nil {
+		return nil
+	}
+	cache := m.cache
+	libID := m.libraryID
+	libMediaType := m.libraryMediaType
+	return func() tea.Msg {
+		return cachePreparedMsg{Err: cache.Prepare(context.Background(), libID, libMediaType)}
+	}
+}
+
+// searchCmd creates a command that performs a library-local search.
 func (m *Model) searchCmd(query string) tea.Cmd {
-	if m.client == nil {
+	if m.cache == nil {
 		return func() tea.Msg {
 			return SearchResultsMsg{Query: query, Err: fmt.Errorf("not authenticated")}
 		}
 	}
 	m.loading = true
-	client := m.client
+	cache := m.cache
 	libID := m.libraryID
+	libMediaType := m.libraryMediaType
 	return func() tea.Msg {
-		// Fallback: if no libraryID was provided, fetch the first library
-		if libID == "" {
-			libs, err := client.GetLibraries(context.Background())
-			if err != nil {
-				return SearchResultsMsg{Query: query, Err: fmt.Errorf("fetch libraries: %w", err)}
-			}
-			libs, _ = client.FilterAudioLibraries(context.Background(), libs)
-			if len(libs) == 0 {
-				return SearchResultsMsg{Query: query, Items: nil}
-			}
-			libID = libs[0].ID
-		}
-
-		result, err := client.SearchLibrary(context.Background(), libID, query)
+		items, err := cache.Search(context.Background(), libID, libMediaType, query)
 		if err != nil {
 			return SearchResultsMsg{Query: query, Err: fmt.Errorf("search: %w", err)}
 		}
-
-		// Merge books and podcasts into a single result list
-		items := make([]abs.LibraryItem, 0, len(result.Book)+len(result.Podcast))
-		for _, entry := range result.Book {
-			items = append(items, entry.LibraryItem)
-		}
-		for _, entry := range result.Podcast {
-			items = append(items, entry.LibraryItem)
-		}
-
 		return SearchResultsMsg{Query: query, Items: items}
 	}
 }

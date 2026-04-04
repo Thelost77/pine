@@ -7,26 +7,26 @@ import (
 // View renders the search screen.
 func (m Model) View() string {
 	inputLine := m.input.View()
+	body := m.styles.Muted.Render("Type to search…")
+	normalizedQuery := normalizeQuery(m.query)
 
-	if m.query == "" {
-		hint := m.styles.Muted.Render("Type to search…")
-		return lipgloss.JoinVertical(lipgloss.Left, inputLine, "", hint)
+	if normalizedQuery == "" {
+		body = m.styles.Muted.Render("Type to search…")
+	} else if m.err != nil {
+		body = m.styles.Error.Render("Error: " + m.err.Error())
+	} else if m.searched && len(m.items) == 0 {
+		body = m.styles.Muted.Render("No results found.")
+	} else {
+		body = m.list.View()
 	}
 
-	if m.loading && len(m.items) == 0 {
-		loading := m.styles.Muted.Render("Searching…")
-		return lipgloss.JoinVertical(lipgloss.Left, inputLine, "", loading)
+	if m.width > 0 && m.height > 0 {
+		bodyHeight := m.height - inputHeight
+		if bodyHeight < 1 {
+			bodyHeight = 1
+		}
+		body = lipgloss.Place(m.width, bodyHeight, lipgloss.Left, lipgloss.Top, body)
 	}
 
-	if m.err != nil {
-		errMsg := m.styles.Error.Render("Error: " + m.err.Error())
-		return lipgloss.JoinVertical(lipgloss.Left, inputLine, "", errMsg)
-	}
-
-	if m.searched && len(m.items) == 0 {
-		noResults := m.styles.Muted.Render("No results found.")
-		return lipgloss.JoinVertical(lipgloss.Left, inputLine, "", noResults)
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, inputLine, "", m.list.View())
+	return lipgloss.JoinVertical(lipgloss.Left, inputLine, "", body)
 }

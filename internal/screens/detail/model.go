@@ -272,6 +272,14 @@ func (m Model) Episodes() []abs.PodcastEpisode {
 // SetEpisodes updates the episode list and refreshes the viewport content.
 func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
 	m.episodes = episodes
+	if m.item.RecentEpisode != nil {
+		for i, episode := range episodes {
+			if episode.ID == m.item.RecentEpisode.ID {
+				m.selectedEpisode = i
+				break
+			}
+		}
+	}
 	if m.selectedEpisode >= len(episodes) {
 		m.selectedEpisode = max(0, len(episodes)-1)
 	}

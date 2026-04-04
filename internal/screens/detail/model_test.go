@@ -955,6 +955,30 @@ func TestPodcastTabKey_CyclesEpisodesAndBookmarks(t *testing.T) {
 	}
 }
 
+func TestSetEpisodes_PreservesRecentEpisodeSelection(t *testing.T) {
+	styles := ui.DefaultStyles()
+	item := abs.LibraryItem{
+		ID:        "pod-001",
+		MediaType: "podcast",
+		RecentEpisode: &abs.PodcastEpisode{
+			ID: "ep-2",
+		},
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Podcast Show"},
+		},
+	}
+
+	m := New(styles, item)
+	m.SetEpisodes([]abs.PodcastEpisode{
+		{ID: "ep-1", Title: "Episode One", Duration: 1800},
+		{ID: "ep-2", Title: "Episode Two", Duration: 2400},
+	})
+
+	if m.SelectedEpisode() != 1 {
+		t.Fatalf("selected episode = %d, want 1", m.SelectedEpisode())
+	}
+}
+
 func TestFormatTimestamp(t *testing.T) {
 	tests := []struct {
 		seconds  float64

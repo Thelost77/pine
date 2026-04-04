@@ -32,13 +32,14 @@ type Model struct {
 	screen    Screen
 	backStack []Screen
 
-	login   login.Model
-	home    home.Model
-	library library.Model
-	detail  detail.Model
-	search  search.Model
-	series  series.Model
-	player  player.Model
+	login       login.Model
+	home        home.Model
+	library     library.Model
+	detail      detail.Model
+	search      search.Model
+	searchCache *search.Cache
+	series      series.Model
+	player      player.Model
 
 	// Playback session state
 	sessionID             string
@@ -78,27 +79,29 @@ func New(cfg config.Config, store *db.Store, client *abs.Client) Model {
 // NewWithPlayer creates a new root model with a specific player implementation.
 func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv player.Player) Model {
 	styles := ui.NewStyles(cfg.Theme)
+	searchCache := search.NewCache(client)
 	initialScreen := ScreenLogin
 	if client != nil {
 		initialScreen = ScreenHome
 	}
 	return Model{
-		screen:    initialScreen,
-		backStack: nil,
-		login:     login.New(styles),
-		home:      home.New(styles, client),
-		library:   library.New(styles, client, "", nil),
-		search:    search.New(styles, client, ""),
-		series:    series.New(styles, client, "", "", ""),
-		player:    player.NewModel(mpv, cfg, styles),
-		keys:      DefaultKeyMap(cfg.Keybinds),
-		err:       components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
-		help:      components.NewHelpOverlay(styles),
-		styles:    styles,
-		config:    cfg,
-		db:        store,
-		client:    client,
-		mpv:       mpv,
+		screen:      initialScreen,
+		backStack:   nil,
+		login:       login.New(styles),
+		home:        home.New(styles, client),
+		library:     library.New(styles, client, "", nil),
+		searchCache: searchCache,
+		search:      search.New(styles, searchCache, "", ""),
+		series:      series.New(styles, client, "", "", ""),
+		player:      player.NewModel(mpv, cfg, styles),
+		keys:        DefaultKeyMap(cfg.Keybinds),
+		err:         components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
+		help:        components.NewHelpOverlay(styles),
+		styles:      styles,
+		config:      cfg,
+		db:          store,
+		client:      client,
+		mpv:         mpv,
 	}
 }
 
@@ -136,6 +139,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if components.IsUnauthorized(msg.Err) {
 			logger.Warn("401 unauthorized, redirecting to login")
 			m.client = nil
+			m.searchCache = search.NewCache(nil)
+			m.search = search.New(m.styles, m.searchCache, "", "")
 			m.screen = ScreenLogin
 			m.backStack = nil
 			m.login = login.New(m.styles)
@@ -173,7 +178,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.home = home.New(m.styles, m.client)
 		m.library = library.New(m.styles, m.client, "", nil)
-		m.search = search.New(m.styles, m.client, "")
+		m.searchCache = search.NewCache(m.client)
+		m.search = search.New(m.styles, m.searchCache, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
 		m.login, _ = m.login.Update(msg)
 		m.backStack = nil
@@ -221,7 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.navigate(ScreenLibrary)
 
 	case home.NavigateSearchMsg:
-		m.search = search.New(m.styles, m.client, msg.LibraryID)
+		m.search = search.New(m.styles, m.searchCache, msg.LibraryID, msg.LibraryMediaType)
 		return m.navigate(ScreenSearch)
 
 	case home.GoBackMsg:
@@ -248,6 +254,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.back()
 		}
 		return m, nil
+
+	case library.NavigateSearchMsg:
+		m.search = search.New(m.styles, m.searchCache, msg.LibraryID, msg.LibraryMediaType)
+		return m.navigate(ScreenSearch)
 
 	case EpisodesLoadedMsg:
 		if msg.Err != nil {
@@ -437,6 +447,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err.Dismiss()
 			m.propagateSize()
 			return m, nil
+		}
+		if m.screen == ScreenSearch {
+			if m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
+				if m.isPlaying() {
+					m, stopCmd := m.stopPlayback()
+					return m, tea.Batch(stopCmd, tea.Quit)
+				}
+				return m, tea.Quit
+			}
+			// Search keeps a focused text input, so it must see typed keys before
+			// global playback shortcuts such as chapters/seek can intercept them.
+			return m.updateScreen(msg)
 		}
 		if key.Matches(msg, m.keys.ChapterOverlay) {
 			if m.canOpenChapterOverlay() {

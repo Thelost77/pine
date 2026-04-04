@@ -65,6 +65,16 @@ func newMockABSServer(log *apiLog) *httptest.Server {
 			}
 			json.NewEncoder(w).Encode(resp)
 
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/pod-001/play/ep-001":
+			resp := abs.PlaySession{
+				ID: "sess-ep-abc",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, ContentURL: "/s/item/pod-001/ep-001.mp3", Duration: 1800},
+				},
+				CurrentTime: 340.0,
+			}
+			json.NewEncoder(w).Encode(resp)
+
 		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-abc/sync":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("{}"))
@@ -271,6 +281,45 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	}
 	if m.ActiveScreen() != ScreenHome {
 		t.Errorf("screen = %v, want Home after back", m.ActiveScreen())
+	}
+}
+
+func TestPlayEpisodeCmdUsesSessionDurationWhenEpisodeDurationMissing(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 0, duration: 1800}
+	client := abs.NewClient(srv.URL, "tok")
+	cfg := config.Default()
+	m := NewWithPlayer(cfg, nil, client, mp)
+	m.screen = ScreenDetail
+	m.backStack = []Screen{ScreenHome}
+
+	result, cmd := m.Update(detail.PlayEpisodeCmd{
+		Item: abs.LibraryItem{ID: "pod-001"},
+		Episode: abs.PodcastEpisode{
+			ID:       "ep-001",
+			Title:    "Buggy Episode",
+			Duration: 0,
+		},
+	})
+	m = result.(Model)
+
+	if cmd == nil {
+		t.Fatal("PlayEpisodeCmd should return an async command to start play session")
+	}
+
+	msg := cmd()
+	psMsg, ok := msg.(PlaySessionMsg)
+	if !ok {
+		t.Fatalf("expected PlaySessionMsg, got %T: %+v", msg, msg)
+	}
+	if psMsg.Session.Duration != 1800 {
+		t.Fatalf("session duration = %v, want 1800", psMsg.Session.Duration)
+	}
+	if psMsg.Session.CurrentTime != 340.0 {
+		t.Fatalf("currentTime = %v, want 340", psMsg.Session.CurrentTime)
 	}
 }
 

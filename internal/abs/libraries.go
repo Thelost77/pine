@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/Thelost77/pine/internal/logger"
 )
@@ -89,6 +90,53 @@ func (c *Client) SearchLibrary(ctx context.Context, libraryID, query string) (*S
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
 	return &resp, nil
+}
+
+const podcastSearchPageLimit = 100
+
+// SearchPodcastEpisodes scans podcast library items and returns episode-level prefix hits.
+func (c *Client) SearchPodcastEpisodes(ctx context.Context, libraryID, query string) ([]LibraryItem, error) {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	if normalized == "" {
+		return nil, nil
+	}
+
+	page := 0
+	items := make([]LibraryItem, 0)
+	for {
+		resp, err := c.GetLibraryItems(ctx, libraryID, page, podcastSearchPageLimit)
+		if err != nil {
+			return nil, fmt.Errorf("list podcast library items: %w", err)
+		}
+
+		for _, libraryItem := range resp.Results {
+			item, err := c.GetLibraryItem(ctx, libraryItem.ID)
+			if err != nil {
+				return nil, fmt.Errorf("expand podcast %s: %w", libraryItem.ID, err)
+			}
+			for _, episode := range item.Media.Episodes {
+				if !strings.HasPrefix(strings.ToLower(episode.Title), normalized) {
+					continue
+				}
+				resultItem := *item
+				ep := episode
+				resultItem.RecentEpisode = &ep
+				resultItem.Media.Episodes = []PodcastEpisode{ep}
+				items = append(items, resultItem)
+			}
+		}
+
+		if len(resp.Results) == 0 || len(resp.Results) < podcastSearchPageLimit {
+			break
+		}
+		loaded := (page + 1) * podcastSearchPageLimit
+		if resp.Total > 0 && loaded >= resp.Total {
+			break
+		}
+		page++
+	}
+
+	return items, nil
 }
 
 // GetLibraryItem returns a single library item by ID with full details (including episodes for podcasts).

@@ -2,16 +2,18 @@ package search
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newTestModel() Model {
-	return New(ui.DefaultStyles(), nil, "lib-001")
+	return New(ui.DefaultStyles(), NewCache(nil), "lib-001", "book")
 }
 
 func ptrString(s string) *string  { return &s }
@@ -33,6 +35,13 @@ func makeItems(n int) []abs.LibraryItem {
 		}
 	}
 	return items
+}
+
+func viewLineCount(v string) int {
+	if v == "" {
+		return 0
+	}
+	return strings.Count(v, "\n") + 1
 }
 
 func TestNew(t *testing.T) {
@@ -251,14 +260,19 @@ func TestView_EmptyQuery(t *testing.T) {
 	}
 }
 
-func TestView_Loading(t *testing.T) {
+func TestView_LoadingKeepsPreviousResultsVisible(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
 	m.query = "test"
+	items := makeItems(2)
+	m, _ = m.Update(SearchResultsMsg{Items: items, Query: "test"})
 	m.loading = true
 	v := m.View()
-	if !strings.Contains(v, "Searching") {
-		t.Error("loading view should contain 'Searching'")
+	if !strings.Contains(v, "Book 0") {
+		t.Fatalf("loading view should keep previous results visible\n%s", v)
+	}
+	if strings.Contains(v, "Searching") {
+		t.Fatalf("loading view should not show searching placeholder\n%s", v)
 	}
 }
 
@@ -285,6 +299,52 @@ func TestView_NoResults(t *testing.T) {
 	}
 }
 
+func TestView_WhitespaceQueryShowsIdleHint(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m.query = "   "
+	m.searched = true
+
+	v := m.View()
+	if !strings.Contains(v, "Type to search") {
+		t.Fatalf("whitespace query should show idle hint\n%s", v)
+	}
+	if strings.Contains(v, "No results") {
+		t.Fatalf("whitespace query should not show no-results state\n%s", v)
+	}
+}
+
+func TestView_PendingQueryDoesNotShowResultsTitle(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m.query = "test"
+
+	v := m.View()
+	if strings.Contains(v, "Results") {
+		t.Fatalf("pending query should not show list title\n%s", v)
+	}
+}
+
+func TestView_EmptyQueryFillsSearchHeight(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+
+	if got := viewLineCount(m.View()); got != 24 {
+		t.Fatalf("view height = %d, want 24", got)
+	}
+}
+
+func TestView_NoResultsFillsSearchHeight(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m.query = "test"
+	m.searched = true
+
+	if got := viewLineCount(m.View()); got != 24 {
+		t.Fatalf("view height = %d, want 24", got)
+	}
+}
+
 func TestView_WithResults(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
@@ -294,6 +354,143 @@ func TestView_WithResults(t *testing.T) {
 	v := m.View()
 	if !strings.Contains(v, "Book 0") {
 		t.Error("view should contain result titles")
+	}
+}
+
+func TestSearchCmd_PodcastLibraryReturnsEpisodeHits(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/libraries":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"libraries":[{"id":"lib-pod","name":"Podcasts","mediaType":"podcast"}]}`))
+		case "/api/libraries/lib-pod/items":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"results": [
+					{"id":"pod-001","libraryId":"lib-pod","mediaType":"podcast","media":{"metadata":{"title":"Joe Rogan"}}}
+				],
+				"total": 1,
+				"limit": 100,
+				"page": 0
+			}`))
+		case "/api/items/pod-001":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"id":"pod-001",
+				"libraryId":"lib-pod",
+				"mediaType":"podcast",
+				"media":{
+					"metadata":{"title":"Joe Rogan"},
+					"episodes":[
+						{"id":"ep-001","title":"Joe Rogan Experience #1","duration":3600},
+						{"id":"ep-002","title":"Something Else","duration":1200}
+					]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	m := New(ui.DefaultStyles(), NewCache(abs.NewClient(srv.URL, "tok")), "lib-pod", "podcast")
+	cmd := m.searchCmd("Joe Rogan")
+	if cmd == nil {
+		t.Fatal("expected search command")
+	}
+	msg := cmd()
+	results, ok := msg.(SearchResultsMsg)
+	if !ok {
+		t.Fatalf("expected SearchResultsMsg, got %T", msg)
+	}
+	if results.Err != nil {
+		t.Fatalf("expected no error, got %v", results.Err)
+	}
+	if len(results.Items) != 2 {
+		t.Fatalf("expected 2 episode hits, got %d", len(results.Items))
+	}
+	if results.Items[0].RecentEpisode == nil || results.Items[0].RecentEpisode.Title != "Joe Rogan Experience #1" {
+		t.Fatalf("expected episode hit in RecentEpisode, got %#v", results.Items[0].RecentEpisode)
+	}
+}
+
+func TestSearchCmd_PodcastLibraryMatchesEpisodePrefixWithoutShowMatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/libraries/lib-pod/items":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"results": [
+					{"id":"pod-001","libraryId":"lib-pod","mediaType":"podcast","media":{"metadata":{"title":"Joe Rogan"}}}
+				],
+				"total": 1,
+				"limit": 100,
+				"page": 0
+			}`))
+		case "/api/items/pod-001":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"id":"pod-001",
+				"libraryId":"lib-pod",
+				"mediaType":"podcast",
+				"media":{
+					"metadata":{"title":"Joe Rogan"},
+					"episodes":[
+						{"id":"ep-001","title":"Jason...","duration":3600}
+					]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	m := New(ui.DefaultStyles(), NewCache(abs.NewClient(srv.URL, "tok")), "lib-pod", "podcast")
+	cmd := m.searchCmd("Jas")
+	if cmd == nil {
+		t.Fatal("expected search command")
+	}
+	msg := cmd()
+	results, ok := msg.(SearchResultsMsg)
+	if !ok {
+		t.Fatalf("expected SearchResultsMsg, got %T", msg)
+	}
+	if results.Err != nil {
+		t.Fatalf("expected no error, got %v", results.Err)
+	}
+	if len(results.Items) != 1 {
+		t.Fatalf("expected 1 Jason episode hit, got %d", len(results.Items))
+	}
+	if results.Items[0].RecentEpisode == nil || results.Items[0].RecentEpisode.Title != "Jason..." {
+		t.Fatalf("expected Jason episode hit, got %#v", results.Items[0].RecentEpisode)
+	}
+}
+
+func TestView_WithPodcastEpisodeResultsShowsEpisodeTitleAndPodcastName(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m.query = "joe"
+	items := []abs.LibraryItem{{
+		ID:        "pod-001",
+		MediaType: "podcast",
+		RecentEpisode: &abs.PodcastEpisode{
+			ID:       "ep-001",
+			Title:    "Joe Rogan Experience #1",
+			Duration: 3600,
+		},
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Joe Rogan"},
+		},
+	}}
+	m, _ = m.Update(SearchResultsMsg{Items: items, Query: "joe"})
+
+	view := m.View()
+	if !strings.Contains(view, "Joe Rogan Experience #1") {
+		t.Fatalf("expected episode title in search results\n%s", view)
+	}
+	if !strings.Contains(view, "Joe Rogan") {
+		t.Fatalf("expected podcast name in search results\n%s", view)
 	}
 }
 

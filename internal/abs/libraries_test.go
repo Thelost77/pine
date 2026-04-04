@@ -495,3 +495,117 @@ func TestSearchLibraryHTTP(t *testing.T) {
 		t.Fatalf("expected 1 book, got %d", len(result.Book))
 	}
 }
+
+func TestSearchPodcastEpisodesHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/libraries/lib-pod/items":
+			if r.URL.Query().Get("page") != "0" {
+				t.Errorf("page = %q, want 0", r.URL.Query().Get("page"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"results": [
+					{
+						"id": "pod-001",
+						"libraryId": "lib-pod",
+						"mediaType": "podcast",
+						"media": {"metadata": {"title": "Joe Rogan"}}
+					}
+				],
+				"total": 1,
+				"limit": 100,
+				"page": 0
+			}`))
+		case "/api/libraries/lib-pod/search":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"book":[],"podcast":[]}`))
+		case "/api/items/pod-001":
+			if r.URL.Query().Get("expanded") != "1" {
+				t.Error("expected expanded=1 query param")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"id": "pod-001",
+				"libraryId": "lib-pod",
+				"mediaType": "podcast",
+				"media": {
+					"metadata": {"title": "Joe Rogan"},
+					"episodes": [
+						{"id": "ep-001", "title": "Joe Rogan Experience #1", "duration": 3600},
+						{"id": "ep-002", "title": "Another Show", "duration": 1800},
+						{"id": "ep-003", "title": "Joe Rogan Experience #2", "duration": 4200}
+					]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	items, err := c.SearchPodcastEpisodes(context.Background(), "lib-pod", "Joe Rogan")
+	if err != nil {
+		t.Fatalf("SearchPodcastEpisodes() error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 matching episode hits, got %d", len(items))
+	}
+	if items[0].RecentEpisode == nil || items[0].RecentEpisode.ID != "ep-001" {
+		t.Fatalf("expected first hit to expose episode ep-001, got %#v", items[0].RecentEpisode)
+	}
+	if items[1].RecentEpisode == nil || items[1].RecentEpisode.ID != "ep-003" {
+		t.Fatalf("expected second hit to expose episode ep-003, got %#v", items[1].RecentEpisode)
+	}
+}
+
+func TestSearchPodcastEpisodesHTTP_FindsEpisodeWhenShowSearchWouldMiss(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/libraries/lib-pod/items":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"results": [
+					{
+						"id": "pod-001",
+						"libraryId": "lib-pod",
+						"mediaType": "podcast",
+						"media": {"metadata": {"title": "Joe Rogan"}}
+					}
+				],
+				"total": 1,
+				"limit": 100,
+				"page": 0
+			}`))
+		case "/api/items/pod-001":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"id": "pod-001",
+				"libraryId": "lib-pod",
+				"mediaType": "podcast",
+				"media": {
+					"metadata": {"title": "Joe Rogan"},
+					"episodes": [
+						{"id": "ep-001", "title": "Jason...", "duration": 3600}
+					]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	items, err := c.SearchPodcastEpisodes(context.Background(), "lib-pod", "Jas")
+	if err != nil {
+		t.Fatalf("SearchPodcastEpisodes() error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 matching episode hit, got %d", len(items))
+	}
+	if items[0].RecentEpisode == nil || items[0].RecentEpisode.Title != "Jason..." {
+		t.Fatalf("expected Jason episode hit, got %#v", items[0].RecentEpisode)
+	}
+}

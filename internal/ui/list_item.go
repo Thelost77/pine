@@ -9,16 +9,23 @@ type ListItem struct {
 }
 
 func (i ListItem) Title() string {
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		return i.Item.RecentEpisode.Title
+	}
 	return i.Item.Media.Metadata.Title
 }
 
 func (i ListItem) Description() string {
 	author := "Unknown author"
-	if i.Item.Media.Metadata.AuthorName != nil {
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		author = i.Item.Media.Metadata.Title
+	} else if i.Item.Media.Metadata.AuthorName != nil {
 		author = *i.Item.Media.Metadata.AuthorName
 	}
 	duration := ""
-	if i.Item.Media.HasDuration() {
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil && i.Item.RecentEpisode.Duration > 0 {
+		duration = " • " + FormatDuration(i.Item.RecentEpisode.Duration)
+	} else if i.Item.Media.HasDuration() {
 		duration = " • " + FormatDuration(i.Item.Media.TotalDuration())
 	}
 	return author + duration

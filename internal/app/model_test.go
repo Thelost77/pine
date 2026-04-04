@@ -11,6 +11,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/login"
+	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -630,6 +631,24 @@ func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
 	}
 	if m.chapterOverlayIndex != 1 {
 		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
+	}
+}
+
+func TestSearchScreenTypingCDoesNotOpenChapterOverlay(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenSearch
+	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
+	m.sessionID = "sess-123"
+	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = result.(Model)
+
+	if m.chapterOverlayVisible {
+		t.Fatal("overlay should stay closed while typing in search")
+	}
+	if got := m.search.Query(); got != "c" {
+		t.Fatalf("search query = %q, want %q", got, "c")
 	}
 }
 

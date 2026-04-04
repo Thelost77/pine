@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/Thelost77/pine/internal/abs"
-	"github.com/Thelost77/pine/internal/ui"
 )
 
 const pageLimit = 50
@@ -38,12 +38,18 @@ type NavigateDetailMsg struct {
 	Item abs.LibraryItem
 }
 
+// NavigateSearchMsg requests navigation to the search screen for the current library.
+type NavigateSearchMsg struct {
+	LibraryID        string
+	LibraryMediaType string
+}
 
 // KeyMap defines keybindings for the library screen.
 type KeyMap struct {
 	Enter   key.Binding
 	Back    key.Binding
 	NextLib key.Binding
+	Search  key.Binding
 	Select  key.Binding
 }
 
@@ -61,6 +67,10 @@ func DefaultKeyMap() KeyMap {
 		NextLib: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "next library"),
+		),
+		Search: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search"),
 		),
 		Select: key.NewBinding(
 			key.WithKeys("right"),
@@ -183,6 +193,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Back):
 			return m, func() tea.Msg { return GoBackMsg{} }
+		case key.Matches(msg, m.keys.Search):
+			libID := m.libraryID
+			libMediaType := m.SelectedLibraryMediaType()
+			return m, func() tea.Msg {
+				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
+			}
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
@@ -270,6 +286,17 @@ func (m *Model) fetchLibraryItemsCmd(page, limit int) tea.Cmd {
 // Items returns the current library items.
 func (m Model) Items() []abs.LibraryItem {
 	return m.items
+}
+
+// SelectedLibraryMediaType returns the media type of the current library, or empty string.
+func (m Model) SelectedLibraryMediaType() string {
+	if len(m.libraries) > 0 && m.selectedLibrary < len(m.libraries) {
+		return m.libraries[m.selectedLibrary].MediaType
+	}
+	if len(m.items) > 0 {
+		return m.items[0].MediaType
+	}
+	return ""
 }
 
 // updateListTitle updates the list title to reflect the selected library.

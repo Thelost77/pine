@@ -91,6 +91,7 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("tab", "switch lib"))
 	case ScreenLibrary:
 		parts = append(parts, key("→/enter", "open"))
+		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenDetail:
 		parts = append(parts, key("enter/p", "play"))
