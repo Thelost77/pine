@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,6 +55,46 @@ func TestHandleAddBookmarkReturnsBookmarkUpdateErrorWhenRefreshFails(t *testing.
 	}
 	if updateMsg.Err == nil {
 		t.Fatal("expected bookmark refresh error")
+	}
+}
+
+func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
+	var createdTitle string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark":
+			var req struct {
+				Title string `json:"title"`
+			}
+			if err := json.NewDecoder(bytes.NewReader(mustReadBody(t, r))).Decode(&req); err != nil {
+				t.Fatalf("decode create bookmark request: %v", err)
+			}
+			createdTitle = req.Title
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"bookmarks":[{"libraryItemId":"item-001","title":"stored","time":120,"createdAt":1700000000000}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m.sessionID = "sess-001"
+	m.episodeID = "ep-001"
+	m.player.Title = "Episode 2199"
+	m.player.Position = 120
+
+	_, cmd := m.handleAddBookmark(detail.AddBookmarkCmd{Item: testBookmarkItem("item-001")})
+	if cmd == nil {
+		t.Fatal("expected bookmark command")
+	}
+	_ = cmd()
+
+	if createdTitle != "Episode 2199 — Bookmark at 2:00" {
+		t.Fatalf("bookmark title = %q, want episode-aware title", createdTitle)
 	}
 }
 
@@ -139,6 +181,15 @@ func TestHandleUpdateBookmarkRefreshesBookmarks(t *testing.T) {
 	if updateMsg.Bookmarks[0].Title != "Renamed bookmark" {
 		t.Fatalf("bookmark title = %q, want Renamed bookmark", updateMsg.Bookmarks[0].Title)
 	}
+}
+
+func mustReadBody(t *testing.T, r *http.Request) []byte {
+	t.Helper()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+	return data
 }
 
 func TestHandleSeekToBookmarkStartsPlaybackWhenStopped(t *testing.T) {

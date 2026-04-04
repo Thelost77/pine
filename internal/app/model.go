@@ -196,6 +196,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Info("play book from home", "itemID", msg.Item.ID, "title", msg.Item.Media.Metadata.Title)
 		return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
 
+	case home.AddToQueueMsg:
+		if !m.isPlaying() {
+			if msg.Episode != nil {
+				return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: msg.Item, Episode: *msg.Episode})
+			}
+			return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+		}
+		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, false)
+		return m, nil
+
+	case home.PlayNextMsg:
+		if !m.isPlaying() {
+			if msg.Episode != nil {
+				return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: msg.Item, Episode: *msg.Episode})
+			}
+			return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+		}
+		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, true)
+		return m, nil
+
 	case home.NavigateLibraryMsg:
 		m.library = library.New(m.styles, m.client, msg.LibraryID, msg.Libraries)
 		return m.navigate(ScreenLibrary)
@@ -264,10 +284,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleAddBookmark(msg)
 
 	case detail.AddToQueueCmd:
+		if !m.isPlaying() {
+			if msg.Episode != nil {
+				return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: msg.Item, Episode: *msg.Episode})
+			}
+			return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+		}
 		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, false)
 		return m, nil
 
 	case detail.PlayNextCmd:
+		if !m.isPlaying() {
+			if msg.Episode != nil {
+				return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: msg.Item, Episode: *msg.Episode})
+			}
+			return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+		}
 		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, true)
 		return m, nil
 
@@ -431,6 +463,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// When playing, playback keys take priority over screen keys.
 		if m.isPlaying() {
+			if key.Matches(msg, m.keys.NextInQueue) {
+				return m.skipToNextQueued()
+			}
 			if len(m.chapters) > 0 {
 				if key.Matches(msg, m.keys.NextChapter) {
 					return m.seekToChapter(m.nextChapter())

@@ -301,6 +301,49 @@ func TestGetLibraryItemHTTP_WithSeriesMetadata(t *testing.T) {
 	}
 }
 
+func TestGetLibraryItemHTTP_WithSeriesMetadataArray(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/items/li-book-001" {
+			t.Errorf("path = %q, want /api/items/li-book-001", r.URL.Path)
+		}
+		if r.URL.Query().Get("expanded") != "1" {
+			t.Error("expected expanded=1 query param")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"id": "li-book-001",
+			"libraryId": "lib-books-001",
+			"addedAt": 1711111111111,
+			"mediaType": "book",
+			"media": {
+				"metadata": {
+					"title": "Caliban's War",
+					"series": [
+						{
+							"id": "series-expanse",
+							"name": "The Expanse",
+							"sequence": "2"
+						}
+					]
+				}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	item, err := c.GetLibraryItem(context.Background(), "li-book-001")
+	if err != nil {
+		t.Fatalf("GetLibraryItem() error: %v", err)
+	}
+	if item.Media.Metadata.Series == nil {
+		t.Fatal("expected series metadata to be set from array payload")
+	}
+	if item.Media.Metadata.Series.ID != "series-expanse" {
+		t.Errorf("series ID = %q, want series-expanse", item.Media.Metadata.Series.ID)
+	}
+}
+
 func TestGetSeriesHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/libraries/lib-books-001/series/series-expanse" {

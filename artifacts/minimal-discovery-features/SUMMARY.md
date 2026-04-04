@@ -27,11 +27,24 @@
 - **Decisions:** Book detail now hydrates full ABS item data in the background for books, exposes a compact focusable series row when available, and opens a dedicated Series list that preselects the current book.
 
 ### Task 5: Hook queue advancement into playback completion and run integration coverage
-- **Status:** pending
-- **Commit:** —
-- **Deviations:** —
-- **Decisions:** —
+- **Status:** done
+- **Commit:** 415f1b9 feat: advance queue on playback completion
+- **Deviations:** none
+- **Decisions:** Queue consumption is limited to true playback completion (closed mpv client at end-of-track/end-of-item); manual stop, sleep expiry, and generic playback errors keep the queue intact.
+
+## Post-plan follow-up fixes
+- **Home UX polish:** Home was refactored back to a single interactive list model so the Continue Listening header stays visible, Recently Added rows are selectable, and the subsection remains visually secondary.
+- **Podcast Recently Added labeling:** Recently Added podcasts are hydrated to show a latest-episode-style row instead of only the podcast title when ABS payloads lack recent episode data.
+- **Queue visibility:** App-level footer hints now advertise queue actions and show queue length.
+- **Bookmark clarity:** New podcast bookmarks include the active episode title so they are meaningful inside podcast feeds.
+- **ABS compatibility:** `mediaMetadata.series` decoding now accepts both object and array shapes from Audiobookshelf responses.
+- **Queue entry points:** Queueing is available from both Detail and Home for books and podcast episodes.
+- **Final queue semantics:**
+  - `a` adds to queue
+  - `A` moves the selected item to the front of the queue ("play next")
+  - `>` immediately skips to the first queued item during active playback
+  - when playback completes naturally, the queue advances automatically
 
 ## Metrics
-- Tasks completed: 4/5
-- Deviations: 2
+- Tasks completed: 5/5
+- Deviations: 3

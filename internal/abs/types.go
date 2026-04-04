@@ -2,6 +2,7 @@ package abs
 
 import (
 	"cmp"
+	"encoding/json"
 	"slices"
 )
 
@@ -96,6 +97,54 @@ type MediaMetadata struct {
 	Duration    *float64        `json:"duration,omitempty"` // seconds
 	Chapters    []Chapter       `json:"chapters,omitempty"`
 	Series      *SeriesSequence `json:"series,omitempty"`
+}
+
+// UnmarshalJSON handles ABS returning series metadata as either an object or an array.
+func (m *MediaMetadata) UnmarshalJSON(data []byte) error {
+	type mediaMetadataAlias struct {
+		Title       string          `json:"title"`
+		AuthorName  *string         `json:"authorName,omitempty"`
+		Description *string         `json:"description,omitempty"`
+		Duration    *float64        `json:"duration,omitempty"`
+		Chapters    []Chapter       `json:"chapters,omitempty"`
+		Series      json.RawMessage `json:"series,omitempty"`
+	}
+
+	var aux mediaMetadataAlias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	*m = MediaMetadata{
+		Title:       aux.Title,
+		AuthorName:  aux.AuthorName,
+		Description: aux.Description,
+		Duration:    aux.Duration,
+		Chapters:    aux.Chapters,
+	}
+
+	if len(aux.Series) == 0 || string(aux.Series) == "null" {
+		return nil
+	}
+
+	if aux.Series[0] == '[' {
+		var seriesList []SeriesSequence
+		if err := json.Unmarshal(aux.Series, &seriesList); err != nil {
+			return err
+		}
+		if len(seriesList) > 0 {
+			series := seriesList[0]
+			m.Series = &series
+		}
+		return nil
+	}
+
+	var series SeriesSequence
+	if err := json.Unmarshal(aux.Series, &series); err != nil {
+		return err
+	}
+	m.Series = &series
+	return nil
 }
 
 // SeriesSequence is the minimal series context attached to a library item.

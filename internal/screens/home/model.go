@@ -23,52 +23,53 @@ type PersonalizedMsg struct {
 	Err           error
 }
 
-// listItem wraps a LibraryItem for the bubbles list component.
+type rowKind int
+
+const (
+	rowKindItem rowKind = iota
+	rowKindSection
+	rowKindEmpty
+)
+
+// listItem wraps a home row for the bubbles list component.
 type listItem struct {
-	item abs.LibraryItem
+	kind        rowKind
+	item        abs.LibraryItem
+	title       string
+	description string
 }
 
 func (i listItem) Title() string {
-	if i.item.MediaType == "podcast" && i.item.RecentEpisode != nil {
-		return i.item.RecentEpisode.Title
+	if i.kind != rowKindItem {
+		return i.title
 	}
-	return i.item.Media.Metadata.Title
+	return itemTitle(i.item)
 }
 
 func (i listItem) Description() string {
-	author := "Unknown author"
-	if i.item.MediaType == "podcast" && i.item.RecentEpisode != nil {
-		// For podcasts, show podcast name as description context
-		author = i.item.Media.Metadata.Title
-	} else if i.item.Media.Metadata.AuthorName != nil {
-		author = *i.item.Media.Metadata.AuthorName
+	if i.kind != rowKindItem {
+		return i.description
 	}
-
-	progress := ""
-	if i.item.UserMediaProgress != nil {
-		progress = fmt.Sprintf(" • %d%%", int(i.item.UserMediaProgress.Progress*100))
-	}
-
-	duration := ""
-	if i.item.Media.HasDuration() {
-		duration = fmt.Sprintf(" • %s", ui.FormatDuration(i.item.Media.TotalDuration()))
-	}
-
-	return author + progress + duration
+	return itemDescription(i.item)
 }
 
 func (i listItem) FilterValue() string {
+	if i.kind != rowKindItem {
+		return ""
+	}
 	return i.item.Media.Metadata.Title
 }
 
 // KeyMap defines keybindings for the home screen.
 type KeyMap struct {
-	Enter   key.Binding
-	Back    key.Binding
-	Library key.Binding
-	Search  key.Binding
-	NextLib key.Binding
-	Select  key.Binding
+	Enter      key.Binding
+	Back       key.Binding
+	Library    key.Binding
+	Search     key.Binding
+	NextLib    key.Binding
+	Select     key.Binding
+	AddToQueue key.Binding
+	PlayNext   key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings for the home screen.
@@ -97,6 +98,14 @@ func DefaultKeyMap() KeyMap {
 		NextLib: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "next library"),
+		),
+		AddToQueue: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "add to queue"),
+		),
+		PlayNext: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", "play next"),
 		),
 	}
 }
@@ -131,7 +140,7 @@ func New(styles ui.Styles, client *abs.Client) Model {
 
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = "Continue Listening"
-	l.SetShowStatusBar(true)
+	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
@@ -189,9 +198,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Enter), key.Matches(msg, m.keys.Select):
-			if sel, ok := m.list.SelectedItem().(listItem); ok {
-				item := sel.item
-				// Podcast with a recent episode → play it directly
+			if item, ok := m.selectedItem(); ok {
 				if item.MediaType == "podcast" && item.RecentEpisode != nil {
 					ep := *item.RecentEpisode
 					return m, func() tea.Msg {
@@ -200,6 +207,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, func() tea.Msg {
 					return NavigateDetailMsg{Item: item}
+				}
+			}
+		case key.Matches(msg, m.keys.AddToQueue):
+			if item, episode, ok := m.selectedQueueTarget(); ok {
+				return m, func() tea.Msg {
+					return AddToQueueMsg{Item: item, Episode: episode}
+				}
+			}
+		case key.Matches(msg, m.keys.PlayNext):
+			if item, episode, ok := m.selectedQueueTarget(); ok {
+				return m, func() tea.Msg {
+					return PlayNextMsg{Item: item, Episode: episode}
 				}
 			}
 		case key.Matches(msg, m.keys.Library):
@@ -226,16 +245,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				newLibID := m.SelectedLibraryID()
 				if cached, ok := m.itemCache[newLibID]; ok {
 					m.items = cached
-					m.setListItems(cached)
 				} else {
 					m.items = nil
-					m.setListItems(nil)
 				}
 				if cachedRecent, ok := m.recentCache[newLibID]; ok {
 					m.recentlyAdded = cachedRecent
 				} else {
 					m.recentlyAdded = nil
 				}
+				m.setListItems(m.items)
 				return m, m.fetchPersonalizedCmd()
 			}
 			return m, nil
@@ -246,6 +264,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		m.skipNonInteractiveSelection(selectionStep(keyMsg))
+	}
 	return m, cmd
 }
 
@@ -294,6 +315,7 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 				recentlyAdded = section.Entities
 			}
 		}
+		recentlyAdded = hydrateRecentlyAddedPodcasts(context.Background(), client, recentlyAdded)
 
 		return PersonalizedMsg{
 			Items:         continueListening,
@@ -317,6 +339,18 @@ type PlayEpisodeMsg struct {
 // PlayMsg requests direct playback of an audiobook from the home screen.
 type PlayMsg struct {
 	Item abs.LibraryItem
+}
+
+// AddToQueueMsg requests appending the selected home item to the queue.
+type AddToQueueMsg struct {
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
+}
+
+// PlayNextMsg requests inserting the selected home item at the front of the queue.
+type PlayNextMsg struct {
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
 }
 
 // NavigateLibraryMsg requests navigation to the library screen.
@@ -370,11 +404,8 @@ func (m *Model) updateListTitle() {
 }
 
 func (m *Model) setListItems(items []abs.LibraryItem) {
-	listItems := make([]list.Item, len(items))
-	for i, item := range items {
-		listItems[i] = listItem{item: item}
-	}
-	m.list.SetItems(listItems)
+	m.list.SetItems(buildListRows(m.styles, items, m.recentlyAdded))
+	m.skipNonInteractiveSelection(1)
 }
 
 func limitItems(items []abs.LibraryItem, limit int) []abs.LibraryItem {
@@ -414,6 +445,172 @@ func dedupeRecentlyAdded(primary, recent []abs.LibraryItem, limit int) []abs.Lib
 		}
 	}
 	return result
+}
+
+func buildListRows(styles ui.Styles, items, recent []abs.LibraryItem) []list.Item {
+	rows := make([]list.Item, 0, len(items)+len(recent)+2)
+	if len(items) == 0 {
+		rows = append(rows, listItem{
+			kind:  rowKindEmpty,
+			title: styles.Muted.Render("No items in continue listening"),
+		})
+	} else {
+		for _, item := range items {
+			rows = append(rows, listItem{kind: rowKindItem, item: item})
+		}
+	}
+
+	if len(recent) > 0 {
+		rows = append(rows, listItem{
+			kind:  rowKindSection,
+			title: styles.Accent.Bold(true).Render("Recently Added"),
+		})
+		for _, item := range recent {
+			rows = append(rows, listItem{kind: rowKindItem, item: item})
+		}
+	}
+
+	return rows
+}
+
+func itemTitle(item abs.LibraryItem) string {
+	if item.MediaType == "podcast" && item.RecentEpisode != nil {
+		return item.RecentEpisode.Title
+	}
+	return item.Media.Metadata.Title
+}
+
+func itemDescription(item abs.LibraryItem) string {
+	contextLabel := "Unknown author"
+	if item.MediaType == "podcast" && item.RecentEpisode != nil {
+		contextLabel = item.Media.Metadata.Title
+	} else if item.Media.Metadata.AuthorName != nil {
+		contextLabel = *item.Media.Metadata.AuthorName
+	}
+
+	progress := ""
+	if item.UserMediaProgress != nil {
+		progress = fmt.Sprintf(" • %d%%", int(item.UserMediaProgress.Progress*100))
+	}
+
+	duration := ""
+	switch {
+	case item.MediaType == "podcast" && item.RecentEpisode != nil && item.RecentEpisode.Duration > 0:
+		duration = fmt.Sprintf(" • %s", ui.FormatDuration(item.RecentEpisode.Duration))
+	case item.Media.HasDuration():
+		duration = fmt.Sprintf(" • %s", ui.FormatDuration(item.Media.TotalDuration()))
+	}
+
+	return contextLabel + progress + duration
+}
+
+func (m Model) selectedItem() (abs.LibraryItem, bool) {
+	sel, ok := m.list.SelectedItem().(listItem)
+	if !ok || sel.kind != rowKindItem {
+		return abs.LibraryItem{}, false
+	}
+	return sel.item, true
+}
+
+func (m Model) selectedQueueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {
+	item, ok := m.selectedItem()
+	if !ok {
+		return abs.LibraryItem{}, nil, false
+	}
+	if item.MediaType == "podcast" && item.RecentEpisode != nil {
+		return item, cloneEpisode(item.RecentEpisode), true
+	}
+	return item, nil, true
+}
+
+func (m *Model) skipNonInteractiveSelection(step int) {
+	items := m.list.Items()
+	if len(items) == 0 {
+		return
+	}
+
+	idx := m.list.Index()
+	if idx < 0 || idx >= len(items) {
+		return
+	}
+	if row, ok := items[idx].(listItem); ok && row.kind == rowKindItem {
+		return
+	}
+
+	if step == 0 {
+		step = 1
+	}
+	for next := idx + step; next >= 0 && next < len(items); next += step {
+		row, ok := items[next].(listItem)
+		if !ok {
+			continue
+		}
+		if row.kind == rowKindItem {
+			m.list.Select(next)
+			return
+		}
+	}
+}
+
+func selectionStep(msg tea.KeyMsg) int {
+	switch msg.String() {
+	case "j", "down":
+		return 1
+	case "k", "up":
+		return -1
+	default:
+		return 0
+	}
+}
+
+func hydrateRecentlyAddedPodcasts(ctx context.Context, client *abs.Client, items []abs.LibraryItem) []abs.LibraryItem {
+	if client == nil || len(items) == 0 {
+		return items
+	}
+
+	hydrated := make([]abs.LibraryItem, len(items))
+	copy(hydrated, items)
+	for i, item := range hydrated {
+		if item.MediaType != "podcast" || item.RecentEpisode != nil {
+			continue
+		}
+		fullItem, err := client.GetLibraryItem(ctx, item.ID)
+		if err != nil || fullItem == nil {
+			continue
+		}
+		if episode := latestEpisode(fullItem.Media.Episodes); episode != nil {
+			item.RecentEpisode = episode
+			hydrated[i] = item
+		}
+	}
+	return hydrated
+}
+
+func latestEpisode(episodes []abs.PodcastEpisode) *abs.PodcastEpisode {
+	if len(episodes) == 0 {
+		return nil
+	}
+
+	best := episodes[0]
+	for _, episode := range episodes[1:] {
+		switch {
+		case episode.AddedAt > best.AddedAt:
+			best = episode
+		case episode.AddedAt == best.AddedAt && episode.PublishedAt > best.PublishedAt:
+			best = episode
+		case episode.AddedAt == best.AddedAt && episode.PublishedAt == best.PublishedAt && episode.Index > best.Index:
+			best = episode
+		}
+	}
+	return cloneEpisode(&best)
+}
+
+func cloneEpisode(episode *abs.PodcastEpisode) *abs.PodcastEpisode {
+	if episode == nil {
+		return nil
+	}
+	cp := *episode
+	return &cp
 }
 
 // Loading returns whether data is being fetched.

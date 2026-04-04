@@ -83,6 +83,28 @@ func TestViewHintsAdvertiseChaptersOnlyWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestViewHintsAdvertiseQueueActionsAndCountOnDetail(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenDetail
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "item-1"}}}
+
+	hints := m.viewHints()
+	if !containsString(hints, "a queue") {
+		t.Fatalf("detail hints should advertise add to queue\n%s", hints)
+	}
+	if !containsString(hints, "A next") {
+		t.Fatalf("detail hints should advertise play next\n%s", hints)
+	}
+	if !containsString(hints, "> next queued") {
+		t.Fatalf("detail hints should advertise queue skip\n%s", hints)
+	}
+	if !containsString(hints, "1 queued") {
+		t.Fatalf("detail hints should surface queue count\n%s", hints)
+	}
+}
+
 func TestHelpOverlayDocumentsChapterOverlay(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.help.Toggle()
@@ -90,5 +112,8 @@ func TestHelpOverlayDocumentsChapterOverlay(t *testing.T) {
 	view := m.View()
 	if !containsString(view, "c") || !containsString(view, "open chapters") {
 		t.Fatalf("help overlay should document chapter overlay binding\n%s", view)
+	}
+	if !containsString(view, ">") || !containsString(view, "play next queued") {
+		t.Fatalf("help overlay should document next queued binding\n%s", view)
 	}
 }

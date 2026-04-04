@@ -84,6 +84,8 @@ func (m Model) viewHints() string {
 	switch m.screen {
 	case ScreenHome:
 		parts = append(parts, key("→/enter", "open"))
+		parts = append(parts, key("a", "queue"))
+		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("o", "library"))
 		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("tab", "switch lib"))
@@ -93,6 +95,8 @@ func (m Model) viewHints() string {
 	case ScreenDetail:
 		parts = append(parts, key("enter/p", "play"))
 		parts = append(parts, key("b", "bookmark"))
+		parts = append(parts, key("a", "queue"))
+		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("tab", "focus"))
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenSearch:
@@ -108,9 +112,15 @@ func (m Model) viewHints() string {
 	if m.isPlaying() {
 		parts = append(parts, key("space", "pause"))
 		parts = append(parts, key("h/l", "seek"))
+		if len(m.queue) > 0 {
+			parts = append(parts, key(">", "next queued"))
+		}
 		if len(m.chapters) > 0 {
 			parts = append(parts, key("c", "chapters"))
 		}
+	}
+	if len(m.queue) > 0 {
+		parts = append(parts, m.styles.Muted.Render(fmt.Sprintf("%d queued", len(m.queue))))
 	}
 	parts = append(parts, key("?", "help"))
 

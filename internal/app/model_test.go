@@ -9,6 +9,7 @@ import (
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
+	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
@@ -863,6 +864,9 @@ func TestPlayEpisodeCmdTogglesPauseWhilePlaying(t *testing.T) {
 
 func TestAddToQueueCmdAppendsEntry(t *testing.T) {
 	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
 	item := abs.LibraryItem{
 		ID:        "item-queue",
 		MediaType: "book",
@@ -890,6 +894,9 @@ func TestAddToQueueCmdAppendsEntry(t *testing.T) {
 
 func TestPlayNextCmdPrependsEntry(t *testing.T) {
 	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
 	first := QueueEntry{
 		Item: abs.LibraryItem{
 			ID:        "item-old",
@@ -922,6 +929,141 @@ func TestPlayNextCmdPrependsEntry(t *testing.T) {
 	}
 	if rm.Queue()[1].Item.ID != "item-old" {
 		t.Fatalf("expected original queue entry to remain second, got %s", rm.Queue()[1].Item.ID)
+	}
+}
+
+func TestHomeAddToQueueMsgAppendsEntry(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	item := abs.LibraryItem{
+		ID: "book-home",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Home Queue"},
+		},
+	}
+
+	result, cmd := m.Update(home.AddToQueueMsg{Item: item})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command when enqueueing from home")
+	}
+	if len(rm.Queue()) != 1 || rm.Queue()[0].Item.ID != "book-home" {
+		t.Fatalf("queue = %#v, want appended home item", rm.Queue())
+	}
+}
+
+func TestHomePlayNextMsgPrependsEntry(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "existing"}}}
+	item := abs.LibraryItem{
+		ID: "book-home-next",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Home Next"},
+		},
+	}
+
+	result, cmd := m.Update(home.PlayNextMsg{Item: item})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command when prepending from home")
+	}
+	queue := rm.Queue()
+	if len(queue) != 2 || queue[0].Item.ID != "book-home-next" {
+		t.Fatalf("queue = %#v, want home-next at front", queue)
+	}
+}
+
+func TestAddToQueueCmdStartsPlaybackWhenIdle(t *testing.T) {
+	m := newPlaybackTestModel()
+	item := abs.LibraryItem{
+		ID: "idle-detail-queue",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Idle Detail Queue"},
+		},
+	}
+
+	result, cmd := m.Update(detail.AddToQueueCmd{Item: item})
+	rm := result.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected play command when idle")
+	}
+	if len(rm.Queue()) != 0 {
+		t.Fatalf("queue = %#v, want empty when add-to-queue starts immediately", rm.Queue())
+	}
+}
+
+func TestHomeAddToQueueMsgStartsPlaybackWhenIdle(t *testing.T) {
+	m := newPlaybackTestModel()
+	item := abs.LibraryItem{
+		ID: "idle-home-queue",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Idle Home Queue"},
+		},
+	}
+
+	result, cmd := m.Update(home.AddToQueueMsg{Item: item})
+	rm := result.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected play command when idle")
+	}
+	if len(rm.Queue()) != 0 {
+		t.Fatalf("queue = %#v, want empty when home add-to-queue starts immediately", rm.Queue())
+	}
+}
+
+func TestNextInQueueKeyStartsQueuedItem(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.queue = []QueueEntry{
+		{
+			Item: abs.LibraryItem{
+				ID: "queued-book",
+				Media: abs.Media{
+					Metadata: abs.MediaMetadata{Title: "Queued Book"},
+				},
+			},
+		},
+	}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'>'}})
+	rm := result.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected play command when skipping to queued item")
+	}
+	if len(rm.Queue()) != 0 {
+		t.Fatalf("queue = %#v, want consumed head after skip", rm.Queue())
+	}
+	if rm.sessionID != "" {
+		t.Fatalf("sessionID = %q, want cleared before next playback starts", rm.sessionID)
+	}
+}
+
+func TestNextInQueueKeyDoesNothingWithoutQueue(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'>'}})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command when queue is empty")
+	}
+	if !rm.player.Playing {
+		t.Fatal("expected current playback to remain active")
 	}
 }
 

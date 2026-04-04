@@ -325,7 +325,22 @@ func (m Model) handlePlaybackCompleted() (Model, tea.Cmd) {
 	if !hasNext {
 		return m, stopCmd
 	}
+	return m.startQueuedEntry(next, stopCmd)
+}
 
+func (m Model) skipToNextQueued() (Model, tea.Cmd) {
+	if !m.isPlaying() {
+		return m, nil
+	}
+	next, hasNext := m.dequeueQueueEntry()
+	if !hasNext {
+		return m, nil
+	}
+	m, stopCmd := m.stopPlayback()
+	return m.startQueuedEntry(next, stopCmd)
+}
+
+func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cmd) {
 	var nextCmd tea.Cmd
 	if next.Episode != nil {
 		m, nextCmd = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{

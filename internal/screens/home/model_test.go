@@ -1,7 +1,11 @@
 package home
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -258,6 +262,108 @@ func TestView_WithItems(t *testing.T) {
 	}
 }
 
+func TestView_EmptyContinueListeningKeepsHeaderVisible(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	recent := sampleRecentlyAddedItems()
+
+	m, _ = m.Update(PersonalizedMsg{RecentlyAdded: recent})
+
+	view := m.View()
+	if !strings.Contains(view, "Continue Listening") {
+		t.Fatalf("expected Continue Listening header to stay visible\n%s", view)
+	}
+	if !strings.Contains(view, "Recently Added") {
+		t.Fatalf("expected Recently Added section to render\n%s", view)
+	}
+	if !strings.Contains(view, recent[0].Media.Metadata.Title) {
+		t.Fatalf("expected recently added item to render when continue listening is empty\n%s", view)
+	}
+}
+
+func TestSelection_SkipsRecentlyAddedHeader(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	items := sampleItems()[:1]
+	recent := sampleRecentlyAddedItems()[:1]
+
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: recent})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a command from enter key")
+	}
+
+	msg := cmd()
+	navMsg, ok := msg.(NavigateDetailMsg)
+	if !ok {
+		t.Fatalf("expected NavigateDetailMsg, got %T", msg)
+	}
+	if navMsg.Item.ID != recent[0].ID {
+		t.Fatalf("expected selection to skip section header and open recent item %q, got %q", recent[0].ID, navMsg.Item.ID)
+	}
+}
+
+func TestAKey_AddsSelectedHomeItemToQueue(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	items := sampleItems()[:1]
+
+	m, _ = m.Update(PersonalizedMsg{Items: items})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if cmd == nil {
+		t.Fatal("expected queue command from a")
+	}
+	msg := cmd()
+	queueMsg, ok := msg.(AddToQueueMsg)
+	if !ok {
+		t.Fatalf("expected AddToQueueMsg, got %T", msg)
+	}
+	if queueMsg.Item.ID != items[0].ID {
+		t.Fatalf("expected queued home item %q, got %q", items[0].ID, queueMsg.Item.ID)
+	}
+}
+
+func TestShiftAKey_AddsSelectedHomeItemAsPlayNext(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	items := sampleItems()[:1]
+
+	m, _ = m.Update(PersonalizedMsg{Items: items})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	if cmd == nil {
+		t.Fatal("expected queue command from A")
+	}
+	msg := cmd()
+	queueMsg, ok := msg.(PlayNextMsg)
+	if !ok {
+		t.Fatalf("expected PlayNextMsg, got %T", msg)
+	}
+	if queueMsg.Item.ID != items[0].ID {
+		t.Fatalf("expected play-next home item %q, got %q", items[0].ID, queueMsg.Item.ID)
+	}
+}
+
+func TestView_DoesNotCountRecentlyAddedInListStatus(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	items := make([]abs.LibraryItem, 0, 5)
+	for i := 0; i < 5; i++ {
+		items = append(items, abs.LibraryItem{
+			ID:        fmt.Sprintf("book-%d", i),
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: fmt.Sprintf("Book %d", i)}},
+		})
+	}
+	recent := sampleRecentlyAddedItems()[:2]
+
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: recent})
+	view := m.View()
+	if strings.Contains(view, "8 items") {
+		t.Fatalf("expected synthetic rows to stay out of item count\n%s", view)
+	}
+}
+
 func TestJKey_MovesSelection(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
@@ -334,14 +440,14 @@ func TestListItem_Description(t *testing.T) {
 	items := sampleItems()
 
 	// Item with progress and duration
-	li := listItem{item: items[0]}
+	li := listItem{kind: rowKindItem, item: items[0]}
 	desc := li.Description()
 	if desc == "" {
 		t.Error("expected non-empty description")
 	}
 
 	// Item without progress/duration
-	li2 := listItem{item: items[1]}
+	li2 := listItem{kind: rowKindItem, item: items[1]}
 	desc2 := li2.Description()
 	if desc2 == "" {
 		t.Error("expected non-empty description for item without progress")
@@ -357,7 +463,7 @@ func TestListItem_NoAuthor(t *testing.T) {
 			},
 		},
 	}
-	li := listItem{item: item}
+	li := listItem{kind: rowKindItem, item: item}
 	desc := li.Description()
 	if desc == "" {
 		t.Error("expected non-empty description for item without author")
@@ -404,5 +510,46 @@ func TestPersonalizedMsg_DedupesRecentlyAddedByTitle(t *testing.T) {
 		if item.Media.Metadata.Title == "The Great Adventure" {
 			t.Fatal("expected duplicate title to be excluded from recently added")
 		}
+	}
+}
+
+func TestHydrateRecentlyAddedPodcastsUsesLatestEpisode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/items/pod-1" || r.URL.Query().Get("expanded") != "1" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(abs.LibraryItem{
+			ID:        "pod-1",
+			LibraryID: "lib-pod",
+			MediaType: "podcast",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{Title: "Podcast Show"},
+				Episodes: []abs.PodcastEpisode{
+					{ID: "ep-old", Title: "Older", AddedAt: 10, PublishedAt: 10, Index: 1, Duration: 1200},
+					{ID: "ep-new", Title: "Newer", AddedAt: 20, PublishedAt: 20, Index: 2, Duration: 1800},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := abs.NewClient(srv.URL, "tok")
+	items := []abs.LibraryItem{{
+		ID:        "pod-1",
+		MediaType: "podcast",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast Show"}},
+	}}
+
+	hydrated := hydrateRecentlyAddedPodcasts(context.Background(), client, items)
+	if hydrated[0].RecentEpisode == nil {
+		t.Fatal("expected recent episode to be hydrated")
+	}
+	if hydrated[0].RecentEpisode.ID != "ep-new" {
+		t.Fatalf("expected newest episode to be selected, got %q", hydrated[0].RecentEpisode.ID)
+	}
+	if itemTitle(hydrated[0]) != "Newer" {
+		t.Fatalf("expected item title to use hydrated episode title, got %q", itemTitle(hydrated[0]))
 	}
 }

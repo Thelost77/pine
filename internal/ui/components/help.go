@@ -70,6 +70,7 @@ func defaultGroups() []HelpGroup {
 				{Key: "p / space", Desc: "play / pause"},
 				{Key: "l", Desc: "seek forward"},
 				{Key: "h", Desc: "seek backward"},
+				{Key: ">", Desc: "play next queued"},
 				{Key: "+", Desc: "speed up"},
 				{Key: "-", Desc: "speed down"},
 				{Key: "] / [", Desc: "volume up / down"},

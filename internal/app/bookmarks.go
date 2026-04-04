@@ -28,6 +28,9 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 	itemID := msg.Item.ID
 	currentTime := m.player.Position
 	title := fmt.Sprintf("Bookmark at %s", ui.FormatTimestamp(currentTime))
+	if m.episodeID != "" && m.player.Title != "" {
+		title = fmt.Sprintf("%s — %s", m.player.Title, title)
+	}
 	logger.Info("creating bookmark", "itemID", itemID, "time", currentTime, "title", title)
 
 	return m, func() tea.Msg {

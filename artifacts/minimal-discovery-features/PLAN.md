@@ -17,7 +17,7 @@
 - **Recently Added cap:** **3 items**
 - **Recently Added dedupe:** exclude titles already present in Continue Listening
 - **Queue scope:** **session-only**, in memory
-- **Queue entry points:** **Detail screen only** for books and podcast episodes
+- **Queue entry points:** **Detail and Home** for books and podcast episodes
 - **Queue continuity:** manual play does **not** clear the queue
 - **Series UX:** compact `Series: Name #N` row in book detail
 - **Series navigation surface:** opens a dedicated **Series** screen
@@ -32,7 +32,7 @@
 
 ## Non-goals
 - Queue persistence across restarts
-- Queue actions from home/library/search
+- Queue actions from library/search
 - Auto-enqueue behavior
 - Playlist management
 - General metadata browsing (authors, narrators, collections, tags)
@@ -113,8 +113,8 @@
 - **Files:** `internal/app/model.go`, `internal/app/messages.go`, `internal/app/playback.go`, `internal/screens/detail/model.go`, `internal/screens/detail/view.go`, tests
 - **Action:**
   - define a queue entry type in root app state (book vs podcast episode)
-  - add detail messages/actions for **play next** and **add to queue**
-  - expose minimal UI/hints from detail only
+  - add detail/home messages and actions for **play next** and **add to queue**
+  - expose minimal UI/hints from detail and home, keeping queue management otherwise invisible
   - ensure manual play leaves queue intact
 - **Edge cases:**
   - duplicate enqueue of the same item/episode
@@ -126,8 +126,8 @@
   - GREEN: implement root queue state and detail action wiring
   - Verify GREEN: `go test ./internal/app/... ./internal/screens/detail/... -count=1` passes
   - REFACTOR: extract queue-entry helpers if book/episode branching duplicates logic
-- **Verify:** queue actions exist only in detail contexts and do not clutter other screens
-- **Done:** user can queue from detail for books and selected podcast episodes
+- **Verify:** queue actions exist in focused listening contexts and do not create a dedicated queue-management screen
+- **Done:** user can queue from detail and home for books and selected podcast episodes
 
 ### 4. Add enriched book detail and dedicated Series screen [size: M]
 - **Depends on:** Task 1

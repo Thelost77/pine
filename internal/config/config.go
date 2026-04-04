@@ -34,6 +34,7 @@ type KeybindsConfig struct {
 	PlayPause    string `toml:"play_pause"`
 	SeekForward  string `toml:"seek_forward"`
 	SeekBackward string `toml:"seek_backward"`
+	NextInQueue  string `toml:"next_in_queue"`
 	SpeedUp      string `toml:"speed_up"`
 	SpeedDown    string `toml:"speed_down"`
 	VolumeUp     string `toml:"volume_up"`
@@ -77,6 +78,7 @@ func Default() Config {
 			PlayPause:    " ",
 			SeekForward:  "l",
 			SeekBackward: "h",
+			NextInQueue:  ">",
 			SpeedUp:      "+",
 			SpeedDown:    "-",
 			VolumeUp:     "]",
