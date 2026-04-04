@@ -30,10 +30,6 @@ type debounceTickMsg struct {
 	seq int
 }
 
-type cachePreparedMsg struct {
-	Err error
-}
-
 // NavigateDetailMsg requests navigation to the detail screen for an item.
 type NavigateDetailMsg struct {
 	Item abs.LibraryItem
@@ -84,7 +80,7 @@ type Model struct {
 // New creates a new search screen model.
 func New(styles ui.Styles, cache *Cache, libraryID, libraryMediaType string) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Search audiobooks…"
+	ti.Placeholder = searchPlaceholder(libraryMediaType)
 	ti.CharLimit = 256
 	ti.Focus()
 
@@ -128,23 +124,12 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command (focus text input cursor).
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textinput.Blink}
-	if prepareCmd := m.prepareCmd(); prepareCmd != nil {
-		cmds = append(cmds, prepareCmd)
-	}
-	return tea.Batch(cmds...)
+	return textinput.Blink
 }
 
 // Update handles messages for the search screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case cachePreparedMsg:
-		if msg.Err != nil && m.query != "" {
-			m.err = msg.Err
-			m.loading = false
-		}
-		return m, nil
-
 	case SearchResultsMsg:
 		if msg.Query != m.query {
 			return m, nil
@@ -228,18 +213,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) prepareCmd() tea.Cmd {
-	if m.cache == nil {
-		return nil
-	}
-	cache := m.cache
-	libID := m.libraryID
-	libMediaType := m.libraryMediaType
-	return func() tea.Msg {
-		return cachePreparedMsg{Err: cache.Prepare(context.Background(), libID, libMediaType)}
-	}
-}
-
 // searchCmd creates a command that performs a library-local search.
 func (m *Model) searchCmd(query string) tea.Cmd {
 	if m.cache == nil {
@@ -274,3 +247,10 @@ func (m Model) Error() error { return m.err }
 
 // Searched returns whether at least one search has completed.
 func (m Model) Searched() bool { return m.searched }
+
+func searchPlaceholder(libraryMediaType string) string {
+	if libraryMediaType == "podcast" {
+		return "Search episodes…"
+	}
+	return "Search audiobooks…"
+}

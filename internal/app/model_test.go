@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
@@ -649,6 +650,76 @@ func TestSearchScreenTypingCDoesNotOpenChapterOverlay(t *testing.T) {
 	}
 	if got := m.search.Query(); got != "c" {
 		t.Fatalf("search query = %q, want %q", got, "c")
+	}
+}
+
+func TestSearchScreenPlayPauseKeyControlsPlayback(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenSearch
+	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
+	m.sessionID = "sess-123"
+	m.player.Title = "Episode"
+	m.player.Playing = true
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = result.(Model)
+
+	if m.player.Playing {
+		t.Fatal("player should pause from search screen")
+	}
+	if cmd == nil {
+		t.Fatal("expected pause command from search screen")
+	}
+	if got := m.search.Query(); got != "" {
+		t.Fatalf("search query = %q, want empty", got)
+	}
+}
+
+func TestSearchScreenNextInQueueKeyStartsQueuedItem(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenSearch
+	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.queue = []QueueEntry{{
+		Item: abs.LibraryItem{
+			ID: "queued-book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{Title: "Queued Book"},
+			},
+		},
+	}}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'>'}})
+	m = result.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected play command when skipping queue from search screen")
+	}
+	if len(m.Queue()) != 0 {
+		t.Fatalf("queue = %#v, want empty after consuming queued item", m.Queue())
+	}
+}
+
+func TestSearchScreenSleepTimerKeyCyclesTimer(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenSearch
+	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = result.(Model)
+
+	if m.sleepDuration != 15*time.Minute {
+		t.Fatalf("sleep duration = %v, want %v", m.sleepDuration, 15*time.Minute)
+	}
+	if cmd == nil {
+		t.Fatal("expected sleep timer command from search screen")
+	}
+	if got := m.search.Query(); got != "" {
+		t.Fatalf("search query = %q, want empty", got)
 	}
 }
 

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // StartPlayMsg signals that playback should begin.
@@ -99,6 +99,17 @@ func (m Model) SeekForwardKey() key.Binding { return m.keys.SeekForward }
 
 // SeekBackKey returns the seek backward key binding.
 func (m Model) SeekBackKey() key.Binding { return m.keys.SeekBack }
+
+// HandlesKey reports whether the player should consume the key while a session is active.
+func (m Model) HandlesKey(msg tea.KeyMsg) bool {
+	return key.Matches(msg, m.keys.PlayPause) ||
+		key.Matches(msg, m.keys.SeekForward) ||
+		key.Matches(msg, m.keys.SeekBack) ||
+		key.Matches(msg, m.keys.SpeedUp) ||
+		key.Matches(msg, m.keys.SpeedDown) ||
+		key.Matches(msg, m.keys.VolumeUp) ||
+		key.Matches(msg, m.keys.VolumeDown)
+}
 
 // Update handles messages for the player sub-model.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {

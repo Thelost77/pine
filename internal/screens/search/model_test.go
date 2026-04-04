@@ -61,6 +61,16 @@ func TestNew(t *testing.T) {
 	if len(m.Items()) != 0 {
 		t.Error("expected no items initially")
 	}
+	if got := m.input.Placeholder; got != "Search audiobooks…" {
+		t.Fatalf("placeholder = %q, want %q", got, "Search audiobooks…")
+	}
+}
+
+func TestNewPodcastPlaceholder(t *testing.T) {
+	m := New(ui.DefaultStyles(), NewCache(nil), "lib-pod", "podcast")
+	if got := m.input.Placeholder; got != "Search episodes…" {
+		t.Fatalf("placeholder = %q, want %q", got, "Search episodes…")
+	}
 }
 
 func TestSearchResultsMsg_Success(t *testing.T) {
@@ -273,6 +283,18 @@ func TestView_LoadingKeepsPreviousResultsVisible(t *testing.T) {
 	}
 	if strings.Contains(v, "Searching") {
 		t.Fatalf("loading view should not show searching placeholder\n%s", v)
+	}
+}
+
+func TestView_LoadingWithoutResultsShowsSearchingState(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m.query = "test"
+	m.loading = true
+
+	v := m.View()
+	if !strings.Contains(v, "Searching") {
+		t.Fatalf("loading view should show searching state when no results exist\n%s", v)
 	}
 }
 

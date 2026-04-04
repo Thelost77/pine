@@ -12,6 +12,8 @@ func (m Model) View() string {
 
 	if normalizedQuery == "" {
 		body = m.styles.Muted.Render("Type to search…")
+	} else if m.loading && len(m.items) == 0 {
+		body = m.styles.Muted.Render("Searching…")
 	} else if m.err != nil {
 		body = m.styles.Error.Render("Error: " + m.err.Error())
 	} else if m.searched && len(m.items) == 0 {
