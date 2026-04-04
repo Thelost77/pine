@@ -3,6 +3,7 @@ package player
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Thelost77/pine/internal/logger"
@@ -91,7 +92,7 @@ type PlayerQuitMsg struct{}
 func LaunchCmd(p Player, url string, startTime float64) tea.Cmd {
 	return func() tea.Msg {
 		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
-		socketPath := fmt.Sprintf("%s/pine-mpv-%d.sock", MpvSocketDir(), os.Getpid())
+		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("pine-mpv-%d.sock", os.Getpid()))
 		// Remove stale socket
 		os.Remove(socketPath)
 
