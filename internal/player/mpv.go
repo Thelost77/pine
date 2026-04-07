@@ -2,11 +2,15 @@
 package player
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/dexterlb/mpvipc"
@@ -71,10 +75,12 @@ type ProcessStarter func(name string, args ...string) *exec.Cmd
 
 // Mpv wraps mpvipc to control an mpv subprocess via IPC.
 type Mpv struct {
-	conn    IPCConnection
-	cmd     *exec.Cmd
-	startFn ProcessStarter
-	newConn func(socketPath string) IPCConnection
+	conn     IPCConnection
+	cmd      *exec.Cmd
+	startFn  ProcessStarter
+	newConn  func(socketPath string) IPCConnection
+	procMu   sync.Mutex
+	waitDone chan struct{}
 }
 
 // NewMpv creates an Mpv player with default process and connection factories.
@@ -92,24 +98,44 @@ func NewMpv() *Mpv {
 func (m *Mpv) Launch(url, startTime, socketPath string) error {
 	// Clean up any existing mpv process to avoid orphans
 	if m.cmd != nil && m.cmd.Process != nil {
-		logger.Warn("killing previous mpv process", "pid", m.cmd.Process.Pid)
-		_ = m.cmd.Process.Kill()
-		_ = m.cmd.Wait()
+		m.stopProcess("killing previous mpv process")
 	}
 	if m.conn != nil && !m.conn.IsClosed() {
 		_ = m.conn.Close()
 	}
-	m.cmd = m.startFn("mpv",
+
+	cmd := m.startFn("mpv",
 		"--no-video",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 		fmt.Sprintf("--start=%s", startTime),
 		url,
 	)
-	if err := m.cmd.Start(); err != nil {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		logger.Error("failed to attach mpv stdout", "socketPath", socketPath, "startTime", startTime, "err", err)
+		return fmt.Errorf("attach mpv stdout: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		logger.Error("failed to attach mpv stderr", "socketPath", socketPath, "startTime", startTime, "err", err)
+		return fmt.Errorf("attach mpv stderr: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
 		logger.Error("failed to start mpv subprocess", "socketPath", socketPath, "startTime", startTime, "err", err)
 		return fmt.Errorf("failed to launch mpv: %w", err)
 	}
-	logger.Info("mpv subprocess started", "pid", m.cmd.Process.Pid, "socketPath", socketPath, "startTime", startTime)
+	stream := describeStreamURL(url)
+	logger.Info("mpv subprocess started",
+		"pid", cmd.Process.Pid,
+		"socketPath", socketPath,
+		"startTime", startTime,
+		"streamParsed", stream.Parsed,
+		"streamScheme", stream.Scheme,
+		"streamHost", stream.Host,
+		"streamPath", stream.Path,
+		"streamHasToken", stream.HasToken,
+	)
+	m.startProcessWatchers(cmd, stdout, stderr)
 	m.conn = m.newConn(socketPath)
 	return nil
 }
@@ -204,11 +230,113 @@ func (m *Mpv) Quit() error {
 		_ = m.conn.Close()
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
-		logger.Info("stopping mpv subprocess", "pid", m.cmd.Process.Pid)
-		_ = m.cmd.Process.Kill()
-		_ = m.cmd.Wait()
+		m.stopProcess("stopping mpv subprocess")
 	}
 	return nil
+}
+
+type streamLogInfo struct {
+	Parsed   bool
+	Scheme   string
+	Host     string
+	Path     string
+	HasToken bool
+}
+
+func describeStreamURL(rawURL string) streamLogInfo {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return streamLogInfo{}
+	}
+	return streamLogInfo{
+		Parsed:   true,
+		Scheme:   parsed.Scheme,
+		Host:     parsed.Host,
+		Path:     parsed.EscapedPath(),
+		HasToken: parsed.Query().Has("token"),
+	}
+}
+
+func (m *Mpv) startProcessWatchers(cmd *exec.Cmd, stdout, stderr io.ReadCloser) {
+	done := make(chan struct{})
+
+	m.procMu.Lock()
+	m.cmd = cmd
+	m.waitDone = done
+	m.procMu.Unlock()
+
+	pid := cmd.Process.Pid
+
+	go logMpvPipe("stdout", pid, stdout)
+	go logMpvPipe("stderr", pid, stderr)
+
+	go func() {
+		err := cmd.Wait()
+		logMpvExit(pid, cmd.ProcessState, err)
+
+		m.procMu.Lock()
+		if m.cmd == cmd {
+			m.cmd = nil
+			m.waitDone = nil
+		}
+		m.procMu.Unlock()
+
+		close(done)
+	}()
+}
+
+func (m *Mpv) stopProcess(reason string) {
+	m.procMu.Lock()
+	cmd := m.cmd
+	done := m.waitDone
+	m.procMu.Unlock()
+
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
+	logger.Info(reason, "pid", cmd.Process.Pid)
+	if err := cmd.Process.Kill(); err != nil {
+		logger.Debug("failed to kill mpv subprocess", "pid", cmd.Process.Pid, "err", err)
+	}
+	if done != nil {
+		<-done
+	}
+
+	m.procMu.Lock()
+	if m.cmd == cmd {
+		m.cmd = nil
+		m.waitDone = nil
+	}
+	m.procMu.Unlock()
+}
+
+func logMpvPipe(stream string, pid int, r io.ReadCloser) {
+	defer r.Close()
+
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		logger.Debug("mpv "+stream, "pid", pid, "line", scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Warn("failed reading mpv "+stream, "pid", pid, "err", err)
+	}
+}
+
+func logMpvExit(pid int, state *os.ProcessState, err error) {
+	args := []any{"pid", pid}
+	if state != nil {
+		args = append(args, "exitCode", state.ExitCode(), "state", state.String())
+		if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			args = append(args, "signal", status.Signal())
+		}
+	}
+	if err != nil {
+		args = append(args, "err", err)
+		logger.Warn("mpv subprocess exited", args...)
+		return
+	}
+	logger.Info("mpv subprocess exited", args...)
 }
 
 func (m *Mpv) getFloat(property string) (float64, error) {
