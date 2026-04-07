@@ -154,17 +154,35 @@ type SeriesSequence struct {
 	Sequence string `json:"sequence,omitempty"`
 }
 
-// SeriesBook is a library item embedded in a series response with sequence info.
+// SeriesBook is a library item embedded in some ABS responses with sequence info.
 type SeriesBook struct {
 	LibraryItem
 	Sequence string `json:"sequence,omitempty"`
 }
 
-// Series contains ordered books for a given series.
+// Series contains series metadata returned by ABS.
 type Series struct {
-	ID    string       `json:"id"`
-	Name  string       `json:"name"`
-	Books []SeriesBook `json:"books"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	LibraryID   string       `json:"libraryId,omitempty"`
+	AddedAt     int64        `json:"addedAt,omitempty"`
+	UpdatedAt   int64        `json:"updatedAt,omitempty"`
+	Books       []SeriesBook `json:"books"`
+}
+
+// SeriesContents combines series metadata with the library items in that series.
+type SeriesContents struct {
+	Series Series
+	Items  []LibraryItem
+}
+
+// LibrarySeriesResponse is returned by GET /api/libraries/{id}/series.
+type LibrarySeriesResponse struct {
+	Results []Series `json:"results"`
+	Total   int      `json:"total"`
+	Limit   int      `json:"limit"`
+	Page    int      `json:"page"`
 }
 
 // Chapter represents a chapter within a media item.

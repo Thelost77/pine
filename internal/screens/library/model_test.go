@@ -69,7 +69,7 @@ func TestLibraryItemsMsgPopulatesList(t *testing.T) {
 	items := makeItems(3)
 	msg := LibraryItemsMsg{Items: items, Total: 10, Page: 0}
 
-	m, _ = m.Update(msg)
+	m, cmd := m.Update(msg)
 
 	if m.Loading() {
 		t.Error("loading should be false after receiving items")
@@ -82,6 +82,9 @@ func TestLibraryItemsMsgPopulatesList(t *testing.T) {
 	}
 	if m.Page() != 0 {
 		t.Errorf("expected page 0, got %d", m.Page())
+	}
+	if cmd != nil {
+		t.Fatal("expected no follow-up command after loading items")
 	}
 }
 
@@ -164,6 +167,27 @@ func TestSlashEmitsNavigateSearchMsg(t *testing.T) {
 	}
 }
 
+func TestSKeyEmitsNavigateSeriesListMsg(t *testing.T) {
+	libs := []abs.Library{{ID: "lib-001", Name: "Books", MediaType: "book"}}
+	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if cmd == nil {
+		t.Fatal("s should produce a command")
+	}
+	msg := cmd()
+	navMsg, ok := msg.(NavigateSeriesListMsg)
+	if !ok {
+		t.Fatalf("expected NavigateSeriesListMsg, got %T", msg)
+	}
+	if navMsg.LibraryID != "lib-001" {
+		t.Fatalf("library ID = %q, want lib-001", navMsg.LibraryID)
+	}
+	if navMsg.LibraryName != "Books" {
+		t.Fatalf("library name = %q, want Books", navMsg.LibraryName)
+	}
+}
+
 func TestViewShowsLoadingWhenEmpty(t *testing.T) {
 	m := newTestModel()
 	m.loading = true
@@ -199,8 +223,8 @@ func TestViewShowsListAfterItems(t *testing.T) {
 	}
 }
 
-func TestListItemDescription(t *testing.T) {
-	item := ui.ListItem{Item: abs.LibraryItem{
+func TestLibraryListItemDescription(t *testing.T) {
+	item := libraryListItem{Item: abs.LibraryItem{
 		Media: abs.Media{
 			Metadata: abs.MediaMetadata{
 				Title:      "Test",
@@ -219,8 +243,31 @@ func TestListItemDescription(t *testing.T) {
 	}
 }
 
-func TestListItemDescriptionUnknownAuthor(t *testing.T) {
-	item := ui.ListItem{Item: abs.LibraryItem{
+func TestLibraryListItemDescriptionOmitsSeriesInfo(t *testing.T) {
+	item := libraryListItem{Item: abs.LibraryItem{
+		MediaType: "book",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title:      "Test",
+				AuthorName: ptrString("Jane Doe"),
+				Duration:   ptrFloat(7200),
+				Series: &abs.SeriesSequence{
+					ID:       "series-expanse",
+					Name:     "The Expanse",
+					Sequence: "2",
+				},
+			},
+		},
+	}}
+
+	desc := item.Description()
+	if containsString(desc, "The Expanse") {
+		t.Errorf("description should omit series info, got %q", desc)
+	}
+}
+
+func TestLibraryListItemDescriptionUnknownAuthor(t *testing.T) {
+	item := libraryListItem{Item: abs.LibraryItem{
 		Media: abs.Media{
 			Metadata: abs.MediaMetadata{Title: "Test"},
 		},
@@ -232,8 +279,8 @@ func TestListItemDescriptionUnknownAuthor(t *testing.T) {
 	}
 }
 
-func TestListItemFilterValue(t *testing.T) {
-	item := ui.ListItem{Item: abs.LibraryItem{
+func TestLibraryListItemFilterValue(t *testing.T) {
+	item := libraryListItem{Item: abs.LibraryItem{
 		Media: abs.Media{
 			Metadata: abs.MediaMetadata{Title: "My Book"},
 		},

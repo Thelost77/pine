@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
@@ -44,12 +45,19 @@ type NavigateSearchMsg struct {
 	LibraryMediaType string
 }
 
+// NavigateSeriesListMsg requests navigation to the current library's series browser.
+type NavigateSeriesListMsg struct {
+	LibraryID   string
+	LibraryName string
+}
+
 // KeyMap defines keybindings for the library screen.
 type KeyMap struct {
 	Enter   key.Binding
 	Back    key.Binding
 	NextLib key.Binding
 	Search  key.Binding
+	Series  key.Binding
 	Select  key.Binding
 }
 
@@ -71,6 +79,10 @@ func DefaultKeyMap() KeyMap {
 		Search: key.NewBinding(
 			key.WithKeys("/"),
 			key.WithHelp("/", "search"),
+		),
+		Series: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "series"),
 		),
 		Select: key.NewBinding(
 			key.WithKeys("right"),
@@ -168,15 +180,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.page = msg.Page
 
 		if msg.Page == 0 {
-			m.items = msg.Items
+			m.items = append([]abs.LibraryItem(nil), msg.Items...)
 		} else {
 			m.items = append(m.items, msg.Items...)
 		}
-		items := make([]list.Item, len(m.items))
-		for i, item := range m.items {
-			items[i] = ui.ListItem{Item: item}
-		}
-		m.list.SetItems(items)
+		m.syncListItems()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -186,7 +194,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Enter), key.Matches(msg, m.keys.Select):
-			if sel, ok := m.list.SelectedItem().(ui.ListItem); ok {
+			if sel, ok := m.list.SelectedItem().(libraryListItem); ok {
 				return m, func() tea.Msg {
 					return NavigateDetailMsg{Item: sel.Item}
 				}
@@ -199,6 +207,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
 			}
+		case key.Matches(msg, m.keys.Series):
+			if m.SelectedLibraryMediaType() == "book" {
+				libID := m.libraryID
+				libName := m.selectedLibraryName()
+				return m, func() tea.Msg {
+					return NavigateSeriesListMsg{LibraryID: libID, LibraryName: libName}
+				}
+			}
+			return m, nil
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
@@ -216,11 +233,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	m.list, cmd = m.list.Update(msg)
 
 	// After list update, check if cursor is near the end for infinite scroll
-	if prefetchCmd := m.maybePrefetch(); prefetchCmd != nil {
-		return m, tea.Batch(cmd, prefetchCmd)
-	}
-
-	return m, cmd
+	prefetchCmd := m.maybePrefetch()
+	return m, tea.Batch(cmd, prefetchCmd)
 }
 
 // maybePrefetch checks if the cursor has reached 80% of loaded items and
@@ -283,6 +297,14 @@ func (m *Model) fetchLibraryItemsCmd(page, limit int) tea.Cmd {
 	}
 }
 
+func (m *Model) syncListItems() {
+	items := make([]list.Item, len(m.items))
+	for i, item := range m.items {
+		items[i] = libraryListItem{Item: item}
+	}
+	m.list.SetItems(items)
+}
+
 // Items returns the current library items.
 func (m Model) Items() []abs.LibraryItem {
 	return m.items
@@ -295,6 +317,13 @@ func (m Model) SelectedLibraryMediaType() string {
 	}
 	if len(m.items) > 0 {
 		return m.items[0].MediaType
+	}
+	return ""
+}
+
+func (m Model) selectedLibraryName() string {
+	if len(m.libraries) > 0 && m.selectedLibrary < len(m.libraries) {
+		return m.libraries[m.selectedLibrary].Name
 	}
 	return ""
 }
@@ -316,6 +345,43 @@ func (m Model) Loading() bool {
 // Error returns the last error, if any.
 func (m Model) Error() error {
 	return m.err
+}
+
+type libraryListItem struct {
+	Item abs.LibraryItem
+}
+
+func (i libraryListItem) Title() string {
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		return i.Item.RecentEpisode.Title
+	}
+	return i.Item.Media.Metadata.Title
+}
+
+func (i libraryListItem) Description() string {
+	context := "Unknown author"
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		context = i.Item.Media.Metadata.Title
+	} else if i.Item.Media.Metadata.AuthorName != nil {
+		context = *i.Item.Media.Metadata.AuthorName
+	}
+
+	duration := ""
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil && i.Item.RecentEpisode.Duration > 0 {
+		duration = ui.FormatDuration(i.Item.RecentEpisode.Duration)
+	} else if i.Item.Media.HasDuration() {
+		duration = ui.FormatDuration(i.Item.Media.TotalDuration())
+	}
+
+	parts := []string{context}
+	if duration != "" {
+		parts = append(parts, duration)
+	}
+	return strings.Join(parts, " • ")
+}
+
+func (i libraryListItem) FilterValue() string {
+	return i.Item.Media.Metadata.Title
 }
 
 // Page returns the current page number.

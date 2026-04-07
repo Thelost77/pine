@@ -1,11 +1,16 @@
 package abs
 
 import (
+	"cmp"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Thelost77/pine/internal/logger"
@@ -64,7 +69,35 @@ func (c *Client) GetRecentlyAdded(ctx context.Context, libraries []Library) ([]L
 
 // GetLibraryItems returns a paginated list of items in a library.
 func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, limit int) (*LibraryItemsResponse, error) {
-	path := fmt.Sprintf("/api/libraries/%s/items?page=%d&limit=%d", libraryID, page, limit)
+	return c.getLibraryItems(ctx, libraryID, page, limit, "")
+}
+
+// GetLibrarySeries returns a paginated list of series in a library.
+func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, limit int) (*LibrarySeriesResponse, error) {
+	query := url.Values{}
+	query.Set("page", strconv.Itoa(page))
+	query.Set("limit", strconv.Itoa(limit))
+	path := fmt.Sprintf("/api/libraries/%s/series?%s", libraryID, query.Encode())
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get library series: %w", err)
+	}
+
+	var resp LibrarySeriesResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("decode library series response: %w", err)
+	}
+	return &resp, nil
+}
+
+func (c *Client) getLibraryItems(ctx context.Context, libraryID string, page, limit int, filter string) (*LibraryItemsResponse, error) {
+	query := url.Values{}
+	query.Set("page", strconv.Itoa(page))
+	query.Set("limit", strconv.Itoa(limit))
+	if filter != "" {
+		query.Set("filter", filter)
+	}
+	path := fmt.Sprintf("/api/libraries/%s/items?%s", libraryID, query.Encode())
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get library items: %w", err)
@@ -158,7 +191,7 @@ func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*LibraryIte
 	return &item, nil
 }
 
-// GetSeries returns an ordered series payload scoped to a library.
+// GetSeries returns series metadata scoped to a library.
 func (c *Client) GetSeries(ctx context.Context, libraryID, seriesID string) (*Series, error) {
 	path := fmt.Sprintf("/api/libraries/%s/series/%s", libraryID, seriesID)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
@@ -171,6 +204,94 @@ func (c *Client) GetSeries(ctx context.Context, libraryID, seriesID string) (*Se
 		return nil, fmt.Errorf("decode series response: %w", err)
 	}
 	return &series, nil
+}
+
+const seriesPageLimit = 50
+
+// GetSeriesContents returns series metadata plus all library items in that series.
+func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID string) (*SeriesContents, error) {
+	series, err := c.GetSeries(ctx, libraryID, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	if series == nil {
+		return nil, nil
+	}
+
+	items := make([]LibraryItem, 0)
+	for page := 0; ; page++ {
+		resp, err := c.getLibraryItems(ctx, libraryID, page, seriesPageLimit, "series."+encodeLibraryFilterValue(seriesID))
+		if err != nil {
+			return nil, fmt.Errorf("get series items: %w", err)
+		}
+		items = append(items, resp.Results...)
+
+		if len(resp.Results) == 0 || len(resp.Results) < seriesPageLimit {
+			break
+		}
+		loaded := (page + 1) * seriesPageLimit
+		if resp.Total > 0 && loaded >= resp.Total {
+			break
+		}
+	}
+
+	sortSeriesItems(items, seriesID)
+	if series.Name == "" {
+		for _, item := range items {
+			if item.Media.Metadata.Series != nil && item.Media.Metadata.Series.ID == seriesID && item.Media.Metadata.Series.Name != "" {
+				series.Name = item.Media.Metadata.Series.Name
+				break
+			}
+		}
+	}
+
+	return &SeriesContents{Series: *series, Items: items}, nil
+}
+
+func sortSeriesItems(items []LibraryItem, seriesID string) {
+	slices.SortStableFunc(items, func(a, b LibraryItem) int {
+		aseq, aok := seriesSequenceValue(a, seriesID)
+		bseq, bok := seriesSequenceValue(b, seriesID)
+		switch {
+		case aok && bok:
+			if aseq < bseq {
+				return -1
+			}
+			if aseq > bseq {
+				return 1
+			}
+		case aok:
+			return -1
+		case bok:
+			return 1
+		}
+
+		atitle := a.Media.Metadata.Title
+		btitle := b.Media.Metadata.Title
+		if atitle != btitle {
+			return cmp.Compare(atitle, btitle)
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+}
+
+func seriesSequenceValue(item LibraryItem, seriesID string) (float64, bool) {
+	if item.Media.Metadata.Series == nil || item.Media.Metadata.Series.ID != seriesID {
+		return 0, false
+	}
+	sequence := strings.TrimSpace(item.Media.Metadata.Series.Sequence)
+	if sequence == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(sequence, 64)
+	if err != nil || math.IsNaN(value) {
+		return 0, false
+	}
+	return value, true
+}
+
+func encodeLibraryFilterValue(value string) string {
+	return base64.StdEncoding.EncodeToString([]byte(value))
 }
 
 const audioCheckSampleSize = 10

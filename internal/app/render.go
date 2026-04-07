@@ -65,6 +65,8 @@ func (m Model) viewScreen() string {
 		return m.detail.View()
 	case ScreenSearch:
 		return m.search.View()
+	case ScreenSeriesList:
+		return m.seriesList.View()
 	case ScreenSeries:
 		return m.series.View()
 	default:
@@ -91,6 +93,7 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("tab", "switch lib"))
 	case ScreenLibrary:
 		parts = append(parts, key("→/enter", "open"))
+		parts = append(parts, key("s", "series"))
 		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenDetail:
@@ -103,6 +106,9 @@ func (m Model) viewHints() string {
 	case ScreenSearch:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("esc", "back"))
+	case ScreenSeriesList:
+		parts = append(parts, key("enter", "open"))
+		parts = append(parts, key("←/esc", "back"))
 	case ScreenSeries:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("←/esc", "back"))

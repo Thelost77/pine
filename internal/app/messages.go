@@ -11,6 +11,7 @@ const (
 	ScreenLibrary
 	ScreenDetail
 	ScreenSearch
+	ScreenSeriesList
 	ScreenSeries
 )
 
@@ -27,6 +28,8 @@ func (s Screen) String() string {
 		return "Detail"
 	case ScreenSearch:
 		return "Search"
+	case ScreenSeriesList:
+		return "Series"
 	case ScreenSeries:
 		return "Series"
 	default:

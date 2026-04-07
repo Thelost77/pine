@@ -15,6 +15,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/screens/series"
+	"github.com/Thelost77/pine/internal/screens/serieslist"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -37,6 +38,7 @@ type Model struct {
 	library     library.Model
 	detail      detail.Model
 	search      search.Model
+	seriesList  serieslist.Model
 	searchCache *search.Cache
 	series      series.Model
 	player      player.Model
@@ -92,6 +94,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		library:     library.New(styles, client, "", nil),
 		searchCache: searchCache,
 		search:      search.New(styles, searchCache, "", ""),
+		seriesList:  serieslist.New(styles, client, "", ""),
 		series:      series.New(styles, client, "", "", ""),
 		player:      player.NewModel(mpv, cfg, styles),
 		keys:        DefaultKeyMap(cfg.Keybinds),
@@ -180,6 +183,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.library = library.New(m.styles, m.client, "", nil)
 		m.searchCache = search.NewCache(m.client)
 		m.search = search.New(m.styles, m.searchCache, "", "")
+		m.seriesList = serieslist.New(m.styles, m.client, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
 		m.login, _ = m.login.Update(msg)
 		m.backStack = nil
@@ -259,6 +263,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search = search.New(m.styles, m.searchCache, msg.LibraryID, msg.LibraryMediaType)
 		return m.navigate(ScreenSearch)
 
+	case library.NavigateSeriesListMsg:
+		m.seriesList = serieslist.New(m.styles, m.client, msg.LibraryID, msg.LibraryName)
+		return m.navigate(ScreenSeriesList)
+
 	case EpisodesLoadedMsg:
 		if msg.Err != nil {
 			logger.Error("failed to load episodes", "err", msg.Err)
@@ -316,6 +324,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case detail.NavigateSeriesMsg:
 		m.series = series.New(m.styles, m.client, msg.LibraryID, msg.SeriesID, msg.CurrentItemID)
 		return m.navigate(ScreenSeries)
+
+	case serieslist.NavigateSeriesMsg:
+		m.series = series.New(m.styles, m.client, msg.LibraryID, msg.SeriesID, "")
+		return m.navigate(ScreenSeries)
+
+	case serieslist.BackMsg:
+		return m.back()
 
 	case detail.MarkFinishedCmd:
 		return m.handleMarkFinished(msg)

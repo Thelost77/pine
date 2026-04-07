@@ -57,6 +57,14 @@ func defaultGroups() []HelpGroup {
 			},
 		},
 		{
+			Title: "Library",
+			Bindings: []HelpBinding{
+				{Key: "s", Desc: "browse series"},
+				{Key: "/", Desc: "search"},
+				{Key: "tab", Desc: "switch library"},
+			},
+		},
+		{
 			Title: "Navigation",
 			Bindings: []HelpBinding{
 				{Key: "j / ↓", Desc: "move down"},

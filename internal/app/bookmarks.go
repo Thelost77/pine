@@ -136,11 +136,12 @@ func (m Model) fetchEpisodesCmd(itemID string) tea.Cmd {
 }
 
 // fetchBookDetailCmd returns a command that fetches an enriched book item from ABS.
-func (m Model) fetchBookDetailCmd(itemID string) tea.Cmd {
+func (m Model) fetchBookDetailCmd(item abs.LibraryItem) tea.Cmd {
 	if m.client == nil {
 		return nil
 	}
 	client := m.client
+	itemID := item.ID
 	return func() tea.Msg {
 		item, err := client.GetLibraryItem(context.Background(), itemID)
 		if err != nil {
@@ -156,7 +157,7 @@ func (m Model) detailLoadCmds(item abs.LibraryItem, navCmd tea.Cmd) []tea.Cmd {
 		return append(cmds, m.fetchEpisodesCmd(item.ID))
 	}
 	if item.MediaType == "book" {
-		return append(cmds, m.fetchBookDetailCmd(item.ID))
+		return append(cmds, m.fetchBookDetailCmd(item))
 	}
 	return cmds
 }

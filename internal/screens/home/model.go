@@ -180,12 +180,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if len(msg.Libraries) > 0 {
 			m.libraries = msg.Libraries
 		}
-		m.items = limitItems(msg.Items, continueListeningLimit)
-		m.recentlyAdded = dedupeRecentlyAdded(m.items, msg.RecentlyAdded, recentlyAddedLimit)
 		if libID := m.SelectedLibraryID(); libID != "" {
+			items := limitItems(msg.Items, continueListeningLimit)
+			recent := dedupeRecentlyAdded(items, msg.RecentlyAdded, recentlyAddedLimit)
+			m.items = items
+			m.recentlyAdded = recent
 			m.itemCache[libID] = m.items
 			m.recentCache[libID] = m.recentlyAdded
+			m.setListItems(m.items)
+			m.updateListTitle()
+			return m, nil
 		}
+		m.items = limitItems(msg.Items, continueListeningLimit)
+		m.recentlyAdded = dedupeRecentlyAdded(m.items, msg.RecentlyAdded, recentlyAddedLimit)
 		m.setListItems(m.items)
 		m.updateListTitle()
 		return m, nil
@@ -514,7 +521,6 @@ func itemDescription(item abs.LibraryItem) string {
 	case item.Media.HasDuration():
 		duration = fmt.Sprintf(" • %s", ui.FormatDuration(item.Media.TotalDuration()))
 	}
-
 	return contextLabel + progress + duration
 }
 

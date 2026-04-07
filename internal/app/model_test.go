@@ -11,6 +11,7 @@ import (
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/home"
+	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui/components"
@@ -99,6 +100,7 @@ func TestScreenString(t *testing.T) {
 		{ScreenLibrary, "Library"},
 		{ScreenDetail, "Detail"},
 		{ScreenSearch, "Search"},
+		{ScreenSeriesList, "Series"},
 		{ScreenSeries, "Series"},
 		{Screen(99), "Unknown"},
 	}
@@ -1172,6 +1174,23 @@ func TestNavigateSeriesMsgOpensSeriesScreen(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected init command when navigating to series screen")
+	}
+}
+
+func TestNavigateSeriesListMsgOpensSeriesListScreen(t *testing.T) {
+	m := newPlaybackTestModel()
+
+	result, cmd := m.Update(library.NavigateSeriesListMsg{
+		LibraryID:   "lib-books-001",
+		LibraryName: "Books",
+	})
+	rm := result.(Model)
+
+	if rm.ActiveScreen() != ScreenSeriesList {
+		t.Fatalf("screen = %v, want Series", rm.ActiveScreen())
+	}
+	if cmd == nil {
+		t.Fatal("expected init command when navigating to series list screen")
 	}
 }
 
