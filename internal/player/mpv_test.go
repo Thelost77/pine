@@ -333,6 +333,37 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 	}
 }
 
+func TestDescribeStreamURL(t *testing.T) {
+	info := describeStreamURL("https://abs.example.com/s/item/book/audio.mp3?token=secret-token")
+
+	if !info.Parsed {
+		t.Fatal("expected URL to parse")
+	}
+	if info.Scheme != "https" {
+		t.Fatalf("scheme = %q, want https", info.Scheme)
+	}
+	if info.Host != "abs.example.com" {
+		t.Fatalf("host = %q, want abs.example.com", info.Host)
+	}
+	if info.Path != "/s/item/book/audio.mp3" {
+		t.Fatalf("path = %q, want /s/item/book/audio.mp3", info.Path)
+	}
+	if !info.HasToken {
+		t.Fatal("expected token query to be detected")
+	}
+}
+
+func TestDescribeStreamURLInvalid(t *testing.T) {
+	info := describeStreamURL("://bad-url")
+
+	if info.Parsed {
+		t.Fatal("expected invalid URL to remain unparsed")
+	}
+	if info.Host != "" || info.Path != "" || info.HasToken {
+		t.Fatalf("unexpected info for invalid URL: %+v", info)
+	}
+}
+
 func TestGetFloatIntType(t *testing.T) {
 	mc := newMockConn()
 	mc.props["time-pos"] = int(100)
