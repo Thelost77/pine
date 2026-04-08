@@ -860,6 +860,71 @@ func TestManualStopPreservesQueue(t *testing.T) {
 	}
 }
 
+func TestMarkFinishedUsesEpisodeDurationForPodcasts(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/pod-001/ep-001":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, &mockPlayer{})
+
+	totalDuration := 7200.0
+	episodeDuration := 1800.0
+	_, cmd := m.handleMarkFinished(detail.MarkFinishedCmd{
+		Item: abs.LibraryItem{
+			ID:        "pod-001",
+			MediaType: "podcast",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:    "Podcast Show",
+					Duration: &totalDuration,
+				},
+			},
+		},
+		Episode: &abs.PodcastEpisode{
+			ID:       "ep-001",
+			Title:    "Episode 1",
+			Duration: episodeDuration,
+		},
+	})
+
+	if cmd == nil {
+		t.Fatal("expected command from handleMarkFinished")
+	}
+	msg := cmd()
+	if _, ok := msg.(detail.MarkFinishedMsg); !ok {
+		t.Fatalf("expected MarkFinishedMsg, got %T", msg)
+	}
+
+	reqs := log.get()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	req := reqs[0]
+	if req.Method != http.MethodPatch || req.Path != "/api/me/progress/pod-001/ep-001" {
+		t.Fatalf("unexpected request: %s %s", req.Method, req.Path)
+	}
+
+	if got, ok := req.Body["currentTime"].(float64); !ok || got != episodeDuration {
+		t.Fatalf("currentTime = %#v, want %v", req.Body["currentTime"], episodeDuration)
+	}
+}
+
 func TestPlaybackErrorDoesNotConsumeQueue(t *testing.T) {
 	log := &apiLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

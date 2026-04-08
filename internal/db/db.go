@@ -96,5 +96,16 @@ func (s *Store) migrate() error {
 		logger.Info("database migration applied", "migration", "rename token_encrypted column")
 	}
 
+	// Add episode_id column if it doesn't exist (SQLite doesn't support IF NOT EXISTS for ALTER TABLE)
+	var hasEpisodeID bool
+	row := s.DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'episode_id'`)
+	if err := row.Scan(&hasEpisodeID); err == nil && !hasEpisodeID {
+		if _, err := s.DB.Exec(`ALTER TABLE sessions ADD COLUMN episode_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			logger.Error("database migration failed", "migration", "add episode_id column", "err", err)
+			return fmt.Errorf("migration failed: %w", err)
+		}
+		logger.Info("database migration applied", "migration", "add episode_id column")
+	}
+
 	return nil
 }

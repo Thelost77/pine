@@ -7,7 +7,7 @@ pine is a TUI client for Audiobookshelf written in Go with bubbletea.
 ## Build & Test
 
 ```sh
-go build ./cmd/                    # build
+go build -o pine ./cmd/              # build
 go test ./... -count=1             # run all tests
 go test ./internal/app/... -v      # verbose app tests (includes E2E)
 ```

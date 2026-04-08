@@ -161,9 +161,11 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
-	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters))
+	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
 
-	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime)
+	paused := m.restorePaused
+	m.restorePaused = false
+	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused)
 }
 
 // handlePlayerReady starts the position tick and sync tick.
@@ -423,6 +425,7 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	client := m.client
 	sessionID := m.sessionID
 	itemID := m.itemID
+	episodeID := m.episodeID
 	currentTime := m.player.Position
 	timeListened := m.timeListened
 	duration := m.player.Duration
@@ -446,6 +449,7 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 			if store != nil {
 				if err := store.SaveListeningSession(db.ListeningSession{
 					ItemID:      itemID,
+					EpisodeID:   episodeID,
 					SessionID:   sessionID,
 					CurrentTime: currentTime,
 					Duration:    duration,
@@ -468,19 +472,28 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	}
 	client := m.client
 	item := msg.Item
+	episode := msg.Episode
 	duration := item.Media.TotalDuration()
+	if episode != nil && episode.Duration > 0 {
+		duration = episode.Duration
+	}
 	return m, func() tea.Msg {
-		if err := client.UpdateProgress(context.Background(), item.ID, duration, 1.0, true); err != nil {
+		var err error
+		if episode != nil {
+			err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, duration, 1.0, true)
+		} else {
+			err = client.UpdateProgress(context.Background(), item.ID, duration, 1.0, true)
+		}
+		if err != nil {
 			logger.Warn("failed to mark as finished", "err", err)
 			return PlaybackErrorMsg{Err: err}
 		}
-		return detail.MarkFinishedMsg{
-			Progress: &abs.UserMediaProgress{
-				CurrentTime: duration,
-				Progress:    1.0,
-				IsFinished:  true,
-			},
+		progress := &abs.UserMediaProgress{
+			CurrentTime: duration,
+			Progress:    1.0,
+			IsFinished:  true,
 		}
+		return detail.MarkFinishedMsg{Progress: progress}
 	}
 }
 
@@ -537,6 +550,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 			if store != nil && itemID != "" {
 				if err := store.SaveListeningSession(db.ListeningSession{
 					ItemID:      itemID,
+					EpisodeID:   episodeID,
 					SessionID:   sessionID,
 					CurrentTime: currentTime,
 					Duration:    duration,
@@ -611,13 +625,14 @@ func (m Model) Cleanup() {
 	if m.db != nil && m.itemID != "" {
 		if err := m.db.SaveListeningSession(db.ListeningSession{
 			ItemID:      m.itemID,
+			EpisodeID:   m.episodeID,
 			SessionID:   m.sessionID,
 			CurrentTime: currentTime,
 			Duration:    duration,
 		}); err != nil {
-			logger.Warn("cleanup: failed to save listening session", "itemID", m.itemID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+			logger.Warn("cleanup: failed to save listening session", "itemID", m.itemID, "episodeID", m.episodeID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration, "err", err)
 		} else {
-			logger.Debug("cleanup: listening session saved", "itemID", m.itemID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration)
+			logger.Debug("cleanup: listening session saved", "itemID", m.itemID, "episodeID", m.episodeID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration)
 		}
 	}
 }
@@ -627,4 +642,32 @@ func syncTickCmd() tea.Cmd {
 	return tea.Tick(syncInterval, func(_ time.Time) tea.Msg {
 		return SyncTickMsg{}
 	})
+}
+
+// restoreSessionCmd fetches the last saved session from the DB and resolves
+// the full LibraryItem from ABS so playback can resume.
+func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
+	return func() tea.Msg {
+		session, err := store.GetLastSession()
+		if err != nil {
+			logger.Debug("no saved session to restore", "err", err)
+			return RestoreSessionMsg{}
+		}
+		item, err := client.GetLibraryItem(context.Background(), session.ItemID)
+		if err != nil {
+			logger.Warn("failed to fetch item for session restore", "itemID", session.ItemID, "err", err)
+			return RestoreSessionMsg{}
+		}
+		var episode *abs.PodcastEpisode
+		if session.EpisodeID != "" {
+			for _, ep := range item.Media.Episodes {
+				if ep.ID == session.EpisodeID {
+					ep := ep
+					episode = &ep
+					break
+				}
+			}
+		}
+		return RestoreSessionMsg{Item: item, Episode: episode}
+	}
 }

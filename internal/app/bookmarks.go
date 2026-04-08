@@ -38,12 +38,12 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
+		progress, err := client.GetMediaProgress(context.Background(), itemID)
 		if err != nil {
 			return detail.BookmarksUpdatedMsg{Err: err}
 		}
-		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
-		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
+		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(progress.Bookmarks))
+		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
 	}
 }
 
@@ -72,12 +72,12 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
+		progress, err := client.GetMediaProgress(context.Background(), itemID)
 		if err != nil {
 			return detail.BookmarksUpdatedMsg{Err: err}
 		}
-		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
-		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
+		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(progress.Bookmarks))
+		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
 	}
 }
 
@@ -96,12 +96,12 @@ func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cm
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
+		progress, err := client.GetMediaProgress(context.Background(), itemID)
 		if err != nil {
 			return detail.BookmarksUpdatedMsg{Err: err}
 		}
-		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(bookmarks))
-		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
+		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(progress.Bookmarks))
+		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
 	}
 }
 
@@ -112,11 +112,11 @@ func (m Model) fetchBookmarksCmd(itemID string) tea.Cmd {
 	}
 	client := m.client
 	return func() tea.Msg {
-		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
+		progress, err := client.GetMediaProgress(context.Background(), itemID)
 		if err != nil {
 			return detail.BookmarksUpdatedMsg{Err: err}
 		}
-		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
+		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
 	}
 }
 
@@ -129,24 +129,25 @@ func (m Model) fetchEpisodesCmd(itemID string) tea.Cmd {
 	return func() tea.Msg {
 		item, err := client.GetLibraryItem(context.Background(), itemID)
 		if err != nil {
-			return EpisodesLoadedMsg{Err: err}
+			return EpisodesLoadedMsg{ItemID: itemID, Err: err}
 		}
-		return EpisodesLoadedMsg{Episodes: item.Media.Episodes}
+		return EpisodesLoadedMsg{ItemID: itemID, Episodes: item.Media.Episodes}
 	}
 }
 
 // fetchBookDetailCmd returns a command that fetches an enriched book item from ABS.
-func (m Model) fetchBookDetailCmd(itemID string) tea.Cmd {
+func (m Model) fetchBookDetailCmd(item abs.LibraryItem) tea.Cmd {
 	if m.client == nil {
 		return nil
 	}
 	client := m.client
+	itemID := item.ID
 	return func() tea.Msg {
 		item, err := client.GetLibraryItem(context.Background(), itemID)
 		if err != nil {
-			return BookDetailLoadedMsg{Err: err}
+			return BookDetailLoadedMsg{ItemID: itemID, Err: err}
 		}
-		return BookDetailLoadedMsg{Item: item}
+		return BookDetailLoadedMsg{ItemID: itemID, Item: item}
 	}
 }
 
@@ -156,7 +157,7 @@ func (m Model) detailLoadCmds(item abs.LibraryItem, navCmd tea.Cmd) []tea.Cmd {
 		return append(cmds, m.fetchEpisodesCmd(item.ID))
 	}
 	if item.MediaType == "book" {
-		return append(cmds, m.fetchBookDetailCmd(item.ID))
+		return append(cmds, m.fetchBookDetailCmd(item))
 	}
 	return cmds
 }

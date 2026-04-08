@@ -13,8 +13,8 @@ import (
 
 // LoadedMsg carries a loaded series payload.
 type LoadedMsg struct {
-	Series abs.Series
-	Err    error
+	Contents abs.SeriesContents
+	Err      error
 }
 
 // NavigateDetailMsg requests opening a book from the series list.
@@ -56,7 +56,7 @@ type Model struct {
 	libraryID     string
 	seriesID      string
 	currentItemID string
-	series        abs.Series
+	series        abs.SeriesContents
 	loading       bool
 	err           error
 }
@@ -104,16 +104,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, nil
 		}
-		m.series = msg.Series
+		m.series = msg.Contents
 		m.list.Title = "Series"
-		if msg.Series.Name != "" {
-			m.list.Title = "Series — " + msg.Series.Name
+		if msg.Contents.Series.Name != "" {
+			m.list.Title = "Series — " + msg.Contents.Series.Name
 		}
-		items := make([]list.Item, len(msg.Series.Books))
+		items := make([]list.Item, len(msg.Contents.Items))
 		selected := 0
-		for i, book := range msg.Series.Books {
-			items[i] = seriesBookItem{book: book, current: book.LibraryItem.ID == m.currentItemID}
-			if book.LibraryItem.ID == m.currentItemID {
+		for i, item := range msg.Contents.Items {
+			items[i] = seriesBookItem{item: item, current: item.ID == m.currentItemID}
+			if item.ID == m.currentItemID {
 				selected = i
 			}
 		}
@@ -129,7 +129,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Enter):
 			if sel, ok := m.list.SelectedItem().(seriesBookItem); ok {
 				return m, func() tea.Msg {
-					return NavigateDetailMsg{Item: sel.book.LibraryItem}
+					return NavigateDetailMsg{Item: sel.item}
 				}
 			}
 		}
@@ -166,7 +166,7 @@ func (m Model) Loading() bool {
 // SelectedItemID returns the selected item's ID.
 func (m Model) SelectedItemID() string {
 	if sel, ok := m.list.SelectedItem().(seriesBookItem); ok {
-		return sel.book.LibraryItem.ID
+		return sel.item.ID
 	}
 	return ""
 }
@@ -181,24 +181,24 @@ func (m Model) fetchSeriesCmd() tea.Cmd {
 	libraryID := m.libraryID
 	seriesID := m.seriesID
 	return func() tea.Msg {
-		series, err := client.GetSeries(context.Background(), libraryID, seriesID)
+		contents, err := client.GetSeriesContents(context.Background(), libraryID, seriesID)
 		if err != nil {
 			return LoadedMsg{Err: fmt.Errorf("fetch series: %w", err)}
 		}
-		if series == nil {
+		if contents == nil {
 			return LoadedMsg{Err: fmt.Errorf("series not found")}
 		}
-		return LoadedMsg{Series: *series}
+		return LoadedMsg{Contents: *contents}
 	}
 }
 
 type seriesBookItem struct {
-	book    abs.SeriesBook
+	item    abs.LibraryItem
 	current bool
 }
 
 func (i seriesBookItem) Title() string {
-	title := i.book.LibraryItem.Media.Metadata.Title
+	title := i.item.Media.Metadata.Title
 	if i.current {
 		return title + "  (current)"
 	}
@@ -206,12 +206,12 @@ func (i seriesBookItem) Title() string {
 }
 
 func (i seriesBookItem) Description() string {
-	if i.book.Sequence == "" {
+	if i.item.Media.Metadata.Series == nil || i.item.Media.Metadata.Series.Sequence == "" {
 		return "Book"
 	}
-	return "Book #" + i.book.Sequence
+	return "Book #" + i.item.Media.Metadata.Series.Sequence
 }
 
 func (i seriesBookItem) FilterValue() string {
-	return i.book.LibraryItem.Media.Metadata.Title
+	return i.item.Media.Metadata.Title
 }

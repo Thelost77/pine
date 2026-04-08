@@ -11,8 +11,10 @@ import (
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/home"
+	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/screens/search"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -30,7 +32,7 @@ type mockPlayer struct {
 	connectErr error
 }
 
-func (p *mockPlayer) Launch(url, startTime, socketPath string) error {
+func (p *mockPlayer) Launch(url, startTime, socketPath string, paused bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launched = true
@@ -99,6 +101,7 @@ func TestScreenString(t *testing.T) {
 		{ScreenLibrary, "Library"},
 		{ScreenDetail, "Detail"},
 		{ScreenSearch, "Search"},
+		{ScreenSeriesList, "Series"},
 		{ScreenSeries, "Series"},
 		{Screen(99), "Unknown"},
 	}
@@ -1175,6 +1178,23 @@ func TestNavigateSeriesMsgOpensSeriesScreen(t *testing.T) {
 	}
 }
 
+func TestNavigateSeriesListMsgOpensSeriesListScreen(t *testing.T) {
+	m := newPlaybackTestModel()
+
+	result, cmd := m.Update(library.NavigateSeriesListMsg{
+		LibraryID:   "lib-books-001",
+		LibraryName: "Books",
+	})
+	rm := result.(Model)
+
+	if rm.ActiveScreen() != ScreenSeriesList {
+		t.Fatalf("screen = %v, want Series", rm.ActiveScreen())
+	}
+	if cmd == nil {
+		t.Fatal("expected init command when navigating to series list screen")
+	}
+}
+
 func TestBookDetailLoadedMsgUpdatesDetailItem(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.detail = detail.New(m.styles, abs.LibraryItem{
@@ -1382,7 +1402,141 @@ func TestCleanupWhenNotPlaying(t *testing.T) {
 }
 
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestStaleEpisodesLoadedMsgDiscarded(t *testing.T) {
+	m := newTestModel()
+	m.screen = ScreenDetail
+	m.detail = detail.New(ui.NewStyles(config.Default().Theme), abs.LibraryItem{
+		ID:        "item-current",
+		MediaType: "podcast",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Current Podcast"}},
+	})
+
+	staleMsg := EpisodesLoadedMsg{
+		ItemID:   "item-stale",
+		Episodes: []abs.PodcastEpisode{{ID: "ep-stale", Title: "Stale Episode"}},
+	}
+	result, _ := m.Update(staleMsg)
+	rm := result.(Model)
+	if len(rm.detail.Episodes()) != 0 {
+		t.Error("stale EpisodesLoadedMsg should be discarded")
+	}
+
+	freshMsg := EpisodesLoadedMsg{
+		ItemID:   "item-current",
+		Episodes: []abs.PodcastEpisode{{ID: "ep-fresh", Title: "Fresh Episode"}},
+	}
+	result, _ = rm.Update(freshMsg)
+	rm = result.(Model)
+	if len(rm.detail.Episodes()) != 1 {
+		t.Error("fresh EpisodesLoadedMsg should be applied")
+	}
+	if rm.detail.Episodes()[0].ID != "ep-fresh" {
+		t.Error("wrong episode applied")
+	}
+}
+
+func TestStaleBookDetailLoadedMsgDiscarded(t *testing.T) {
+	m := newTestModel()
+	m.screen = ScreenDetail
+	m.detail = detail.New(ui.NewStyles(config.Default().Theme), abs.LibraryItem{
+		ID:        "item-current",
+		MediaType: "book",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Current Book"}},
+	})
+
+	staleMsg := BookDetailLoadedMsg{
+		ItemID: "item-stale",
+		Item: &abs.LibraryItem{
+			ID:        "item-stale",
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Stale Book"}},
+		},
+	}
+	result, _ := m.Update(staleMsg)
+	rm := result.(Model)
+	if rm.detail.Item().ID != "item-current" {
+		t.Error("stale BookDetailLoadedMsg should be discarded")
+	}
+
+	freshMsg := BookDetailLoadedMsg{
+		ItemID: "item-current",
+		Item: &abs.LibraryItem{
+			ID:        "item-current",
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Enriched Book"}},
+		},
+	}
+	result, _ = rm.Update(freshMsg)
+	rm = result.(Model)
+	if rm.detail.Item().Media.Metadata.Title != "Enriched Book" {
+		t.Error("fresh BookDetailLoadedMsg should update detail item")
+	}
+}
+
+func TestUnauthorizedPlaybackErrorRedirectsToLogin(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenHome
+
+	result, cmd := m.Update(PlaybackErrorMsg{
+		Err: fmt.Errorf("unexpected status 401: unauthorized"),
+	})
+	rm := result.(Model)
+	if rm.screen != ScreenLogin {
+		t.Errorf("screen = %v, want ScreenLogin after 401 playback error", rm.screen)
+	}
+	if rm.client != nil {
+		t.Error("client should be nil after 401 redirect")
+	}
+	if cmd == nil {
+		t.Error("expected login init command after 401 redirect")
+	}
+}
+
+func TestUnauthorizedBookDetailErrorRedirectsToLogin(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenDetail
+
+	result, cmd := m.Update(BookDetailLoadedMsg{
+		ItemID: "item-1",
+		Err:    fmt.Errorf("unauthorized status 401"),
+	})
+	rm := result.(Model)
+	if rm.screen != ScreenLogin {
+		t.Errorf("screen = %v, want ScreenLogin after 401 book detail error", rm.screen)
+	}
+	if rm.client != nil {
+		t.Error("client should be nil after 401 redirect")
+	}
+	if cmd == nil {
+		t.Error("expected login init command after 401 redirect")
+	}
+}
+
+func TestNormalPlaybackErrorShowsBanner(t *testing.T) {
+	m := newTestModel()
+	m.screen = ScreenHome
+
+	result, cmd := m.Update(PlaybackErrorMsg{
+		Err: fmt.Errorf("network error"),
+	})
+	rm := result.(Model)
+	if rm.screen != ScreenHome {
+		t.Errorf("screen = %v, want ScreenHome for non-401 error", rm.screen)
+	}
+	if !rm.err.HasError() {
+		t.Error("non-401 playback error should show error banner")
+	}
+	if cmd == nil {
+		t.Error("expected auto-dismiss cmd for error banner")
+	}
 }
 
 func searchString(s, substr string) bool {

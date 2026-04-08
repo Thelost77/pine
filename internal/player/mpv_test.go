@@ -264,12 +264,38 @@ func TestLaunch(t *testing.T) {
 		},
 	}
 
-	err := m.Launch("http://example.com/audio.mp3", "30", "/tmp/test.sock")
+	err := m.Launch("http://example.com/audio.mp3", "30", "/tmp/test.sock", false)
 	if err != nil {
 		t.Fatalf("Launch() error: %v", err)
 	}
 	if !launched {
 		t.Fatal("expected startFn to be called")
+	}
+}
+
+func TestLaunchPaused(t *testing.T) {
+	mc := newMockConn()
+	var gotArgs []string
+	m := &Mpv{
+		startFn: func(name string, args ...string) *exec.Cmd {
+			gotArgs = args
+			return exec.Command("true")
+		},
+		newConn: func(socketPath string) IPCConnection { return mc },
+	}
+
+	if err := m.Launch("http://example.com/audio.mp3", "0", "/tmp/test.sock", true); err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+
+	found := false
+	for _, a := range gotArgs {
+		if a == "--pause" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected --pause flag in mpv args when paused=true")
 	}
 }
 
@@ -314,7 +340,7 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 	}
 
 	// First launch
-	if err := m.Launch("http://example.com/a.mp3", "0", "/tmp/test.sock"); err != nil {
+	if err := m.Launch("http://example.com/a.mp3", "0", "/tmp/test.sock", false); err != nil {
 		t.Fatalf("first Launch() error: %v", err)
 	}
 	if launchCount != 1 {
@@ -322,7 +348,7 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 	}
 
 	// Second launch should close the first connection
-	if err := m.Launch("http://example.com/b.mp3", "0", "/tmp/test.sock"); err != nil {
+	if err := m.Launch("http://example.com/b.mp3", "0", "/tmp/test.sock", false); err != nil {
 		t.Fatalf("second Launch() error: %v", err)
 	}
 	if launchCount != 2 {
@@ -330,6 +356,37 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 	}
 	if !firstConn.closed {
 		t.Error("expected first connection to be closed on re-launch")
+	}
+}
+
+func TestDescribeStreamURL(t *testing.T) {
+	info := describeStreamURL("https://abs.example.com/s/item/book/audio.mp3?token=secret-token")
+
+	if !info.Parsed {
+		t.Fatal("expected URL to parse")
+	}
+	if info.Scheme != "https" {
+		t.Fatalf("scheme = %q, want https", info.Scheme)
+	}
+	if info.Host != "abs.example.com" {
+		t.Fatalf("host = %q, want abs.example.com", info.Host)
+	}
+	if info.Path != "/s/item/book/audio.mp3" {
+		t.Fatalf("path = %q, want /s/item/book/audio.mp3", info.Path)
+	}
+	if !info.HasToken {
+		t.Fatal("expected token query to be detected")
+	}
+}
+
+func TestDescribeStreamURLInvalid(t *testing.T) {
+	info := describeStreamURL("://bad-url")
+
+	if info.Parsed {
+		t.Fatal("expected invalid URL to remain unparsed")
+	}
+	if info.Host != "" || info.Path != "" || info.HasToken {
+		t.Fatalf("unexpected info for invalid URL: %+v", info)
 	}
 }
 

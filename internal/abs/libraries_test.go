@@ -3,6 +3,7 @@ package abs
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -355,33 +356,7 @@ func TestGetSeriesHTTP(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{
 			"id": "series-expanse",
-			"name": "The Expanse",
-			"books": [
-				{
-					"id": "li-book-001",
-					"libraryId": "lib-books-001",
-					"addedAt": 1711111111111,
-					"mediaType": "book",
-					"sequence": "2",
-					"media": {
-						"metadata": {
-							"title": "Caliban's War"
-						}
-					}
-				},
-				{
-					"id": "li-book-002",
-					"libraryId": "lib-books-001",
-					"addedAt": 1711111112222,
-					"mediaType": "book",
-					"sequence": "3",
-					"media": {
-						"metadata": {
-							"title": "Abaddon's Gate"
-						}
-					}
-				}
-			]
+			"name": "The Expanse"
 		}`))
 	}))
 	defer srv.Close()
@@ -394,14 +369,140 @@ func TestGetSeriesHTTP(t *testing.T) {
 	if series.ID != "series-expanse" {
 		t.Errorf("series ID = %q, want series-expanse", series.ID)
 	}
-	if len(series.Books) != 2 {
-		t.Fatalf("expected 2 books, got %d", len(series.Books))
+	if series.Name != "The Expanse" {
+		t.Errorf("series name = %q, want The Expanse", series.Name)
 	}
-	if series.Books[0].Sequence != "2" {
-		t.Errorf("book[0] sequence = %q, want 2", series.Books[0].Sequence)
+}
+
+func TestGetLibrarySeriesHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/libraries/lib-books-001/series" {
+			t.Errorf("path = %q, want /api/libraries/lib-books-001/series", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("page"); got != "0" {
+			t.Errorf("page = %q, want 0", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "50" {
+			t.Errorf("limit = %q, want 50", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"results": [
+				{
+					"id": "series-expanse",
+					"name": "The Expanse",
+					"libraryId": "lib-books-001"
+				}
+			],
+			"total": 1,
+			"limit": 50,
+			"page": 0
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	resp, err := c.GetLibrarySeries(context.Background(), "lib-books-001", 0, 50)
+	if err != nil {
+		t.Fatalf("GetLibrarySeries() error: %v", err)
 	}
-	if series.Books[1].LibraryItem.Media.Metadata.Title != "Abaddon's Gate" {
-		t.Errorf("book[1] title = %q, want Abaddon's Gate", series.Books[1].LibraryItem.Media.Metadata.Title)
+	if resp == nil {
+		t.Fatal("expected response")
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("expected 1 series, got %d", len(resp.Results))
+	}
+	if resp.Results[0].ID != "series-expanse" {
+		t.Fatalf("series ID = %q, want series-expanse", resp.Results[0].ID)
+	}
+}
+
+func TestGetSeriesContentsHTTP(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/libraries/lib-books-001/series/series-expanse":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"id": "series-expanse",
+				"name": "The Expanse"
+			}`))
+		case "/api/libraries/lib-books-001/items":
+			requests++
+			filter := r.URL.Query().Get("filter")
+			wantFilter := "series." + base64.StdEncoding.EncodeToString([]byte("series-expanse"))
+			if filter != wantFilter {
+				t.Fatalf("filter = %q, want %s", filter, wantFilter)
+			}
+			if r.URL.Query().Get("page") != "0" {
+				t.Fatalf("unexpected page %q", r.URL.Query().Get("page"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"results": [
+					{
+						"id": "li-book-002",
+						"libraryId": "lib-books-001",
+						"mediaType": "book",
+						"media": {
+							"metadata": {
+								"title": "Caliban's War",
+								"series": {
+									"id": "series-expanse",
+									"name": "The Expanse",
+									"sequence": "2"
+								}
+							}
+						}
+					},
+					{
+						"id": "li-book-001",
+						"libraryId": "lib-books-001",
+						"mediaType": "book",
+						"media": {
+							"metadata": {
+								"title": "Leviathan Wakes",
+								"series": {
+									"id": "series-expanse",
+									"name": "The Expanse",
+									"sequence": "1"
+								}
+							}
+						}
+					}
+				],
+				"total": 2,
+				"limit": 50,
+				"page": 0
+			}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	contents, err := c.GetSeriesContents(context.Background(), "lib-books-001", "series-expanse")
+	if err != nil {
+		t.Fatalf("GetSeriesContents() error: %v", err)
+	}
+	if contents == nil {
+		t.Fatal("expected series contents")
+	}
+	if contents.Series.Name != "The Expanse" {
+		t.Fatalf("series name = %q, want The Expanse", contents.Series.Name)
+	}
+	if len(contents.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(contents.Items))
+	}
+	if contents.Items[0].ID != "li-book-001" {
+		t.Fatalf("first item ID = %q, want li-book-001", contents.Items[0].ID)
+	}
+	if contents.Items[1].ID != "li-book-002" {
+		t.Fatalf("second item ID = %q, want li-book-002", contents.Items[1].ID)
+	}
+	if requests != 1 {
+		t.Fatalf("expected 1 item request, got %d", requests)
 	}
 }
 

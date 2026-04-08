@@ -482,6 +482,20 @@ func TestListItem_NoAuthor(t *testing.T) {
 	}
 }
 
+func TestItemDescription_OmitsSeriesInfoWhenPresent(t *testing.T) {
+	item := sampleItems()[0]
+	item.Media.Metadata.Series = &abs.SeriesSequence{
+		ID:       "series-expanse",
+		Name:     "The Expanse",
+		Sequence: "2",
+	}
+
+	got := itemDescription(item)
+	if strings.Contains(got, "The Expanse") {
+		t.Fatalf("expected series info to be omitted, got %q", got)
+	}
+}
+
 func TestInit_NilClient(t *testing.T) {
 	m := newTestModel()
 	cmd := m.Init()

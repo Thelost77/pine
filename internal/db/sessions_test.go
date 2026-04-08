@@ -9,6 +9,7 @@ func TestSaveListeningSession(t *testing.T) {
 
 	session := ListeningSession{
 		ItemID:      "item-123",
+		EpisodeID:   "",
 		SessionID:   "sess-456",
 		CurrentTime: 42.5,
 		Duration:    3600.0,
@@ -25,6 +26,9 @@ func TestSaveListeningSession(t *testing.T) {
 	if got.ItemID != session.ItemID {
 		t.Errorf("ItemID = %q, want %q", got.ItemID, session.ItemID)
 	}
+	if got.EpisodeID != session.EpisodeID {
+		t.Errorf("EpisodeID = %q, want %q", got.EpisodeID, session.EpisodeID)
+	}
 	if got.SessionID != session.SessionID {
 		t.Errorf("SessionID = %q, want %q", got.SessionID, session.SessionID)
 	}
@@ -36,6 +40,30 @@ func TestSaveListeningSession(t *testing.T) {
 	}
 	if got.CreatedAt.IsZero() {
 		t.Error("CreatedAt should not be zero")
+	}
+}
+
+func TestSaveListeningSession_WithEpisodeID(t *testing.T) {
+	s := openTestStore(t)
+
+	session := ListeningSession{
+		ItemID:      "item-123",
+		EpisodeID:   "ep-789",
+		SessionID:   "sess-456",
+		CurrentTime: 42.5,
+		Duration:    3600.0,
+	}
+
+	if err := s.SaveListeningSession(session); err != nil {
+		t.Fatalf("SaveListeningSession() error: %v", err)
+	}
+
+	got, err := s.GetLastSession()
+	if err != nil {
+		t.Fatalf("GetLastSession() error: %v", err)
+	}
+	if got.EpisodeID != "ep-789" {
+		t.Errorf("EpisodeID = %q, want %q", got.EpisodeID, "ep-789")
 	}
 }
 

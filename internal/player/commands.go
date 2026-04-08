@@ -88,8 +88,9 @@ type PlayerLaunchErrMsg struct {
 // PlayerQuitMsg signals that mpv has been quit.
 type PlayerQuitMsg struct{}
 
-// LaunchCmd spawns mpv and connects via IPC. Returns PlayerReadyMsg on success.
-func LaunchCmd(p Player, url string, startTime float64) tea.Cmd {
+// LaunchCmd spawns mpv and connects via IPC. If paused is true, mpv starts paused.
+// Returns PlayerReadyMsg on success.
+func LaunchCmd(p Player, url string, startTime float64, paused bool) tea.Cmd {
 	return func() tea.Msg {
 		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
 		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("pine-mpv-%d.sock", os.Getpid()))
@@ -97,7 +98,7 @@ func LaunchCmd(p Player, url string, startTime float64) tea.Cmd {
 		os.Remove(socketPath)
 
 		startStr := fmt.Sprintf("%f", startTime)
-		if err := p.Launch(url, startStr, socketPath); err != nil {
+		if err := p.Launch(url, startStr, socketPath, paused); err != nil {
 			logger.Error("mpv launch failed", "err", err)
 			return PlayerLaunchErrMsg{Err: err}
 		}

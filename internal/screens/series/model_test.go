@@ -16,32 +16,42 @@ func newTestModel() Model {
 	return m
 }
 
-func sampleSeries() abs.Series {
-	return abs.Series{
-		ID:   "series-expanse",
-		Name: "The Expanse",
-		Books: []abs.SeriesBook{
+func sampleSeriesContents() abs.SeriesContents {
+	return abs.SeriesContents{
+		Series: abs.Series{
+			ID:   "series-expanse",
+			Name: "The Expanse",
+		},
+		Items: []abs.LibraryItem{
 			{
-				LibraryItem: abs.LibraryItem{
-					ID:        "li-book-001",
-					LibraryID: "lib-books-001",
-					MediaType: "book",
-					Media: abs.Media{
-						Metadata: abs.MediaMetadata{Title: "Leviathan Wakes"},
+				ID:        "li-book-001",
+				LibraryID: "lib-books-001",
+				MediaType: "book",
+				Media: abs.Media{
+					Metadata: abs.MediaMetadata{
+						Title: "Leviathan Wakes",
+						Series: &abs.SeriesSequence{
+							ID:       "series-expanse",
+							Name:     "The Expanse",
+							Sequence: "1",
+						},
 					},
 				},
-				Sequence: "1",
 			},
 			{
-				LibraryItem: abs.LibraryItem{
-					ID:        "li-book-002",
-					LibraryID: "lib-books-001",
-					MediaType: "book",
-					Media: abs.Media{
-						Metadata: abs.MediaMetadata{Title: "Caliban's War"},
+				ID:        "li-book-002",
+				LibraryID: "lib-books-001",
+				MediaType: "book",
+				Media: abs.Media{
+					Metadata: abs.MediaMetadata{
+						Title: "Caliban's War",
+						Series: &abs.SeriesSequence{
+							ID:       "series-expanse",
+							Name:     "The Expanse",
+							Sequence: "2",
+						},
 					},
 				},
-				Sequence: "2",
 			},
 		},
 	}
@@ -50,7 +60,7 @@ func sampleSeries() abs.Series {
 func TestSeriesLoadedMsgPopulatesListAndSelectsCurrentItem(t *testing.T) {
 	m := newTestModel()
 
-	m, _ = m.Update(LoadedMsg{Series: sampleSeries()})
+	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
 
 	if m.Loading() {
 		t.Fatal("expected loading to be false after series load")
@@ -62,7 +72,7 @@ func TestSeriesLoadedMsgPopulatesListAndSelectsCurrentItem(t *testing.T) {
 
 func TestView_ShowsSeriesNameAndBooks(t *testing.T) {
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Series: sampleSeries()})
+	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
 
 	v := m.View()
 	for _, want := range []string{"The Expanse", "Leviathan Wakes", "Caliban's War"} {
@@ -74,7 +84,7 @@ func TestView_ShowsSeriesNameAndBooks(t *testing.T) {
 
 func TestEnterKey_NavigatesToSelectedBook(t *testing.T) {
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Series: sampleSeries()})
+	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {

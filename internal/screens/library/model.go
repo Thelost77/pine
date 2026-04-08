@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
@@ -24,10 +25,11 @@ type FetchLibraryItemsMsg struct {
 
 // LibraryItemsMsg carries the result of fetching library items.
 type LibraryItemsMsg struct {
-	Items []abs.LibraryItem
-	Total int
-	Page  int
-	Err   error
+	Items     []abs.LibraryItem
+	Total     int
+	Page      int
+	LibraryID string
+	Err       error
 }
 
 // GoBackMsg requests navigating back from the library screen.
@@ -44,12 +46,19 @@ type NavigateSearchMsg struct {
 	LibraryMediaType string
 }
 
+// NavigateSeriesListMsg requests navigation to the current library's series browser.
+type NavigateSeriesListMsg struct {
+	LibraryID   string
+	LibraryName string
+}
+
 // KeyMap defines keybindings for the library screen.
 type KeyMap struct {
 	Enter   key.Binding
 	Back    key.Binding
 	NextLib key.Binding
 	Search  key.Binding
+	Series  key.Binding
 	Select  key.Binding
 }
 
@@ -72,6 +81,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("/"),
 			key.WithHelp("/", "search"),
 		),
+		Series: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "series"),
+		),
 		Select: key.NewBinding(
 			key.WithKeys("right"),
 			key.WithHelp("→", "open detail"),
@@ -85,6 +98,7 @@ type Model struct {
 	items           []abs.LibraryItem
 	page            int
 	totalItems      int
+	cache           map[string]libraryCacheEntry
 	loading         bool
 	err             error
 	keys            KeyMap
@@ -95,6 +109,12 @@ type Model struct {
 	libraryID       string
 	libraries       []abs.Library
 	selectedLibrary int
+}
+
+type libraryCacheEntry struct {
+	items      []abs.LibraryItem
+	page       int
+	totalItems int
 }
 
 // New creates a new library screen model.
@@ -138,8 +158,40 @@ func New(styles ui.Styles, client *abs.Client, libraryID string, libraries []abs
 		client:          client,
 		libraryID:       libraryID,
 		libraries:       libraries,
+		cache:           make(map[string]libraryCacheEntry),
 		selectedLibrary: selectedIdx,
 	}
+}
+
+// Configure updates the active library context while preserving cached pages.
+func (m *Model) Configure(libraryID string, libraries []abs.Library) {
+	m.libraries = libraries
+
+	selectedIdx := 0
+	for i, lib := range libraries {
+		if lib.ID == libraryID {
+			selectedIdx = i
+			break
+		}
+	}
+
+	m.selectedLibrary = selectedIdx
+	if libraryID == "" && len(libraries) > 0 {
+		libraryID = libraries[selectedIdx].ID
+	}
+	m.libraryID = libraryID
+	m.err = nil
+	m.updateListTitle()
+
+	if m.applyCachedLibrary(m.libraryID) {
+		return
+	}
+
+	m.items = nil
+	m.page = 0
+	m.totalItems = 0
+	m.loading = true
+	m.syncListItems()
 }
 
 // SetSize updates the terminal dimensions for the library screen.
@@ -151,6 +203,14 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command that fetches the first page of library items.
 func (m Model) Init() tea.Cmd {
+	if m.libraryID != "" {
+		if _, ok := m.cache[m.libraryID]; ok {
+			return nil
+		}
+	}
+	if len(m.items) > 0 {
+		return nil
+	}
 	m.page = 0
 	return m.fetchLibraryItemsCmd(0, pageLimit)
 }
@@ -160,6 +220,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LibraryItemsMsg:
 		m.loading = false
+		if msg.LibraryID != "" && m.libraryID != "" && msg.LibraryID != m.libraryID {
+			return m, nil
+		}
 		if msg.Err != nil {
 			m.err = msg.Err
 			return m, nil
@@ -168,15 +231,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.page = msg.Page
 
 		if msg.Page == 0 {
-			m.items = msg.Items
+			m.items = append([]abs.LibraryItem(nil), msg.Items...)
 		} else {
 			m.items = append(m.items, msg.Items...)
 		}
-		items := make([]list.Item, len(m.items))
-		for i, item := range m.items {
-			items[i] = ui.ListItem{Item: item}
-		}
-		m.list.SetItems(items)
+		m.storeCurrentLibraryCache()
+		m.syncListItems()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -186,7 +246,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Enter), key.Matches(msg, m.keys.Select):
-			if sel, ok := m.list.SelectedItem().(ui.ListItem); ok {
+			if sel, ok := m.list.SelectedItem().(libraryListItem); ok {
 				return m, func() tea.Msg {
 					return NavigateDetailMsg{Item: sel.Item}
 				}
@@ -199,13 +259,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
 			}
+		case key.Matches(msg, m.keys.Series):
+			if m.SelectedLibraryMediaType() == "book" {
+				libID := m.libraryID
+				libName := m.selectedLibraryName()
+				return m, func() tea.Msg {
+					return NavigateSeriesListMsg{LibraryID: libID, LibraryName: libName}
+				}
+			}
+			return m, nil
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
+				m.storeCurrentLibraryCache()
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.libraryID = m.libraries[m.selectedLibrary].ID
 				m.updateListTitle()
+				m.err = nil
+				if m.applyCachedLibrary(m.libraryID) {
+					return m, nil
+				}
+				m.items = nil
 				m.page = 0
 				m.totalItems = 0
+				m.loading = true
+				m.syncListItems()
 				return m, m.fetchLibraryItemsCmd(0, pageLimit)
 			}
 			return m, nil
@@ -216,11 +293,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	m.list, cmd = m.list.Update(msg)
 
 	// After list update, check if cursor is near the end for infinite scroll
-	if prefetchCmd := m.maybePrefetch(); prefetchCmd != nil {
-		return m, tea.Batch(cmd, prefetchCmd)
-	}
-
-	return m, cmd
+	prefetchCmd := m.maybePrefetch()
+	return m, tea.Batch(cmd, prefetchCmd)
 }
 
 // maybePrefetch checks if the cursor has reached 80% of loaded items and
@@ -256,31 +330,65 @@ func (m *Model) fetchLibraryItemsCmd(page, limit int) tea.Cmd {
 	m.loading = true
 	client := m.client
 	libID := m.libraryID
+	libraryID := m.libraryID
 	return func() tea.Msg {
 		// Fallback: if no libraryID was provided, fetch the first library
 		if libID == "" {
 			libs, err := client.GetLibraries(context.Background())
 			if err != nil {
-				return LibraryItemsMsg{Err: fmt.Errorf("fetch libraries: %w", err)}
+				return LibraryItemsMsg{LibraryID: libraryID, Err: fmt.Errorf("fetch libraries: %w", err)}
 			}
 			libs, _ = client.FilterAudioLibraries(context.Background(), libs)
 			if len(libs) == 0 {
-				return LibraryItemsMsg{Items: nil, Total: 0, Page: 0}
+				return LibraryItemsMsg{Items: nil, Total: 0, Page: 0, LibraryID: libraryID}
 			}
 			libID = libs[0].ID
 		}
 
 		resp, err := client.GetLibraryItems(context.Background(), libID, page, limit)
 		if err != nil {
-			return LibraryItemsMsg{Err: fmt.Errorf("fetch library items: %w", err)}
+			return LibraryItemsMsg{LibraryID: libID, Err: fmt.Errorf("fetch library items: %w", err)}
 		}
 
 		return LibraryItemsMsg{
-			Items: resp.Results,
-			Total: resp.Total,
-			Page:  resp.Page,
+			Items:     resp.Results,
+			Total:     resp.Total,
+			Page:      resp.Page,
+			LibraryID: libID,
 		}
 	}
+}
+
+func (m *Model) syncListItems() {
+	items := make([]list.Item, len(m.items))
+	for i, item := range m.items {
+		items[i] = libraryListItem{Item: item}
+	}
+	m.list.SetItems(items)
+}
+
+func (m *Model) storeCurrentLibraryCache() {
+	if m.libraryID == "" || len(m.items) == 0 {
+		return
+	}
+	m.cache[m.libraryID] = libraryCacheEntry{
+		items:      append([]abs.LibraryItem(nil), m.items...),
+		page:       m.page,
+		totalItems: m.totalItems,
+	}
+}
+
+func (m *Model) applyCachedLibrary(libraryID string) bool {
+	entry, ok := m.cache[libraryID]
+	if !ok {
+		return false
+	}
+	m.items = append([]abs.LibraryItem(nil), entry.items...)
+	m.page = entry.page
+	m.totalItems = entry.totalItems
+	m.loading = false
+	m.syncListItems()
+	return true
 }
 
 // Items returns the current library items.
@@ -295,6 +403,13 @@ func (m Model) SelectedLibraryMediaType() string {
 	}
 	if len(m.items) > 0 {
 		return m.items[0].MediaType
+	}
+	return ""
+}
+
+func (m Model) selectedLibraryName() string {
+	if len(m.libraries) > 0 && m.selectedLibrary < len(m.libraries) {
+		return m.libraries[m.selectedLibrary].Name
 	}
 	return ""
 }
@@ -316,6 +431,43 @@ func (m Model) Loading() bool {
 // Error returns the last error, if any.
 func (m Model) Error() error {
 	return m.err
+}
+
+type libraryListItem struct {
+	Item abs.LibraryItem
+}
+
+func (i libraryListItem) Title() string {
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		return i.Item.RecentEpisode.Title
+	}
+	return i.Item.Media.Metadata.Title
+}
+
+func (i libraryListItem) Description() string {
+	context := "Unknown author"
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		context = i.Item.Media.Metadata.Title
+	} else if i.Item.Media.Metadata.AuthorName != nil {
+		context = *i.Item.Media.Metadata.AuthorName
+	}
+
+	duration := ""
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil && i.Item.RecentEpisode.Duration > 0 {
+		duration = ui.FormatDuration(i.Item.RecentEpisode.Duration)
+	} else if i.Item.Media.HasDuration() {
+		duration = ui.FormatDuration(i.Item.Media.TotalDuration())
+	}
+
+	parts := []string{context}
+	if duration != "" {
+		parts = append(parts, duration)
+	}
+	return strings.Join(parts, " • ")
+}
+
+func (i libraryListItem) FilterValue() string {
+	return i.Item.Media.Metadata.Title
 }
 
 // Page returns the current page number.

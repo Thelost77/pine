@@ -121,8 +121,12 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 	}
 	if build, ok := c.builds[resolvedID]; ok {
 		c.mu.Unlock()
-		<-build.done
-		return build.snapshot, build.err
+		select {
+		case <-build.done:
+			return build.snapshot, build.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	build := &snapshotBuild{done: make(chan struct{})}
@@ -216,6 +220,11 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 		}
 
 		for _, item := range resp.Results {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
 			fullItem, err := c.client.GetLibraryItem(ctx, item.ID)
 			if err != nil {
 				return nil, fmt.Errorf("expand podcast %s: %w", item.ID, err)
