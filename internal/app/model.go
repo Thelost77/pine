@@ -59,6 +59,7 @@ type Model struct {
 	sleepDuration         time.Duration
 	sleepGeneration       uint64
 	queue                 []QueueEntry
+	restorePaused         bool
 
 	keys   KeyMap
 	err    components.ErrorBanner
@@ -119,7 +120,11 @@ func (m Model) Queue() []QueueEntry {
 
 // Init returns the initial command for the active screen.
 func (m Model) Init() tea.Cmd {
-	return m.initScreen(m.screen)
+	cmds := []tea.Cmd{m.initScreen(m.screen)}
+	if m.client != nil && m.db != nil {
+		cmds = append(cmds, restoreSessionCmd(m.client, m.db))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update dispatches messages to the active screen and handles navigation.
@@ -366,6 +371,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PlaySessionMsg:
 		logger.Info("play session started", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)
 		return m.handlePlaySessionMsg(msg)
+
+	case RestoreSessionMsg:
+		if msg.Item == nil {
+			logger.Debug("no session to restore")
+			return m, nil
+		}
+		logger.Info("restoring session", "itemID", msg.Item.ID, "episodeID", msg.Episode)
+		m.detail = detail.New(m.styles, *msg.Item)
+		m, navCmd := m.navigate(ScreenDetail)
+		detailCmds := m.detailLoadCmds(*msg.Item, nil)
+		m.restorePaused = true
+		var playCmd tea.Cmd
+		if msg.Episode != nil {
+			m, playCmd = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: *msg.Item, Episode: *msg.Episode})
+		} else {
+			m, playCmd = m.handlePlayCmd(detail.PlayCmd{Item: *msg.Item})
+		}
+		return m, tea.Batch(append(detailCmds, navCmd, playCmd)...)
 
 	case player.PlayerReadyMsg:
 		return m.handlePlayerReady()

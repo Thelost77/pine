@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/home"
@@ -15,6 +15,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui/components"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ---------------------------------------------------------------------------
@@ -2024,4 +2025,55 @@ func TestE2E_MultiTrackSyncPosition(t *testing.T) {
 			break
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// E2E: Session restore on startup
+// ---------------------------------------------------------------------------
+
+func TestE2E_SessionRestore(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 42, duration: 3600}
+	m, store := newE2EModelWithDB(t, srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Save a session to the DB simulating a previous listening session
+	if err := store.SaveListeningSession(db.ListeningSession{
+		ItemID:      "item-001",
+		EpisodeID:   "",
+		SessionID:   "sess-old",
+		CurrentTime: 100.0,
+		Duration:    3600.0,
+	}); err != nil {
+		t.Fatalf("SaveListeningSession: %v", err)
+	}
+
+	// Simulate login so client is available
+	res, _ := m.Update(login.LoginSuccessMsg{
+		Token:     "jwt-token-e2e",
+		ServerURL: srv.URL,
+		Username:  "alice",
+	})
+	m = res.(Model)
+
+	// Call Init which triggers restoreSessionCmd
+	cmd := m.Init()
+
+	// Execute the restore command — it fetches the item from ABS
+	m, cmd = feedCmd(m, cmd)
+
+	// After restore, should be on Detail screen
+	assertScreen(t, m, ScreenDetail)
+
+	// Should have restorePaused set, meaning playback will start paused
+	if !m.restorePaused {
+		t.Error("expected restorePaused to be true when restoring session")
+	}
+
+	// Session state should be populated once play session starts
+	// (the PlayCmd is initiated by RestoreSessionMsg handling)
 }

@@ -42,7 +42,9 @@ The biggest issues are not style problems. They are:
 
 ### High
 
-#### 1. “Persistent sessions” are saved but not restored
+#### 1. “Persistent sessions” are saved but not restored ✅ FIXED
+
+> **Status:** Fixed. Full session restore-on-startup implemented. See `artifacts/deep-code-review/SUMMARY.md`.
 
 **Why it matters:** the README promises “Persistent sessions — pick up where you left off”, but the app only writes session state; it never reads it back on startup.
 
@@ -64,7 +66,9 @@ The biggest issues are not style problems. They are:
 - either implement restore-on-startup from `GetLastSession`
 - or downgrade/remove the README claim until it exists
 
-#### 2. Default-account handling can create multiple defaults, and startup selection becomes nondeterministic
+#### 2. Default-account handling can create multiple defaults, and startup selection becomes nondeterministic — NOT APPLICABLE
+
+> **Status:** Not applicable. The app has no multi-account switching mechanism; changing accounts requires nuking the DB. Creating multiple defaults through normal usage is not possible.
 
 **Why it matters:** login always saves the logged-in account as default, but `SaveAccount` does not clear the flag from existing default accounts.
 
