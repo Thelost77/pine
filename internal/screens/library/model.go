@@ -25,10 +25,11 @@ type FetchLibraryItemsMsg struct {
 
 // LibraryItemsMsg carries the result of fetching library items.
 type LibraryItemsMsg struct {
-	Items []abs.LibraryItem
-	Total int
-	Page  int
-	Err   error
+	Items     []abs.LibraryItem
+	Total     int
+	Page      int
+	LibraryID string
+	Err       error
 }
 
 // GoBackMsg requests navigating back from the library screen.
@@ -97,6 +98,7 @@ type Model struct {
 	items           []abs.LibraryItem
 	page            int
 	totalItems      int
+	cache           map[string]libraryCacheEntry
 	loading         bool
 	err             error
 	keys            KeyMap
@@ -107,6 +109,12 @@ type Model struct {
 	libraryID       string
 	libraries       []abs.Library
 	selectedLibrary int
+}
+
+type libraryCacheEntry struct {
+	items      []abs.LibraryItem
+	page       int
+	totalItems int
 }
 
 // New creates a new library screen model.
@@ -150,8 +158,40 @@ func New(styles ui.Styles, client *abs.Client, libraryID string, libraries []abs
 		client:          client,
 		libraryID:       libraryID,
 		libraries:       libraries,
+		cache:           make(map[string]libraryCacheEntry),
 		selectedLibrary: selectedIdx,
 	}
+}
+
+// Configure updates the active library context while preserving cached pages.
+func (m *Model) Configure(libraryID string, libraries []abs.Library) {
+	m.libraries = libraries
+
+	selectedIdx := 0
+	for i, lib := range libraries {
+		if lib.ID == libraryID {
+			selectedIdx = i
+			break
+		}
+	}
+
+	m.selectedLibrary = selectedIdx
+	if libraryID == "" && len(libraries) > 0 {
+		libraryID = libraries[selectedIdx].ID
+	}
+	m.libraryID = libraryID
+	m.err = nil
+	m.updateListTitle()
+
+	if m.applyCachedLibrary(m.libraryID) {
+		return
+	}
+
+	m.items = nil
+	m.page = 0
+	m.totalItems = 0
+	m.loading = true
+	m.syncListItems()
 }
 
 // SetSize updates the terminal dimensions for the library screen.
@@ -163,6 +203,14 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command that fetches the first page of library items.
 func (m Model) Init() tea.Cmd {
+	if m.libraryID != "" {
+		if _, ok := m.cache[m.libraryID]; ok {
+			return nil
+		}
+	}
+	if len(m.items) > 0 {
+		return nil
+	}
 	m.page = 0
 	return m.fetchLibraryItemsCmd(0, pageLimit)
 }
@@ -172,6 +220,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LibraryItemsMsg:
 		m.loading = false
+		if msg.LibraryID != "" && m.libraryID != "" && msg.LibraryID != m.libraryID {
+			return m, nil
+		}
 		if msg.Err != nil {
 			m.err = msg.Err
 			return m, nil
@@ -184,6 +235,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.items = append(m.items, msg.Items...)
 		}
+		m.storeCurrentLibraryCache()
 		m.syncListItems()
 		return m, nil
 
@@ -218,11 +270,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
+				m.storeCurrentLibraryCache()
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.libraryID = m.libraries[m.selectedLibrary].ID
 				m.updateListTitle()
+				m.err = nil
+				if m.applyCachedLibrary(m.libraryID) {
+					return m, nil
+				}
+				m.items = nil
 				m.page = 0
 				m.totalItems = 0
+				m.loading = true
+				m.syncListItems()
 				return m, m.fetchLibraryItemsCmd(0, pageLimit)
 			}
 			return m, nil
@@ -270,29 +330,31 @@ func (m *Model) fetchLibraryItemsCmd(page, limit int) tea.Cmd {
 	m.loading = true
 	client := m.client
 	libID := m.libraryID
+	libraryID := m.libraryID
 	return func() tea.Msg {
 		// Fallback: if no libraryID was provided, fetch the first library
 		if libID == "" {
 			libs, err := client.GetLibraries(context.Background())
 			if err != nil {
-				return LibraryItemsMsg{Err: fmt.Errorf("fetch libraries: %w", err)}
+				return LibraryItemsMsg{LibraryID: libraryID, Err: fmt.Errorf("fetch libraries: %w", err)}
 			}
 			libs, _ = client.FilterAudioLibraries(context.Background(), libs)
 			if len(libs) == 0 {
-				return LibraryItemsMsg{Items: nil, Total: 0, Page: 0}
+				return LibraryItemsMsg{Items: nil, Total: 0, Page: 0, LibraryID: libraryID}
 			}
 			libID = libs[0].ID
 		}
 
 		resp, err := client.GetLibraryItems(context.Background(), libID, page, limit)
 		if err != nil {
-			return LibraryItemsMsg{Err: fmt.Errorf("fetch library items: %w", err)}
+			return LibraryItemsMsg{LibraryID: libID, Err: fmt.Errorf("fetch library items: %w", err)}
 		}
 
 		return LibraryItemsMsg{
-			Items: resp.Results,
-			Total: resp.Total,
-			Page:  resp.Page,
+			Items:     resp.Results,
+			Total:     resp.Total,
+			Page:      resp.Page,
+			LibraryID: libID,
 		}
 	}
 }
@@ -303,6 +365,30 @@ func (m *Model) syncListItems() {
 		items[i] = libraryListItem{Item: item}
 	}
 	m.list.SetItems(items)
+}
+
+func (m *Model) storeCurrentLibraryCache() {
+	if m.libraryID == "" || len(m.items) == 0 {
+		return
+	}
+	m.cache[m.libraryID] = libraryCacheEntry{
+		items:      append([]abs.LibraryItem(nil), m.items...),
+		page:       m.page,
+		totalItems: m.totalItems,
+	}
+}
+
+func (m *Model) applyCachedLibrary(libraryID string) bool {
+	entry, ok := m.cache[libraryID]
+	if !ok {
+		return false
+	}
+	m.items = append([]abs.LibraryItem(nil), entry.items...)
+	m.page = entry.page
+	m.totalItems = entry.totalItems
+	m.loading = false
+	m.syncListItems()
+	return true
 }
 
 // Items returns the current library items.

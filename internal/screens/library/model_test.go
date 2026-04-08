@@ -513,6 +513,118 @@ func TestNoPrefetchWhenBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestTabSwitchUsesCachedLibraryItems(t *testing.T) {
+	libs := []abs.Library{
+		{ID: "lib-001", Name: "Books", MediaType: "book"},
+		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+	m.SetSize(80, 24)
+
+	firstItems := makeItems(2)
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     firstItems,
+		Total:     2,
+		Page:      0,
+		LibraryID: "lib-001",
+	})
+
+	secondItems := makeItems(2)
+	secondItems[0].ID = "pod-1"
+	secondItems[0].Media.Metadata.Title = "Podcast 1"
+	secondItems[1].ID = "pod-2"
+	secondItems[1].Media.Metadata.Title = "Podcast 2"
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if cmd == nil {
+		t.Fatal("expected fetch command on first switch to uncached library")
+	}
+	if m.libraryID != "lib-002" {
+		t.Fatalf("libraryID = %q, want lib-002", m.libraryID)
+	}
+	if !m.Loading() {
+		t.Fatal("expected loading=true while fetching uncached library")
+	}
+	if len(m.Items()) != 0 {
+		t.Fatalf("expected items to be cleared for uncached library loading, got %d", len(m.Items()))
+	}
+	if !containsString(m.View(), "Loading library") {
+		t.Fatal("expected loading view when switching to uncached library")
+	}
+
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     secondItems,
+		Total:     2,
+		Page:      0,
+		LibraryID: "lib-002",
+	})
+
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if cmd != nil {
+		t.Fatal("expected no fetch command when switching to cached library")
+	}
+	if m.libraryID != "lib-001" {
+		t.Fatalf("libraryID = %q, want lib-001", m.libraryID)
+	}
+	if len(m.Items()) != len(firstItems) {
+		t.Fatalf("items length = %d, want %d", len(m.Items()), len(firstItems))
+	}
+	if m.Items()[0].ID != firstItems[0].ID {
+		t.Fatalf("first cached item ID = %q, want %q", m.Items()[0].ID, firstItems[0].ID)
+	}
+}
+
+func TestConfigureUsesCachedLibraryItems(t *testing.T) {
+	libs := []abs.Library{
+		{ID: "lib-001", Name: "Books", MediaType: "book"},
+		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+	firstItems := makeItems(2)
+	secondItems := makeItems(2)
+	secondItems[0].ID = "pod-1"
+	secondItems[1].ID = "pod-2"
+
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     firstItems,
+		Total:     2,
+		Page:      0,
+		LibraryID: "lib-001",
+	})
+	m.Configure("lib-002", libs)
+	if !m.Loading() {
+		t.Fatal("expected loading=true for uncached configured library")
+	}
+
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     secondItems,
+		Total:     2,
+		Page:      0,
+		LibraryID: "lib-002",
+	})
+
+	m.Configure("lib-001", libs)
+	if m.Loading() {
+		t.Fatal("expected loading=false when configuring cached library")
+	}
+	if len(m.Items()) != len(firstItems) {
+		t.Fatalf("items length = %d, want %d", len(m.Items()), len(firstItems))
+	}
+	if m.Items()[0].ID != firstItems[0].ID {
+		t.Fatalf("first cached item ID = %q, want %q", m.Items()[0].ID, firstItems[0].ID)
+	}
+}
+
+func TestInitSkipsFetchWhenItemsAlreadyLoaded(t *testing.T) {
+	m := newTestModel()
+	m.items = makeItems(2)
+	m.totalItems = 2
+
+	if cmd := m.Init(); cmd != nil {
+		t.Fatal("expected no init command when items are already loaded")
+	}
+}
+
 func containsString(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

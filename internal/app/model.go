@@ -232,7 +232,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case home.NavigateLibraryMsg:
-		m.library = library.New(m.styles, m.client, msg.LibraryID, msg.Libraries)
+		m.library.Configure(msg.LibraryID, msg.Libraries)
 		return m.navigate(ScreenLibrary)
 
 	case home.NavigateSearchMsg:
@@ -245,6 +245,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case home.PersonalizedMsg:
+		var cmd tea.Cmd
+		m.home, cmd = m.home.Update(msg)
+		return m, cmd
+
 	case search.NavigateDetailMsg:
 		m.detail = detail.New(m.styles, msg.Item)
 		m, navCmd := m.navigate(ScreenDetail)
@@ -252,6 +257,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case search.BackMsg:
 		return m.back()
+
+	case library.LibraryItemsMsg:
+		var cmd tea.Cmd
+		m.library, cmd = m.library.Update(msg)
+		return m, cmd
 
 	case library.NavigateDetailMsg:
 		m.detail = detail.New(m.styles, msg.Item)
@@ -275,8 +285,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case EpisodesLoadedMsg:
 		if msg.Err != nil {
 			logger.Error("failed to load episodes", "err", msg.Err)
+			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+				return m2, cmd
+			}
 		} else {
 			logger.Info("episodes loaded", "count", len(msg.Episodes))
+		}
+		if msg.ItemID != "" && msg.ItemID != m.detail.ItemID() {
+			return m, nil
 		}
 		if msg.Err == nil && len(msg.Episodes) > 0 {
 			m.detail.SetEpisodes(msg.Episodes)
@@ -286,6 +302,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BookDetailLoadedMsg:
 		if msg.Err != nil {
 			logger.Error("failed to load detail item", "err", msg.Err)
+			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+				return m2, cmd
+			}
+			return m, nil
+		}
+		if msg.ItemID != "" && msg.ItemID != m.detail.ItemID() {
 			return m, nil
 		}
 		if msg.Item != nil {
@@ -378,9 +400,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		logger.Info("restoring session", "itemID", msg.Item.ID, "episodeID", msg.Episode)
-		m.detail = detail.New(m.styles, *msg.Item)
-		m, navCmd := m.navigate(ScreenDetail)
-		detailCmds := m.detailLoadCmds(*msg.Item, nil)
 		m.restorePaused = true
 		var playCmd tea.Cmd
 		if msg.Episode != nil {
@@ -388,7 +407,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m, playCmd = m.handlePlayCmd(detail.PlayCmd{Item: *msg.Item})
 		}
-		return m, tea.Batch(append(detailCmds, navCmd, playCmd)...)
+		return m, playCmd
 
 	case player.PlayerReadyMsg:
 		return m.handlePlayerReady()
@@ -426,6 +445,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PlaybackErrorMsg:
 		if msg.Err != nil {
 			logger.Error("playback error", "err", msg.Err)
+			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+				return m2, cmd
+			}
 			cmd := m.err.SetError(msg.Err)
 			m.propagateSize()
 			return m, cmd
@@ -702,4 +724,23 @@ func (m *Model) clearPlaybackSessionState() {
 	m.player.Title = ""
 	m.player.Position = 0
 	m.player.Duration = 0
+}
+
+// checkUnauthorized checks if the error indicates a 401 response.
+// If so, it resets the client and redirects to login.
+// Returns the updated model and init command plus true if 401 was handled.
+func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
+	if !components.IsUnauthorized(err) {
+		return m, nil, false
+	}
+	logger.Warn("401 unauthorized, redirecting to login")
+	m.client = nil
+	m.searchCache = search.NewCache(nil)
+	m.search = search.New(m.styles, m.searchCache, "", "")
+	m.screen = ScreenLogin
+	m.backStack = nil
+	m.login = login.New(m.styles)
+	cmd := m.login.Init()
+	m.propagateSize()
+	return m, cmd, true
 }

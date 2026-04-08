@@ -177,40 +177,40 @@ func (m Model) helpText() string {
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if m.focusEpisodes {
 			if hasBookmarkFocus {
-				return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab next section • q/h back"
+				return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab next section • esc/← back"
 			}
-			return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab unfocus • q/h back"
+			return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab unfocus • esc/← back"
 		}
 		if m.focusBookmarks && hasBookmarkFocus {
-			return "enter seek • e edit • d delete • j/k navigate • tab unfocus • q/h back"
+			return "enter seek • e edit • d delete • j/k navigate • tab unfocus • esc/← back"
 		}
 		if hasBookmarkFocus {
-			return "space/p play • tab focus episodes/bookmarks • b bookmark • q/h back"
+			return "space/p play • tab focus episodes/bookmarks • b bookmark • esc/← back"
 		}
-		return "space/p play • tab focus episodes • b bookmark • q/h back"
+		return "space/p play • tab focus episodes • b bookmark • esc/← back"
 	}
 	if m.item.MediaType == "podcast" && len(m.episodes) == 0 {
 		if hasBookmarkFocus {
-			return "b bookmark • tab focus bookmarks • q/h back"
+			return "b bookmark • tab focus bookmarks • esc/← back"
 		}
-		return "b bookmark • q/h back"
+		return "b bookmark • esc/← back"
 	}
 	if m.focusBookmarks && hasBookmarkFocus {
-		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark" + queueHints + " • q/h back"
+		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark" + queueHints + " • esc/← back"
 	}
 	if m.focusSeries && m.hasSeries() {
-		return "enter open series • tab next section • b bookmark" + queueHints + " • q/h back"
+		return "enter open series • tab next section • b bookmark" + queueHints + " • esc/← back"
 	}
 	if hasBookmarkFocus {
 		if m.hasSeries() {
-			return "space/p play • b bookmark" + queueHints + " • tab focus series/bookmarks • j/k scroll • q/h back"
+			return "space/p play • b bookmark" + queueHints + " • tab focus series/bookmarks • j/k scroll • esc/← back"
 		}
-		return "space/p play • b bookmark" + queueHints + " • tab focus bookmarks • j/k scroll • q/h back"
+		return "space/p play • b bookmark" + queueHints + " • tab focus bookmarks • j/k scroll • esc/← back"
 	}
 	if m.hasSeries() {
-		return "space/p play • b bookmark • f mark finished" + queueHints + " • tab focus series • j/k scroll • q/h back"
+		return "space/p play • b bookmark • f mark finished" + queueHints + " • tab focus series • j/k scroll • esc/← back"
 	}
-	return "space/p play • b bookmark • f mark finished" + queueHints + " • j/k scroll • q/h back"
+	return "space/p play • b bookmark • f mark finished" + queueHints + " • j/k scroll • esc/← back"
 }
 
 // wordWrap wraps text to the given width, breaking on spaces.

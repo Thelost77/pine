@@ -2,6 +2,7 @@ package abs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -26,6 +27,21 @@ func (c *Client) UpdateProgress(ctx context.Context, itemID string, currentTime,
 		return fmt.Errorf("update progress: %w", err)
 	}
 	return nil
+}
+
+// GetMediaProgress returns the user's media progress (including bookmarks)
+// for a specific library item.
+func (c *Client) GetMediaProgress(ctx context.Context, itemID string) (*MediaProgressWithBookmarks, error) {
+	path := fmt.Sprintf("/api/me/progress/%s", itemID)
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get media progress: %w", err)
+	}
+	var progress MediaProgressWithBookmarks
+	if err := json.Unmarshal(resp, &progress); err != nil {
+		return nil, fmt.Errorf("get media progress: unmarshal: %w", err)
+	}
+	return &progress, nil
 }
 
 // UpdateEpisodeProgress updates the user's progress on a podcast episode.

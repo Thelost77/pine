@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -20,6 +21,7 @@ type PersonalizedMsg struct {
 	Items         []abs.LibraryItem
 	RecentlyAdded []abs.LibraryItem
 	Libraries     []abs.Library
+	LibraryID     string
 	Err           error
 }
 
@@ -173,11 +175,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case PersonalizedMsg:
 		m.loading = false
+		currentLib := m.SelectedLibraryID()
+		if msg.LibraryID != "" && currentLib != "" && msg.LibraryID != currentLib {
+			logger.Debug("STALE: discarding personalized msg", "msgLib", msg.LibraryID, "currentLib", currentLib)
+			return m, nil
+		}
 		if msg.Err != nil {
+			logger.Debug("personalized error", "err", msg.Err)
 			m.err = msg.Err
 			return m, nil
 		}
 		if len(msg.Libraries) > 0 {
+			logger.Debug("personalized: updating libraries", "count", len(msg.Libraries))
 			m.libraries = msg.Libraries
 		}
 		if libID := m.SelectedLibraryID(); libID != "" {
@@ -288,6 +297,7 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 	client := m.client
 	selectedIdx := m.selectedLibrary
 	existingLibs := m.libraries
+	currentLibID := m.SelectedLibraryID()
 	return func() tea.Msg {
 		libs := existingLibs
 		// Fetch libraries if we don't have them yet
@@ -300,7 +310,7 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 			libs, _ = client.FilterAudioLibraries(context.Background(), libs)
 		}
 		if len(libs) == 0 {
-			return PersonalizedMsg{Items: nil, Libraries: libs}
+			return PersonalizedMsg{Items: nil, Libraries: libs, LibraryID: currentLibID}
 		}
 
 		idx := selectedIdx
@@ -310,7 +320,7 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 
 		sections, err := client.GetPersonalized(context.Background(), libs[idx].ID)
 		if err != nil {
-			return PersonalizedMsg{Err: fmt.Errorf("fetch personalized: %w", err), Libraries: libs}
+			return PersonalizedMsg{Err: fmt.Errorf("fetch personalized: %w", err), Libraries: libs, LibraryID: libs[idx].ID}
 		}
 
 		var continueListening []abs.LibraryItem
@@ -329,6 +339,7 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 			Items:         continueListening,
 			RecentlyAdded: recentlyAdded,
 			Libraries:     libs,
+			LibraryID:     libs[idx].ID,
 		}
 	}
 }
@@ -593,6 +604,11 @@ func hydrateRecentlyAddedPodcasts(ctx context.Context, client *abs.Client, items
 	for i, item := range hydrated {
 		if item.MediaType != "podcast" || item.RecentEpisode != nil {
 			continue
+		}
+		select {
+		case <-ctx.Done():
+			return hydrated
+		default:
 		}
 		fullItem, err := client.GetLibraryItem(ctx, item.ID)
 		if err != nil || fullItem == nil {

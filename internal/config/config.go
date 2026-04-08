@@ -42,11 +42,7 @@ type KeybindsConfig struct {
 	NextChapter  string `toml:"next_chapter"`
 	PrevChapter  string `toml:"prev_chapter"`
 	SleepTimer   string `toml:"sleep_timer"`
-	Select       string `toml:"select"`
 	Back         string `toml:"back"`
-	Up           string `toml:"up"`
-	Down         string `toml:"down"`
-	Search       string `toml:"search"`
 }
 
 type Config struct {
@@ -86,11 +82,7 @@ func Default() Config {
 			NextChapter:  "n",
 			PrevChapter:  "N",
 			SleepTimer:   "s",
-			Select:       "enter",
 			Back:         "esc",
-			Up:           "k",
-			Down:         "j",
-			Search:       "/",
 		},
 	}
 }

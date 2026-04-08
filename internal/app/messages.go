@@ -92,14 +92,16 @@ type SleepTimerExpiredMsg struct {
 
 // EpisodesLoadedMsg carries podcast episodes fetched from the API.
 type EpisodesLoadedMsg struct {
+	ItemID   string
 	Episodes []abs.PodcastEpisode
 	Err      error
 }
 
 // BookDetailLoadedMsg carries an enriched library item fetched from ABS.
 type BookDetailLoadedMsg struct {
-	Item *abs.LibraryItem
-	Err  error
+	ItemID string
+	Item   *abs.LibraryItem
+	Err    error
 }
 
 // RestoreSessionMsg carries the result of a session restore attempt.

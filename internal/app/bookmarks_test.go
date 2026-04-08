@@ -31,7 +31,7 @@ func TestHandleAddBookmarkReturnsBookmarkUpdateErrorWhenRefreshFails(t *testing.
 		case r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
 			http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
@@ -72,9 +72,9 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 			createdTitle = req.Title
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"bookmarks":[{"libraryItemId":"item-001","title":"stored","time":120,"createdAt":1700000000000}]}`))
+			w.Write([]byte(`{"libraryItemId":"item-001","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[{"libraryItemId":"item-001","title":"stored","time":120,"createdAt":1700000000000}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -103,9 +103,9 @@ func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *tes
 		switch {
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/me/item/item-001/bookmark/300.5":
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"bookmarks":[]}`))
+			w.Write([]byte(`{"libraryItemId":"item-001","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -144,9 +144,9 @@ func TestHandleUpdateBookmarkRefreshesBookmarks(t *testing.T) {
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/item/item-001/bookmark":
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"bookmarks":[{"libraryItemId":"item-001","title":"Renamed bookmark","time":300.5,"createdAt":1700000000000}]}`))
+			w.Write([]byte(`{"libraryItemId":"item-001","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[{"libraryItemId":"item-001","title":"Renamed bookmark","time":300.5,"createdAt":1700000000000}]}`))
 		default:
 			http.NotFound(w, r)
 		}

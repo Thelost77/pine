@@ -75,6 +75,7 @@ type Model struct {
 	cache            *Cache
 	libraryID        string
 	libraryMediaType string
+	searchCancel     context.CancelFunc
 }
 
 // New creates a new search screen model.
@@ -122,9 +123,22 @@ func (m *Model) SetSize(width, height int) {
 	m.list.SetSize(width, listHeight)
 }
 
-// Init returns the initial command (focus text input cursor).
+// Init returns the initial command (focus text input cursor + prewarm cache).
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.prewarmCmd())
+}
+
+func (m Model) prewarmCmd() tea.Cmd {
+	if m.cache == nil {
+		return nil
+	}
+	cache := m.cache
+	libID := m.libraryID
+	libMediaType := m.libraryMediaType
+	return func() tea.Msg {
+		_ = cache.Prepare(context.Background(), libID, libMediaType)
+		return nil
+	}
 }
 
 // Update handles messages for the search screen.
@@ -220,12 +234,18 @@ func (m *Model) searchCmd(query string) tea.Cmd {
 			return SearchResultsMsg{Query: query, Err: fmt.Errorf("not authenticated")}
 		}
 	}
+	if m.searchCancel != nil {
+		m.searchCancel()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	m.searchCancel = cancel
 	m.loading = true
 	cache := m.cache
 	libID := m.libraryID
 	libMediaType := m.libraryMediaType
 	return func() tea.Msg {
-		items, err := cache.Search(context.Background(), libID, libMediaType, query)
+		defer cancel()
+		items, err := cache.Search(ctx, libID, libMediaType, query)
 		if err != nil {
 			return SearchResultsMsg{Query: query, Err: fmt.Errorf("search: %w", err)}
 		}

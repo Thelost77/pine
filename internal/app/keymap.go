@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/Thelost77/pine/internal/config"
+	"github.com/charmbracelet/bubbles/key"
 )
 
 // KeyMap defines the global keybindings for the root model.
@@ -21,12 +21,12 @@ type KeyMap struct {
 func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 	return KeyMap{
 		Quit: key.NewBinding(
-			key.WithKeys("q"),
-			key.WithHelp("q", "quit"),
+			key.WithKeys(cfg.Quit),
+			key.WithHelp(cfg.Quit, "quit"),
 		),
 		Back: key.NewBinding(
-			key.WithKeys("esc", "left"),
-			key.WithHelp("esc/←", "back"),
+			key.WithKeys(cfg.Back, "left"),
+			key.WithHelp(cfg.Back, "back"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),

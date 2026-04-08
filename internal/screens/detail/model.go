@@ -72,7 +72,8 @@ type SeekToChapterCmd struct {
 
 // MarkFinishedCmd requests marking an item as finished.
 type MarkFinishedCmd struct {
-	Item abs.LibraryItem
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
 }
 
 // MarkFinishedMsg updates the item after marking it finished.
@@ -269,6 +270,11 @@ func (m Model) Episodes() []abs.PodcastEpisode {
 	return m.episodes
 }
 
+// ItemID returns the ID of the displayed library item.
+func (m Model) ItemID() string {
+	return m.item.ID
+}
+
 // SetEpisodes updates the episode list and refreshes the viewport content.
 func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
 	m.episodes = episodes
@@ -417,8 +423,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.MarkFinished):
 			item := m.item
+			var episode *abs.PodcastEpisode
+			if item.MediaType == "podcast" && m.focusEpisodes && len(m.episodes) > 0 && m.selectedEpisode < len(m.episodes) {
+				ep := m.episodes[m.selectedEpisode]
+				episode = &ep
+			}
 			return m, func() tea.Msg {
-				return MarkFinishedCmd{Item: item}
+				return MarkFinishedCmd{Item: item, Episode: episode}
 			}
 		case key.Matches(msg, m.keys.ToggleFocus):
 			m.cycleFocus()

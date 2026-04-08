@@ -35,7 +35,7 @@ func (m Model) View() string {
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	if m.width > 0 {
-		content = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		content = lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content)
 	}
 
 	if !m.chapterOverlayVisible {

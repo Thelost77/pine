@@ -472,19 +472,28 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	}
 	client := m.client
 	item := msg.Item
+	episode := msg.Episode
 	duration := item.Media.TotalDuration()
+	if episode != nil && episode.Duration > 0 {
+		duration = episode.Duration
+	}
 	return m, func() tea.Msg {
-		if err := client.UpdateProgress(context.Background(), item.ID, duration, 1.0, true); err != nil {
+		var err error
+		if episode != nil {
+			err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, duration, 1.0, true)
+		} else {
+			err = client.UpdateProgress(context.Background(), item.ID, duration, 1.0, true)
+		}
+		if err != nil {
 			logger.Warn("failed to mark as finished", "err", err)
 			return PlaybackErrorMsg{Err: err}
 		}
-		return detail.MarkFinishedMsg{
-			Progress: &abs.UserMediaProgress{
-				CurrentTime: duration,
-				Progress:    1.0,
-				IsFinished:  true,
-			},
+		progress := &abs.UserMediaProgress{
+			CurrentTime: duration,
+			Progress:    1.0,
+			IsFinished:  true,
 		}
+		return detail.MarkFinishedMsg{Progress: progress}
 	}
 }
 

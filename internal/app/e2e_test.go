@@ -766,8 +766,8 @@ func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForNoBookmarks(t *testing.
 func TestE2E_BookmarkFetchOnDetailEntryShowsBookmarkErrorForServerFailure(t *testing.T) {
 	log := &apiLog{}
 	state := &e2eServerState{
-		bookmarks: make(map[string][]abs.Bookmark),
-		meStatus:  http.StatusInternalServerError,
+		bookmarks:      make(map[string][]abs.Bookmark),
+		progressStatus: map[string]int{"item-001": http.StatusInternalServerError},
 	}
 	srv := newFullMockABSServer(log, state)
 	defer srv.Close()
@@ -2066,8 +2066,8 @@ func TestE2E_SessionRestore(t *testing.T) {
 	// Execute the restore command — it fetches the item from ABS
 	m, cmd = feedCmd(m, cmd)
 
-	// After restore, should be on Detail screen
-	assertScreen(t, m, ScreenDetail)
+	// After restore, should stay on Home screen while restoring paused playback
+	assertScreen(t, m, ScreenHome)
 
 	// Should have restorePaused set, meaning playback will start paused
 	if !m.restorePaused {
