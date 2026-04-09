@@ -116,7 +116,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
 		}
 
-		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL + "?token=" + client.Token()
+		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL
 		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
 
 		return PlaySessionMsg{
@@ -132,6 +132,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				TrackDuration:    session.AudioTracks[0].Duration,
 			},
 			StreamURL: streamURL,
+			AuthToken: client.Token(),
 		}
 	}
 
@@ -165,7 +166,11 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 
 	paused := m.restorePaused
 	m.restorePaused = false
-	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused)
+	var headers []string
+	if msg.AuthToken != "" {
+		headers = []string{"Authorization: Bearer " + msg.AuthToken}
+	}
+	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers)
 }
 
 // handlePlayerReady starts the position tick and sync tick.
@@ -378,7 +383,7 @@ func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemI
 	}
 	logger.Info("track selected for playback", "itemID", itemID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", bookPos, "seekTime", seekTime)
 
-	streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
+	streamURL := client.BaseURL() + track.ContentURL
 
 	return PlaySessionMsg{
 		Session: PlaySessionData{
@@ -392,6 +397,7 @@ func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemI
 			TrackDuration:    track.Duration,
 		},
 		StreamURL: streamURL,
+		AuthToken: client.Token(),
 	}, nil
 }
 

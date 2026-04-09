@@ -264,7 +264,7 @@ func TestLaunch(t *testing.T) {
 		},
 	}
 
-	err := m.Launch("http://example.com/audio.mp3", "30", "/tmp/test.sock", false)
+	err := m.Launch("http://example.com/audio.mp3", "30", "/tmp/test.sock", false, nil)
 	if err != nil {
 		t.Fatalf("Launch() error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestLaunchPaused(t *testing.T) {
 		newConn: func(socketPath string) IPCConnection { return mc },
 	}
 
-	if err := m.Launch("http://example.com/audio.mp3", "0", "/tmp/test.sock", true); err != nil {
+	if err := m.Launch("http://example.com/audio.mp3", "0", "/tmp/test.sock", true, nil); err != nil {
 		t.Fatalf("Launch() error: %v", err)
 	}
 
@@ -340,7 +340,7 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 	}
 
 	// First launch
-	if err := m.Launch("http://example.com/a.mp3", "0", "/tmp/test.sock", false); err != nil {
+	if err := m.Launch("http://example.com/a.mp3", "0", "/tmp/test.sock", false, nil); err != nil {
 		t.Fatalf("first Launch() error: %v", err)
 	}
 	if launchCount != 1 {
@@ -348,7 +348,7 @@ func TestLaunchKillsExistingProcess(t *testing.T) {
 	}
 
 	// Second launch should close the first connection
-	if err := m.Launch("http://example.com/b.mp3", "0", "/tmp/test.sock", false); err != nil {
+	if err := m.Launch("http://example.com/b.mp3", "0", "/tmp/test.sock", false, nil); err != nil {
 		t.Fatalf("second Launch() error: %v", err)
 	}
 	if launchCount != 2 {

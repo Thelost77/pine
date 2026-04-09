@@ -50,6 +50,7 @@ type BackMsg struct{}
 type PlaySessionMsg struct {
 	Session   PlaySessionData
 	StreamURL string
+	AuthToken string
 }
 
 // PlaySessionData carries the data returned from ABS when starting a session.

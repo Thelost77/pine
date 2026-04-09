@@ -32,7 +32,7 @@ type mockPlayer struct {
 	connectErr error
 }
 
-func (p *mockPlayer) Launch(url, startTime, socketPath string, paused bool) error {
+func (p *mockPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launched = true

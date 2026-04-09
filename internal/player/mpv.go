@@ -47,7 +47,7 @@ func MpvSocketDir() string {
 
 // Player defines the interface for media playback control.
 type Player interface {
-	Launch(url, startTime, socketPath string, paused bool) error
+	Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error
 	Connect() error
 	GetPosition() (float64, error)
 	GetDuration() (float64, error)
@@ -96,7 +96,7 @@ func NewMpv() *Mpv {
 // Launch spawns mpv in audio-only mode with the given IPC socket.
 // If paused is true, mpv starts paused and the user must press play to resume.
 // If a previous mpv process is still running, it is killed first.
-func (m *Mpv) Launch(url, startTime, socketPath string, paused bool) error {
+func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error {
 	// Clean up any existing mpv process to avoid orphans
 	if m.cmd != nil && m.cmd.Process != nil {
 		m.stopProcess("killing previous mpv process")
@@ -109,8 +109,11 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool) error {
 		"--no-video",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 		fmt.Sprintf("--start=%s", startTime),
-		url,
 	}
+	for _, h := range httpHeaders {
+		args = append(args, fmt.Sprintf("--http-header-fields=%s", h))
+	}
+	args = append(args, url)
 	if paused {
 		args = append(args, "--pause")
 	}
