@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/Thelost77/pine/internal/logger"
+	"golang.org/x/sync/errgroup"
 )
 
 // GetLibraries returns all libraries on the server.
@@ -299,34 +300,53 @@ const audioCheckSampleSize = 10
 // FilterAudioLibraries filters out "book" type libraries that contain no audio content
 // (ebooks without audio). Podcasts are always kept. For book libraries, it samples
 // items and checks if any has Duration > 0 to determine if it's an audio library.
+// Audio checks for book libraries run in parallel.
 func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Library, error) {
 	if len(libs) == 0 {
 		return libs, nil
 	}
 
 	logger.Debug("filtering audio libraries", "inputCount", len(libs))
+
+	type checkResult struct {
+		include bool
+		err     error
+	}
+
+	// Run audio checks in parallel for book libraries.
+	// Each goroutine writes to its own index — no mutex needed.
+	checks := make([]checkResult, len(libs))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, lib := range libs {
+		if lib.MediaType != "book" {
+			continue
+		}
+		g.Go(func() error {
+			hasAudio, err := c.libraryHasAudio(gctx, lib.ID)
+			checks[i] = checkResult{include: hasAudio, err: err}
+			if err != nil {
+				logger.Warn("failed to check library for audio", "libraryID", lib.ID, "err", err)
+				return nil
+			}
+			if !hasAudio {
+				logger.Info("excluding ebook-only library", "libraryID", lib.ID, "name", lib.Name)
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+
 	result := make([]Library, 0, len(libs))
-	for _, lib := range libs {
-		// Always keep podcasts
+	for i, lib := range libs {
 		if lib.MediaType == "podcast" {
 			result = append(result, lib)
 			continue
 		}
-
-		// For "book" type libraries, check if any item has audio
 		if lib.MediaType == "book" {
-			hasAudio, err := c.libraryHasAudio(ctx, lib.ID)
-			if err != nil {
-				logger.Warn("failed to check library for audio", "libraryID", lib.ID, "err", err)
-				// On error, include the library to be safe
+			if checks[i].err != nil || checks[i].include {
 				result = append(result, lib)
-				continue
 			}
-			if hasAudio {
-				result = append(result, lib)
-			} else {
-				logger.Info("excluding ebook-only library", "libraryID", lib.ID, "name", lib.Name)
-			}
+			continue
 		}
 	}
 
