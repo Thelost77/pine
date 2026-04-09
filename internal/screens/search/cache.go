@@ -219,16 +219,15 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 			return nil, fmt.Errorf("list podcast library items: %w", err)
 		}
 
-		for _, item := range resp.Results {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-			}
-			fullItem, err := c.client.GetLibraryItem(ctx, item.ID)
-			if err != nil {
-				return nil, fmt.Errorf("expand podcast %s: %w", item.ID, err)
-			}
+		ids := make([]string, len(resp.Results))
+		for i, item := range resp.Results {
+			ids[i] = item.ID
+		}
+		fullItems, err := c.client.GetLibraryItemsBatch(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, fullItem := range fullItems {
 			for _, episode := range fullItem.Media.Episodes {
 				entries = append(entries, snapshotEntry{
 					itemID:              fullItem.ID,

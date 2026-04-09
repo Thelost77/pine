@@ -599,24 +599,38 @@ func hydrateRecentlyAddedPodcasts(ctx context.Context, client *abs.Client, items
 		return items
 	}
 
+	type pending struct {
+		index int
+		id    string
+	}
+	var toFetch []pending
+	for i, item := range items {
+		if item.MediaType == "podcast" && item.RecentEpisode == nil {
+			toFetch = append(toFetch, pending{index: i, id: item.ID})
+		}
+	}
+	if len(toFetch) == 0 {
+		return items
+	}
+
+	ids := make([]string, len(toFetch))
+	for i, p := range toFetch {
+		ids[i] = p.id
+	}
+	fullItems, err := client.GetLibraryItemsBatch(ctx, ids)
+	if err != nil {
+		return items
+	}
+
 	hydrated := make([]abs.LibraryItem, len(items))
 	copy(hydrated, items)
-	for i, item := range hydrated {
-		if item.MediaType != "podcast" || item.RecentEpisode != nil {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return hydrated
-		default:
-		}
-		fullItem, err := client.GetLibraryItem(ctx, item.ID)
-		if err != nil || fullItem == nil {
+	for i, fullItem := range fullItems {
+		if fullItem == nil {
 			continue
 		}
 		if episode := latestEpisode(fullItem.Media.Episodes); episode != nil {
-			item.RecentEpisode = episode
-			hydrated[i] = item
+			idx := toFetch[i].index
+			hydrated[idx].RecentEpisode = episode
 		}
 	}
 	return hydrated

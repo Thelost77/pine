@@ -12,10 +12,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Thelost77/pine/internal/logger"
 	"golang.org/x/sync/errgroup"
 )
+
+const batchFetchConcurrency = 10
 
 // GetLibraries returns all libraries on the server.
 func (c *Client) GetLibraries(ctx context.Context) ([]Library, error) {
@@ -143,11 +146,15 @@ func (c *Client) SearchPodcastEpisodes(ctx context.Context, libraryID, query str
 			return nil, fmt.Errorf("list podcast library items: %w", err)
 		}
 
-		for _, libraryItem := range resp.Results {
-			item, err := c.GetLibraryItem(ctx, libraryItem.ID)
-			if err != nil {
-				return nil, fmt.Errorf("expand podcast %s: %w", libraryItem.ID, err)
-			}
+		ids := make([]string, len(resp.Results))
+		for i, li := range resp.Results {
+			ids[i] = li.ID
+		}
+		fullItems, err := c.GetLibraryItemsBatch(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range fullItems {
 			for _, episode := range item.Media.Episodes {
 				if !strings.HasPrefix(strings.ToLower(episode.Title), normalized) {
 					continue
@@ -190,6 +197,50 @@ func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*LibraryIte
 	}
 	logger.Info("library item fetched", "itemID", item.ID, "mediaType", item.MediaType, "episodes", len(item.Media.Episodes))
 	return &item, nil
+}
+
+// GetLibraryItemsBatch fetches multiple library items concurrently.
+func (c *Client) GetLibraryItemsBatch(ctx context.Context, ids []string) ([]*LibraryItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]*LibraryItem, len(ids))
+	var firstErr error
+	var errOnce sync.Once
+	sem := make(chan struct{}, batchFetchConcurrency)
+	var wg sync.WaitGroup
+
+	for i, id := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			item, err := c.GetLibraryItem(ctx, id)
+			if err != nil {
+				errOnce.Do(func() {
+					firstErr = fmt.Errorf("expand item %s: %w", id, err)
+					cancel()
+				})
+				return
+			}
+			results[i] = item
+		}()
+	}
+
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 // GetSeries returns series metadata scoped to a library.
