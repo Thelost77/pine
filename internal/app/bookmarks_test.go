@@ -25,17 +25,55 @@ func testBookmarkItem(id string) abs.LibraryItem {
 	}
 }
 
-func TestHandleAddBookmarkReturnsBookmarkUpdateErrorWhenRefreshFails(t *testing.T) {
+func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark":
+		if r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark" {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
-			http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
-		default:
-			http.NotFound(w, r)
+			return
 		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m.sessionID = "sess-001"
+	m.player.Position = 120
+	m.detail.SetBookmarks([]abs.Bookmark{
+		{LibraryItemID: "item-001", Title: "Existing", Time: 60, CreatedAt: 1700000000000},
+	})
+
+	oldTimeNow := timeNowMillis
+	timeNowMillis = func() int64 { return 1700099000000 }
+	defer func() { timeNowMillis = oldTimeNow }()
+
+	_, cmd := m.handleAddBookmark(detail.AddBookmarkCmd{Item: testBookmarkItem("item-001")})
+	if cmd == nil {
+		t.Fatal("expected bookmark command")
+	}
+
+	msg := cmd()
+	updateMsg, ok := msg.(detail.BookmarksUpdatedMsg)
+	if !ok {
+		t.Fatalf("expected BookmarksUpdatedMsg, got %T", msg)
+	}
+	if updateMsg.Err != nil {
+		t.Fatalf("unexpected error: %v", updateMsg.Err)
+	}
+	if len(updateMsg.Bookmarks) != 2 {
+		t.Fatalf("expected 2 bookmarks, got %d", len(updateMsg.Bookmarks))
+	}
+	if updateMsg.Bookmarks[0].Title != "Existing" {
+		t.Errorf("bookmark[0] title = %q, want Existing", updateMsg.Bookmarks[0].Title)
+	}
+	if updateMsg.Bookmarks[1].Time != 120 {
+		t.Errorf("bookmark[1] time = %f, want 120", updateMsg.Bookmarks[1].Time)
+	}
+}
+
+func TestHandleAddBookmarkReturnsPlaybackErrorOnFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
@@ -49,20 +87,15 @@ func TestHandleAddBookmarkReturnsBookmarkUpdateErrorWhenRefreshFails(t *testing.
 	}
 
 	msg := cmd()
-	updateMsg, ok := msg.(detail.BookmarksUpdatedMsg)
-	if !ok {
-		t.Fatalf("expected BookmarksUpdatedMsg, got %T", msg)
-	}
-	if updateMsg.Err == nil {
-		t.Fatal("expected bookmark refresh error")
+	if _, ok := msg.(PlaybackErrorMsg); !ok {
+		t.Fatalf("expected PlaybackErrorMsg, got %T", msg)
 	}
 }
 
 func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 	var createdTitle string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark":
+		if r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark" {
 			var req struct {
 				Title string `json:"title"`
 			}
@@ -72,12 +105,9 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 			createdTitle = req.Title
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"libraryItemId":"item-001","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[{"libraryItemId":"item-001","title":"stored","time":120,"createdAt":1700000000000}]}`))
-		default:
-			http.NotFound(w, r)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 
@@ -100,19 +130,18 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 
 func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodDelete && r.URL.Path == "/api/me/item/item-001/bookmark/300.5":
+		if r.Method == http.MethodDelete && r.URL.Path == "/api/me/item/item-001/bookmark/300.5" {
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"libraryItemId":"item-001","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[]}`))
-		default:
-			http.NotFound(w, r)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 
 	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m.detail.SetBookmarks([]abs.Bookmark{
+		{LibraryItemID: "item-001", Title: "Only bookmark", Time: 300.5, CreatedAt: 1700000000000},
+	})
 
 	_, cmd := m.handleDeleteBookmark(detail.DeleteBookmarkCmd{
 		ItemID: "item-001",
@@ -138,22 +167,21 @@ func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *tes
 	}
 }
 
-func TestHandleUpdateBookmarkRefreshesBookmarks(t *testing.T) {
+func TestHandleUpdateBookmarkUpdatesTitle(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/item/item-001/bookmark":
+		if r.Method == http.MethodPatch && r.URL.Path == "/api/me/item/item-001/bookmark" {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/api/me/progress/item-001":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"libraryItemId":"item-001","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[{"libraryItemId":"item-001","title":"Renamed bookmark","time":300.5,"createdAt":1700000000000}]}`))
-		default:
-			http.NotFound(w, r)
+			return
 		}
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 
 	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m.detail.SetBookmarks([]abs.Bookmark{
+		{LibraryItemID: "item-001", Title: "Old title", Time: 300.5, CreatedAt: 1700000000000},
+	})
 
 	_, cmd := m.handleUpdateBookmark(detail.UpdateBookmarkCmd{
 		ItemID: "item-001",

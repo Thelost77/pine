@@ -9,68 +9,25 @@ import (
 	"testing"
 )
 
-var userBookmarksFixture = []byte(`{
-  "bookmarks": [
-    {
-      "libraryItemId": "li-001",
-      "title": "Great passage",
-      "time": 300.5,
-      "createdAt": 1700000000000
-    },
-    {
-      "libraryItemId": "li-001",
-      "title": "Important quote",
-      "time": 1500.0,
-      "createdAt": 1700001000000
-    },
-    {
-      "libraryItemId": "li-002",
-      "title": "Different item",
-      "time": 42,
-      "createdAt": 1700002000000
-    }
-  ]
-}`)
-
-// --- Deserialization tests ---
-
-func TestUserBookmarksDeserialization(t *testing.T) {
-	var resp struct {
-		Bookmarks []Bookmark `json:"bookmarks"`
-	}
-	if err := json.Unmarshal(userBookmarksFixture, &resp); err != nil {
-		t.Fatalf("failed to unmarshal fixture: %v", err)
-	}
-	if len(resp.Bookmarks) != 3 {
-		t.Fatalf("expected 3 bookmarks, got %d", len(resp.Bookmarks))
-	}
-	bm := resp.Bookmarks[0]
-	if bm.LibraryItemID != "li-001" {
-		t.Errorf("bookmark libraryItemId = %q, want %q", bm.LibraryItemID, "li-001")
-	}
-	if bm.Title != "Great passage" {
-		t.Errorf("bookmark title = %q, want %q", bm.Title, "Great passage")
-	}
-	if bm.Time != 300.5 {
-		t.Errorf("bookmark time = %f, want 300.5", bm.Time)
-	}
-	if bm.CreatedAt != 1700000000000 {
-		t.Errorf("bookmark createdAt = %d, want 1700000000000", bm.CreatedAt)
-	}
-}
-
-// --- HTTP tests ---
-
 func TestGetBookmarksHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me" {
-			t.Errorf("path = %q, want /api/me", r.URL.Path)
+		if r.URL.Path != "/api/me/progress/li-001" {
+			t.Errorf("path = %q, want /api/me/progress/li-001", r.URL.Path)
 		}
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(userBookmarksFixture)
+		w.Write([]byte(`{
+			"libraryItemId": "li-001",
+			"currentTime": 0,
+			"progress": 0,
+			"isFinished": false,
+			"bookmarks": [
+				{"libraryItemId": "li-001", "title": "Great passage", "time": 300.5, "createdAt": 1700000000000},
+				{"libraryItemId": "li-001", "title": "Important quote", "time": 1500.0, "createdAt": 1700001000000}
+			]
+		}`))
 	}))
 	defer srv.Close()
 
@@ -101,7 +58,7 @@ func TestCreateBookmarkHTTP(t *testing.T) {
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(userBookmarksFixture)
+		w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -137,7 +94,7 @@ func TestUpdateBookmarkHTTP(t *testing.T) {
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(userBookmarksFixture)
+		w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -201,10 +158,9 @@ func TestDeleteBookmarkHTTPPreservesBookmarkPrecision(t *testing.T) {
 }
 
 func TestGetBookmarksEmptyResponse(t *testing.T) {
-	emptyBookmarks := `{"bookmarks": []}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(emptyBookmarks))
+		w.Write([]byte(`{"libraryItemId":"li-002","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[]}`))
 	}))
 	defer srv.Close()
 
@@ -247,7 +203,7 @@ func TestGetBookmarksServerErrorReturnsError(t *testing.T) {
 func TestGetBookmarksMalformedResponseReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"bookmarks":`))
+		w.Write([]byte(`{"libraryItemId":`))
 	}))
 	defer srv.Close()
 

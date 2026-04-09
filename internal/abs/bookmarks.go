@@ -2,7 +2,6 @@ package abs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,30 +13,13 @@ type createBookmarkRequest struct {
 	Title string  `json:"title"`
 }
 
-type userBookmarksResponse struct {
-	Bookmarks []Bookmark `json:"bookmarks"`
-}
-
-// GetBookmarks returns bookmarks for a library item from the authenticated user's bookmark collection.
+// GetBookmarks returns bookmarks for a library item via the per-item progress endpoint.
 func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]Bookmark, error) {
-	path := "/api/me"
-	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	progress, err := c.GetMediaProgress(ctx, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("get bookmarks: %w", err)
 	}
-
-	var user userBookmarksResponse
-	if err := json.Unmarshal(resp, &user); err != nil {
-		return nil, fmt.Errorf("get bookmarks: unmarshal: %w", err)
-	}
-
-	bookmarks := make([]Bookmark, 0, len(user.Bookmarks))
-	for _, bookmark := range user.Bookmarks {
-		if bookmark.LibraryItemID == itemID {
-			bookmarks = append(bookmarks, bookmark)
-		}
-	}
-	return bookmarks, nil
+	return progress.Bookmarks, nil
 }
 
 // CreateBookmark creates a bookmark on a library item at the given time.

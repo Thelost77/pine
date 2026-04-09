@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
@@ -11,6 +12,8 @@ import (
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+var timeNowMillis = func() int64 { return time.Now().UnixMilli() }
 
 // handleAddBookmark creates a bookmark at the current playback position.
 func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
@@ -32,18 +35,17 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		title = fmt.Sprintf("%s — %s", m.player.Title, title)
 	}
 	logger.Info("creating bookmark", "itemID", itemID, "time", currentTime, "title", title)
+	existing := m.detail.Bookmarks()
 
 	return m, func() tea.Msg {
 		err := client.CreateBookmark(context.Background(), itemID, currentTime, title)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		progress, err := client.GetMediaProgress(context.Background(), itemID)
-		if err != nil {
-			return detail.BookmarksUpdatedMsg{Err: err}
-		}
-		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(progress.Bookmarks))
-		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
+		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: timeNowMillis()}
+		updated := append(append([]abs.Bookmark{}, existing...), newBm)
+		logger.Info("bookmark added locally", "itemID", itemID, "count", len(updated))
+		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
 	}
 }
 
@@ -58,7 +60,7 @@ func (m Model) handleSeekToBookmark(msg detail.SeekToBookmarkCmd) (Model, tea.Cm
 	return m.seekToBookGlobalPosition(msg.Time)
 }
 
-// handleDeleteBookmark deletes a bookmark and refreshes the list.
+// handleDeleteBookmark deletes a bookmark and removes it from the local list.
 func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
@@ -66,22 +68,25 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 	client := m.client
 	itemID := msg.ItemID
 	bmTime := msg.Bookmark.Time
+	existing := m.detail.Bookmarks()
 
 	return m, func() tea.Msg {
 		err := client.DeleteBookmark(context.Background(), itemID, bmTime)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		progress, err := client.GetMediaProgress(context.Background(), itemID)
-		if err != nil {
-			return detail.BookmarksUpdatedMsg{Err: err}
+		updated := make([]abs.Bookmark, 0, len(existing))
+		for _, bm := range existing {
+			if bm.Time != bmTime {
+				updated = append(updated, bm)
+			}
 		}
-		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(progress.Bookmarks))
-		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
+		logger.Info("bookmark deleted locally", "itemID", itemID, "count", len(updated))
+		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
 	}
 }
 
-// handleUpdateBookmark updates a bookmark title and refreshes the list.
+// handleUpdateBookmark updates a bookmark title in the local list.
 func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
@@ -90,18 +95,23 @@ func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cm
 	itemID := msg.ItemID
 	bmTime := msg.Bookmark.Time
 	title := msg.Title
+	existing := m.detail.Bookmarks()
 
 	return m, func() tea.Msg {
 		err := client.UpdateBookmark(context.Background(), itemID, bmTime, title)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		progress, err := client.GetMediaProgress(context.Background(), itemID)
-		if err != nil {
-			return detail.BookmarksUpdatedMsg{Err: err}
+		updated := make([]abs.Bookmark, len(existing))
+		copy(updated, existing)
+		for i, bm := range updated {
+			if bm.Time == bmTime {
+				updated[i].Title = title
+				break
+			}
 		}
-		logger.Info("bookmark list refreshed", "itemID", itemID, "count", len(progress.Bookmarks))
-		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
+		logger.Info("bookmark updated locally", "itemID", itemID, "count", len(updated))
+		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
 	}
 }
 

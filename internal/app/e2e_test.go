@@ -548,7 +548,7 @@ func TestE2E_BookmarkCRUD(t *testing.T) {
 	m, cmd := e2ePressKey(m, 'b')
 
 	// cmd returns from detail.AddBookmarkCmd → root handleAddBookmark
-	// which calls CreateBookmark + GetBookmarks
+	// which calls CreateBookmark + optimistic local update
 	m, cmd = feedCmd(m, cmd)
 	m = feedCmdChain(m, cmd, 5)
 
