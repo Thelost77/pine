@@ -30,6 +30,8 @@ func IsHTTPStatus(err error, statusCode int) bool {
 	return errors.As(err, &statusErr) && statusErr.StatusCode == statusCode
 }
 
+const maxResponseSize = 50 * 1024 * 1024 // 50 MB
+
 // Client is an HTTP client for the Audiobookshelf API.
 type Client struct {
 	baseURL    string
@@ -77,10 +79,15 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
+	limitedReader := io.LimitReader(resp.Body, maxResponseSize+1)
+	data, err := io.ReadAll(limitedReader)
 	if err != nil {
 		logger.Error("http response read failed", "method", method, "path", path, "status", resp.StatusCode, "err", err, "duration", time.Since(start))
 		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if len(data) > maxResponseSize {
+		logger.Error("http response body too large", "method", method, "path", path, "status", resp.StatusCode, "limit", maxResponseSize, "duration", time.Since(start))
+		return nil, fmt.Errorf("response body exceeds %d byte limit", maxResponseSize)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

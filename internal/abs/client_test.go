@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +61,23 @@ func TestDoReturnsErrorOnNon2xx(t *testing.T) {
 	_, err := c.do(context.Background(), http.MethodGet, "/api/fail", nil)
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")
+	}
+}
+
+func TestDoRejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(strings.Repeat("x", maxResponseSize+1)))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	_, err := c.do(context.Background(), http.MethodGet, "/api/big", nil)
+	if err == nil {
+		t.Fatal("expected error for oversized response, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error should mention exceeds, got: %v", err)
 	}
 }
 
