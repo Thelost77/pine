@@ -31,7 +31,6 @@ func IsHTTPStatus(err error, statusCode int) bool {
 }
 
 const maxResponseSize = 50 * 1024 * 1024 // 50 MB
-
 // Client is an HTTP client for the Audiobookshelf API.
 type Client struct {
 	baseURL    string

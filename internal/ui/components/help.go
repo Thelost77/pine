@@ -59,7 +59,7 @@ func defaultGroups() []HelpGroup {
 		{
 			Title: "Library",
 			Bindings: []HelpBinding{
-				{Key: "s", Desc: "browse series"},
+				{Key: "s", Desc: "browse series (books)"},
 				{Key: "/", Desc: "search"},
 				{Key: "tab", Desc: "switch library"},
 			},
@@ -69,6 +69,7 @@ func defaultGroups() []HelpGroup {
 			Bindings: []HelpBinding{
 				{Key: "j / ↓", Desc: "move down"},
 				{Key: "k / ↑", Desc: "move up"},
+				{Key: "H / L", Desc: "page up / down"},
 				{Key: "tab", Desc: "toggle focus"},
 			},
 		},
@@ -84,7 +85,7 @@ func defaultGroups() []HelpGroup {
 				{Key: "] / [", Desc: "volume up / down"},
 				{Key: "c", Desc: "open chapters"},
 				{Key: "n / N", Desc: "next / prev chapter"},
-				{Key: "s", Desc: "sleep timer"},
+				{Key: "S", Desc: "sleep timer"},
 			},
 		},
 		{
@@ -102,6 +103,7 @@ func defaultGroups() []HelpGroup {
 			Title: "Series",
 			Bindings: []HelpBinding{
 				{Key: "enter", Desc: "open selected book"},
+				{Key: "H / L", Desc: "page up / down"},
 				{Key: "esc / ←", Desc: "back"},
 			},
 		},

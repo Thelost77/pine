@@ -509,16 +509,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.screen == ScreenSearch {
-			if m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
-				if m.isPlaying() {
-					m, stopCmd := m.stopPlayback()
-					return m, tea.Batch(stopCmd, tea.Quit)
-				}
-				return m, tea.Quit
-			}
-			if m.searchOwnsKey(msg) {
-				return m.updateScreen(msg)
-			}
+			return m.updateScreen(msg)
 		}
 		if key.Matches(msg, m.keys.ChapterOverlay) {
 			if m.canOpenChapterOverlay() {
@@ -576,31 +567,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.updateScreen(msg)
-}
-
-func (m Model) searchOwnsKey(msg tea.KeyMsg) bool {
-	switch msg.Type {
-	case tea.KeyEnter, tea.KeyUp, tea.KeyDown, tea.KeyEsc, tea.KeyLeft:
-		return true
-	}
-
-	if key.Matches(msg, m.keys.ChapterOverlay) {
-		return true
-	}
-
-	if !m.isPlaying() {
-		return true
-	}
-
-	if key.Matches(msg, m.keys.NextInQueue) ||
-		key.Matches(msg, m.keys.NextChapter) ||
-		key.Matches(msg, m.keys.PrevChapter) ||
-		key.Matches(msg, m.keys.SleepTimer) ||
-		m.player.HandlesKey(msg) {
-		return false
-	}
-
-	return true
 }
 
 // --- Sleep timer ---

@@ -86,6 +86,7 @@ func (m Model) viewHints() string {
 	switch m.screen {
 	case ScreenHome:
 		parts = append(parts, key("→/enter", "open"))
+		parts = append(parts, key("H/L", "page"))
 		parts = append(parts, key("a", "queue"))
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("o", "library"))
@@ -93,7 +94,10 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("tab", "switch lib"))
 	case ScreenLibrary:
 		parts = append(parts, key("→/enter", "open"))
-		parts = append(parts, key("s", "series"))
+		parts = append(parts, key("H/L", "page"))
+		if m.library.SelectedLibraryMediaType() == "book" {
+			parts = append(parts, key("s", "series"))
+		}
 		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenDetail:
@@ -111,6 +115,7 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenSeries:
 		parts = append(parts, key("enter", "open"))
+		parts = append(parts, key("H/L", "page"))
 		parts = append(parts, key("←/esc", "back"))
 	default:
 		return ""
@@ -119,6 +124,7 @@ func (m Model) viewHints() string {
 	if m.isPlaying() {
 		parts = append(parts, key("space", "pause"))
 		parts = append(parts, key("h/l", "seek"))
+		parts = append(parts, key("S", "sleep"))
 		if len(m.queue) > 0 {
 			parts = append(parts, key(">", "next queued"))
 		}

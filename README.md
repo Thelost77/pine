@@ -11,29 +11,23 @@ Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](htt
 - Browse your audiobook and podcast libraries
 - Play audiobooks with chapter navigation and multi-track support
 - Play podcast episodes with progress tracking
-- Bookmarks — create, navigate to, and delete
-- Sleep timer with configurable durations
+- Bookmarks — create, edit, navigate to, and delete
+- Sleep timer
 - Automatic progress sync every 30 seconds
-- Server-side search
+- Library search
 - Multiple library support with tab switching
-- Vim-style keybindings (fully configurable)
-- Everforest dark theme (customizable via TOML)
-- Persistent sessions — pick up where you left off
+- Keyboard-driven navigation
+- Everforest dark theme
+- Session restore — pick up where you left off
 - Graceful cleanup — no orphaned mpv processes
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.25+
 - [mpv](https://mpv.io/) installed and available in PATH
 - An [Audiobookshelf](https://www.audiobookshelf.org/) server
 
 ## Installation
-
-```sh
-go install github.com/Thelost77/pine/cmd@latest
-```
-
-Or build from source:
 
 ```sh
 git clone https://github.com/Thelost77/pine.git
@@ -47,9 +41,11 @@ go build -o pine ./cmd/
 pine
 ```
 
-On first run, you'll be prompted to log in to your Audiobookshelf server. Credentials are saved locally for future sessions.
+On first run, you'll be prompted to log in to your Audiobookshelf server. pine stores the server URL, username, and auth token locally in `~/.config/pine/pine.db` for future sessions.
 
-## Keybindings
+## Common keybindings
+
+Some keys are context-specific.
 
 | Key | Action |
 |-----|--------|
@@ -59,37 +55,25 @@ On first run, you'll be prompted to log in to your Audiobookshelf server. Creden
 | `j` / `k` | Navigate down / up |
 | `h` / `l` | Seek backward / forward |
 | `p` / `space` | Play / pause |
+| `a` / `A` | Add to queue / play next |
 | `n` / `N` | Next / previous chapter |
 | `+` / `-` | Speed up / down |
 | `]` / `[` | Volume up / down |
-| `s` | Cycle sleep timer |
+| `c` | Open chapter list |
+| `s` / `S` | Browse series in library / cycle sleep timer during playback |
 | `b` | Add bookmark |
-| `d` | Delete bookmark |
+| `d` / `e` | Delete / edit bookmark |
+| `f` | Mark finished |
 | `tab` | Switch focus / library |
 | `/` | Search |
-| `o` | Open library browser |
+| `o` | Open library |
 | `?` | Help overlay |
 
 ## Configuration
 
-Config file: `~/.config/pine/config.toml`
+Optional config file: `~/.config/pine/config.toml`
 
-```toml
-[player]
-speed = 1.0
-seek_seconds = 10
-
-[theme]
-background = "#2b3339"
-foreground = "#d3c6aa"
-accent = "#a7c080"
-
-[keybinds]
-play_pause = " "
-seek_forward = "l"
-seek_backward = "h"
-# See internal/config/config.go for all options
-```
+See `internal/config/config.go` for the current fields and defaults.
 
 ## Architecture
 
@@ -99,10 +83,10 @@ internal/
   abs/          Audiobookshelf API client
   app/          Root model, screen routing, playback lifecycle
   config/       TOML configuration
-  db/           SQLite persistence (accounts, sessions)
+  db/           SQLite persistence (accounts, last session)
   logger/       File-based structured logging
   player/       mpv IPC wrapper
-  screens/      Screen models (login, home, library, detail, search)
+  screens/      Screen models (login, home, library, detail, search, series, serieslist)
   ui/           Shared styles, formatting, components
 ```
 

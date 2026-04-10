@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
@@ -15,6 +16,7 @@ import (
 
 const continueListeningLimit = 5
 const recentlyAddedLimit = 3
+const loadingRevealDelay = 500 * time.Millisecond
 
 // PersonalizedMsg carries the result of fetching personalized data.
 type PersonalizedMsg struct {
@@ -31,7 +33,12 @@ const (
 	rowKindItem rowKind = iota
 	rowKindSection
 	rowKindEmpty
+	rowKindSkeleton
 )
+
+type loadingRevealMsg struct {
+	generation uint64
+}
 
 // listItem wraps a home row for the bubbles list component.
 type listItem struct {
@@ -69,6 +76,8 @@ type KeyMap struct {
 	Library    key.Binding
 	Search     key.Binding
 	NextLib    key.Binding
+	PageUp     key.Binding
+	PageDown   key.Binding
 	Select     key.Binding
 	AddToQueue key.Binding
 	PlayNext   key.Binding
@@ -101,6 +110,14 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "next library"),
 		),
+		PageUp: key.NewBinding(
+			key.WithKeys("H"),
+			key.WithHelp("H", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("L"),
+			key.WithHelp("L", "page down"),
+		),
 		AddToQueue: key.NewBinding(
 			key.WithKeys("a"),
 			key.WithHelp("a", "add to queue"),
@@ -117,7 +134,10 @@ type Model struct {
 	list            list.Model
 	items           []abs.LibraryItem
 	recentlyAdded   []abs.LibraryItem
+	contentLibrary  string
 	loading         bool
+	loadingVisible  bool
+	loadingGen      uint64
 	err             error
 	keys            KeyMap
 	width           int
@@ -146,6 +166,7 @@ func New(styles ui.Styles, client *abs.Client) Model {
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
+	l.SetItems(buildSkeletonRows(styles))
 
 	return Model{
 		list:        l,
@@ -167,22 +188,25 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command that fetches personalized data.
 func (m Model) Init() tea.Cmd {
-	return m.fetchPersonalizedCmd()
+	return tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
 }
 
 // Update handles messages for the home screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case PersonalizedMsg:
-		m.loading = false
 		currentLib := m.SelectedLibraryID()
 		if msg.LibraryID != "" && currentLib != "" && msg.LibraryID != currentLib {
 			logger.Debug("STALE: discarding personalized msg", "msgLib", msg.LibraryID, "currentLib", currentLib)
 			return m, nil
 		}
+		m.loading = false
+		m.loadingVisible = false
+		m.updateListTitle()
 		if msg.Err != nil {
 			logger.Debug("personalized error", "err", msg.Err)
 			m.err = msg.Err
+			m.refreshListRows()
 			return m, nil
 		}
 		if len(msg.Libraries) > 0 {
@@ -194,16 +218,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			recent := dedupeRecentlyAdded(items, msg.RecentlyAdded, recentlyAddedLimit)
 			m.items = items
 			m.recentlyAdded = recent
+			m.contentLibrary = libID
 			m.itemCache[libID] = m.items
 			m.recentCache[libID] = m.recentlyAdded
-			m.setListItems(m.items)
+			m.refreshListRows()
 			m.updateListTitle()
 			return m, nil
 		}
 		m.items = limitItems(msg.Items, continueListeningLimit)
 		m.recentlyAdded = dedupeRecentlyAdded(m.items, msg.RecentlyAdded, recentlyAddedLimit)
-		m.setListItems(m.items)
+		m.contentLibrary = msg.LibraryID
+		m.refreshListRows()
 		m.updateListTitle()
+		return m, nil
+
+	case loadingRevealMsg:
+		if msg.generation != m.loadingGen || !m.loading {
+			return m, nil
+		}
+		m.loadingVisible = true
+		m.updateListTitle()
+		m.refreshListRows()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -252,27 +287,41 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
 				// Cache current library's items
-				if libID := m.SelectedLibraryID(); libID != "" {
+				if libID := m.contentLibrary; libID != "" {
 					m.itemCache[libID] = m.items
 					m.recentCache[libID] = m.recentlyAdded
 				}
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
+				m.loading = true
+				m.loadingVisible = false
+				m.loadingGen++
+				m.err = nil
 				m.updateListTitle()
 				// Use cached items if available, fetch in background either way
 				newLibID := m.SelectedLibraryID()
 				if cached, ok := m.itemCache[newLibID]; ok {
 					m.items = cached
+					m.contentLibrary = newLibID
 				} else {
-					m.items = nil
+					// Keep current content visible briefly; show skeletons only if
+					// the fetch outlives the reveal delay.
 				}
 				if cachedRecent, ok := m.recentCache[newLibID]; ok {
 					m.recentlyAdded = cachedRecent
 				} else {
-					m.recentlyAdded = nil
+					if m.contentLibrary == newLibID {
+						m.recentlyAdded = nil
+					}
 				}
-				m.setListItems(m.items)
-				return m, m.fetchPersonalizedCmd()
+				m.refreshListRows()
+				return m, tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
 			}
+			return m, nil
+		case key.Matches(msg, m.keys.PageDown):
+			m.pageDown()
+			return m, nil
+		case key.Matches(msg, m.keys.PageUp):
+			m.pageUp()
 			return m, nil
 		case key.Matches(msg, m.keys.Back):
 			return m, func() tea.Msg { return GoBackMsg{} }
@@ -432,12 +481,54 @@ func (m *Model) updateListTitle() {
 	if len(m.libraries) > 1 && m.selectedLibrary < len(m.libraries) {
 		title = fmt.Sprintf("Continue Listening — %s (tab to switch)", m.libraries[m.selectedLibrary].Name)
 	}
+	if m.loading && m.loadingVisible && m.contentLibrary != "" && m.contentLibrary != m.SelectedLibraryID() {
+		title += " (loading...)"
+	}
 	m.list.Title = title
 }
 
-func (m *Model) setListItems(items []abs.LibraryItem) {
-	m.list.SetItems(buildListRows(m.styles, items, m.recentlyAdded))
+func (m *Model) refreshListRows() {
+	if m.shouldShowSkeletons() {
+		m.list.SetItems(buildSkeletonRows(m.styles))
+		return
+	}
+	m.list.SetItems(buildListRows(m.styles, m.items, m.recentlyAdded))
 	m.skipNonInteractiveSelection(1)
+}
+
+func (m Model) loadingRevealCmd() tea.Cmd {
+	generation := m.loadingGen
+	return tea.Tick(loadingRevealDelay, func(time.Time) tea.Msg {
+		return loadingRevealMsg{generation: generation}
+	})
+}
+
+func (m Model) shouldShowSkeletons() bool {
+	if !m.loading {
+		return false
+	}
+	if m.contentLibrary == "" {
+		return true
+	}
+	return false
+}
+
+func (m *Model) pageDown() {
+	before := m.list.GlobalIndex()
+	m.list.NextPage()
+	if m.list.GlobalIndex() == before {
+		m.list.GoToEnd()
+	}
+	m.skipNonInteractiveSelection(1)
+}
+
+func (m *Model) pageUp() {
+	before := m.list.GlobalIndex()
+	m.list.PrevPage()
+	if m.list.GlobalIndex() == before {
+		m.list.GoToStart()
+	}
+	m.skipNonInteractiveSelection(-1)
 }
 
 func limitItems(items []abs.LibraryItem, limit int) []abs.LibraryItem {
@@ -505,6 +596,46 @@ func buildListRows(styles ui.Styles, items, recent []abs.LibraryItem) []list.Ite
 	return rows
 }
 
+func buildSkeletonRows(styles ui.Styles) []list.Item {
+	placeholder := func(width int) string {
+		return styles.Muted.Render(strings.Repeat("-", width))
+	}
+
+	rows := []list.Item{
+		listItem{
+			kind:        rowKindSkeleton,
+			title:       placeholder(22),
+			description: placeholder(14) + " • " + placeholder(5),
+		},
+		listItem{
+			kind:        rowKindSkeleton,
+			title:       placeholder(18),
+			description: placeholder(12) + " • " + placeholder(6),
+		},
+		listItem{
+			kind:        rowKindSkeleton,
+			title:       placeholder(24),
+			description: placeholder(15) + " • " + placeholder(4),
+		},
+		listItem{
+			kind:  rowKindSection,
+			title: styles.Accent.Bold(true).Render("Recently Added"),
+		},
+		listItem{
+			kind:        rowKindSkeleton,
+			title:       placeholder(20),
+			description: placeholder(12) + " • " + placeholder(5),
+		},
+		listItem{
+			kind:        rowKindSkeleton,
+			title:       placeholder(17),
+			description: placeholder(11) + " • " + placeholder(6),
+		},
+	}
+
+	return rows
+}
+
 func itemTitle(item abs.LibraryItem) string {
 	if item.MediaType == "podcast" && item.RecentEpisode != nil {
 		return item.RecentEpisode.Title
@@ -536,6 +667,9 @@ func itemDescription(item abs.LibraryItem) string {
 }
 
 func (m Model) selectedItem() (abs.LibraryItem, bool) {
+	if m.loading && m.contentLibrary != "" && m.contentLibrary != m.SelectedLibraryID() {
+		return abs.LibraryItem{}, false
+	}
 	sel, ok := m.list.SelectedItem().(listItem)
 	if !ok || sel.kind != rowKindItem {
 		return abs.LibraryItem{}, false

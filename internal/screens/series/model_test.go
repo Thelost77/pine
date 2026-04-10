@@ -1,6 +1,7 @@
 package series
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -57,6 +58,44 @@ func sampleSeriesContents() abs.SeriesContents {
 	}
 }
 
+func sampleLongSeriesContents(n int) abs.SeriesContents {
+	items := make([]abs.LibraryItem, 0, n)
+	for i := 0; i < n; i++ {
+		seq := fmt.Sprintf("%d", i+1)
+		items = append(items, abs.LibraryItem{
+			ID:        fmt.Sprintf("li-book-%03d", i),
+			LibraryID: "lib-books-001",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title: fmt.Sprintf("Book %d", i+1),
+					Series: &abs.SeriesSequence{
+						ID:       "series-expanse",
+						Name:     "The Expanse",
+						Sequence: seq,
+					},
+				},
+			},
+		})
+	}
+	return abs.SeriesContents{
+		Series: abs.Series{ID: "series-expanse", Name: "The Expanse"},
+		Items:  items,
+	}
+}
+
+func TestNewStartsWithSkeletonRows(t *testing.T) {
+	m := newTestModel()
+
+	rows := m.list.Items()
+	if len(rows) == 0 {
+		t.Fatal("expected initial skeleton rows")
+	}
+	if _, ok := rows[0].(seriesSkeletonItem); !ok {
+		t.Fatalf("expected first row to be seriesSkeletonItem, got %T", rows[0])
+	}
+}
+
 func TestSeriesLoadedMsgPopulatesListAndSelectsCurrentItem(t *testing.T) {
 	m := newTestModel()
 
@@ -82,6 +121,22 @@ func TestView_ShowsSeriesNameAndBooks(t *testing.T) {
 	}
 }
 
+func TestViewDoesNotShowLoadingMessage(t *testing.T) {
+	m := newTestModel()
+
+	if strings.Contains(m.View(), "Loading series") {
+		t.Fatal("view should not show loading text")
+	}
+}
+
+func TestLoadingSkeletonsDoNotRenderSelectedHighlight(t *testing.T) {
+	m := newTestModel()
+
+	if strings.Contains(m.View(), "│") {
+		t.Fatalf("loading skeletons should not render selected highlight\n%s", m.View())
+	}
+}
+
 func TestEnterKey_NavigatesToSelectedBook(t *testing.T) {
 	m := newTestModel()
 	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
@@ -97,5 +152,41 @@ func TestEnterKey_NavigatesToSelectedBook(t *testing.T) {
 	}
 	if navMsg.Item.ID != "li-book-002" {
 		t.Fatalf("item ID = %q, want li-book-002", navMsg.Item.ID)
+	}
+}
+
+func TestHLPageAcrossSeries(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(LoadedMsg{Contents: sampleLongSeriesContents(30)})
+
+	before := m.list.GlobalIndex()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	after := m.list.GlobalIndex()
+	if after <= before {
+		t.Fatalf("expected L to page down from %d, got %d", before, after)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	if got := m.list.GlobalIndex(); got >= after {
+		t.Fatalf("expected H to page up from %d, got %d", after, got)
+	}
+}
+
+func TestHLFallsBackToExtremes(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(LoadedMsg{Contents: sampleLongSeriesContents(30)})
+
+	for i := 0; i < 5; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	}
+	if got, want := m.list.GlobalIndex(), len(m.list.Items())-1; got != want {
+		t.Fatalf("L at end should jump to last row: got %d want %d", got, want)
+	}
+
+	for i := 0; i < 5; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	}
+	if got := m.list.GlobalIndex(); got != 0 {
+		t.Fatalf("H at start should jump to first row: got %d want 0", got)
 	}
 }

@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/Thelost77/pine/internal/logger"
-	"golang.org/x/sync/errgroup"
 )
 
 const batchFetchConcurrency = 10
@@ -367,25 +366,27 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Li
 	// Run audio checks in parallel for book libraries.
 	// Each goroutine writes to its own index — no mutex needed.
 	checks := make([]checkResult, len(libs))
-	g, gctx := errgroup.WithContext(ctx)
+	var wg sync.WaitGroup
 	for i, lib := range libs {
 		if lib.MediaType != "book" {
 			continue
 		}
-		g.Go(func() error {
-			hasAudio, err := c.libraryHasAudio(gctx, lib.ID)
+		wg.Add(1)
+		go func(i int, lib Library) {
+			defer wg.Done()
+
+			hasAudio, err := c.libraryHasAudio(ctx, lib.ID)
 			checks[i] = checkResult{include: hasAudio, err: err}
 			if err != nil {
 				logger.Warn("failed to check library for audio", "libraryID", lib.ID, "err", err)
-				return nil
+				return
 			}
 			if !hasAudio {
 				logger.Info("excluding ebook-only library", "libraryID", lib.ID, "name", lib.Name)
 			}
-			return nil
-		})
+		}(i, lib)
 	}
-	_ = g.Wait()
+	wg.Wait()
 
 	result := make([]Library, 0, len(libs))
 	for i, lib := range libs {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
@@ -246,6 +245,27 @@ func TestQOnLoginDoesNotQuit(t *testing.T) {
 		msg := cmd()
 		if _, ok := msg.(tea.QuitMsg); ok {
 			t.Error("q on login screen should not quit")
+		}
+	}
+}
+
+func TestQOnSearchDoesNotQuit(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenSearch
+	m.search = search.New(m.styles, m.searchCache, "lib-book", "book")
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = result.(Model)
+
+	if got := m.search.Query(); got != "q" {
+		t.Fatalf("search query = %q, want %q", got, "q")
+	}
+	if cmd == nil {
+		t.Fatal("expected typing command from search screen")
+	}
+	if msg := cmd(); msg != nil {
+		if _, ok := msg.(tea.QuitMsg); ok {
+			t.Fatal("q on search screen should not quit")
 		}
 	}
 }
@@ -656,7 +676,7 @@ func TestSearchScreenTypingCDoesNotOpenChapterOverlay(t *testing.T) {
 	}
 }
 
-func TestSearchScreenPlayPauseKeyControlsPlayback(t *testing.T) {
+func TestSearchScreenSpaceKeyDoesNotControlPlayback(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.screen = ScreenSearch
 	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
@@ -667,18 +687,18 @@ func TestSearchScreenPlayPauseKeyControlsPlayback(t *testing.T) {
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = result.(Model)
 
-	if m.player.Playing {
-		t.Fatal("player should pause from search screen")
+	if !m.player.Playing {
+		t.Fatal("player should not pause while typing in search")
 	}
-	if cmd == nil {
-		t.Fatal("expected pause command from search screen")
+	if cmd != nil {
+		t.Fatal("space-only query should not schedule a search")
 	}
 	if got := m.search.Query(); got != "" {
 		t.Fatalf("search query = %q, want empty", got)
 	}
 }
 
-func TestSearchScreenNextInQueueKeyStartsQueuedItem(t *testing.T) {
+func TestSearchScreenNextInQueueKeyUpdatesQuery(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.screen = ScreenSearch
 	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
@@ -698,14 +718,17 @@ func TestSearchScreenNextInQueueKeyStartsQueuedItem(t *testing.T) {
 	m = result.(Model)
 
 	if cmd == nil {
-		t.Fatal("expected play command when skipping queue from search screen")
+		t.Fatal("expected typing command from search screen")
 	}
-	if len(m.Queue()) != 0 {
-		t.Fatalf("queue = %#v, want empty after consuming queued item", m.Queue())
+	if len(m.Queue()) != 1 {
+		t.Fatalf("queue = %#v, want unchanged queue", m.Queue())
+	}
+	if got := m.search.Query(); got != ">" {
+		t.Fatalf("search query = %q, want %q", got, ">")
 	}
 }
 
-func TestSearchScreenSleepTimerKeyCyclesTimer(t *testing.T) {
+func TestSearchScreenSleepTimerKeyUpdatesQuery(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.screen = ScreenSearch
 	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
@@ -715,14 +738,40 @@ func TestSearchScreenSleepTimerKeyCyclesTimer(t *testing.T) {
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	m = result.(Model)
 
-	if m.sleepDuration != 15*time.Minute {
-		t.Fatalf("sleep duration = %v, want %v", m.sleepDuration, 15*time.Minute)
+	if m.sleepDuration != 0 {
+		t.Fatalf("sleep duration = %v, want 0", m.sleepDuration)
 	}
 	if cmd == nil {
-		t.Fatal("expected sleep timer command from search screen")
+		t.Fatal("expected typing command from search screen")
 	}
-	if got := m.search.Query(); got != "" {
-		t.Fatalf("search query = %q, want empty", got)
+	if got := m.search.Query(); got != "s" {
+		t.Fatalf("search query = %q, want %q", got, "s")
+	}
+}
+
+func TestLibraryScreenSeriesKeyWinsDuringPlayback(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.screen = ScreenLibrary
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	m.library = library.New(m.styles, m.client, "lib-books", []abs.Library{{ID: "lib-books", Name: "Books", MediaType: "book"}})
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	rm := result.(Model)
+
+	if rm.sleepDuration != 0 {
+		t.Fatalf("sleep duration = %v, want 0", rm.sleepDuration)
+	}
+	if cmd == nil {
+		t.Fatal("expected series navigation command from library key")
+	}
+	msg := cmd()
+	nav, ok := msg.(library.NavigateSeriesListMsg)
+	if !ok {
+		t.Fatalf("expected NavigateSeriesListMsg, got %T", msg)
+	}
+	if nav.LibraryID != "lib-books" {
+		t.Fatalf("library ID = %q, want lib-books", nav.LibraryID)
 	}
 }
 

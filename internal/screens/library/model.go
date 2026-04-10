@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
@@ -16,6 +17,19 @@ const pageLimit = 50
 
 // thresholdPercent is the fraction of loaded items at which a prefetch fires.
 const thresholdPercent = 0.8
+
+const loadingRevealDelay = 150 * time.Millisecond
+
+type rowKind int
+
+const (
+	rowKindItem rowKind = iota
+	rowKindSkeleton
+)
+
+type loadingRevealMsg struct {
+	generation uint64
+}
 
 // FetchLibraryItemsMsg is the command payload to request a page of items.
 type FetchLibraryItemsMsg struct {
@@ -54,12 +68,14 @@ type NavigateSeriesListMsg struct {
 
 // KeyMap defines keybindings for the library screen.
 type KeyMap struct {
-	Enter   key.Binding
-	Back    key.Binding
-	NextLib key.Binding
-	Search  key.Binding
-	Series  key.Binding
-	Select  key.Binding
+	Enter    key.Binding
+	Back     key.Binding
+	NextLib  key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
+	Search   key.Binding
+	Series   key.Binding
+	Select   key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings for the library screen.
@@ -76,6 +92,14 @@ func DefaultKeyMap() KeyMap {
 		NextLib: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "next library"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("H"),
+			key.WithHelp("H", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("L"),
+			key.WithHelp("L", "page down"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),
@@ -96,10 +120,13 @@ func DefaultKeyMap() KeyMap {
 type Model struct {
 	list            list.Model
 	items           []abs.LibraryItem
+	contentLibrary  string
 	page            int
 	totalItems      int
 	cache           map[string]libraryCacheEntry
 	loading         bool
+	loadingVisible  bool
+	loadingGen      uint64
 	err             error
 	keys            KeyMap
 	width           int
@@ -133,6 +160,7 @@ func New(styles ui.Styles, client *abs.Client, libraryID string, libraries []abs
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
+	l.SetItems(buildSkeletonRows(styles))
 
 	// Find the selected library index
 	selectedIdx := 0
@@ -153,6 +181,7 @@ func New(styles ui.Styles, client *abs.Client, libraryID string, libraries []abs
 
 	return Model{
 		list:            l,
+		loading:         true,
 		keys:            DefaultKeyMap(),
 		styles:          styles,
 		client:          client,
@@ -187,11 +216,12 @@ func (m *Model) Configure(libraryID string, libraries []abs.Library) {
 		return
 	}
 
-	m.items = nil
 	m.page = 0
 	m.totalItems = 0
 	m.loading = true
-	m.syncListItems()
+	m.loadingVisible = false
+	m.loadingGen++
+	m.refreshListItems()
 }
 
 // SetSize updates the terminal dimensions for the library screen.
@@ -208,11 +238,11 @@ func (m Model) Init() tea.Cmd {
 			return nil
 		}
 	}
-	if len(m.items) > 0 {
+	if m.contentLibrary != "" && m.contentLibrary == m.libraryID {
 		return nil
 	}
 	m.page = 0
-	return m.fetchLibraryItemsCmd(0, pageLimit)
+	return tea.Batch(m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
 }
 
 // Update handles messages for the library screen.
@@ -220,6 +250,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LibraryItemsMsg:
 		m.loading = false
+		m.loadingVisible = false
 		if msg.LibraryID != "" && m.libraryID != "" && msg.LibraryID != m.libraryID {
 			return m, nil
 		}
@@ -232,11 +263,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		if msg.Page == 0 {
 			m.items = append([]abs.LibraryItem(nil), msg.Items...)
+			m.contentLibrary = msg.LibraryID
 		} else {
 			m.items = append(m.items, msg.Items...)
 		}
 		m.storeCurrentLibraryCache()
-		m.syncListItems()
+		m.refreshListItems()
+		return m, nil
+
+	case loadingRevealMsg:
+		if msg.generation != m.loadingGen || !m.loading {
+			return m, nil
+		}
+		m.loadingVisible = true
+		m.refreshListItems()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -246,7 +286,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Enter), key.Matches(msg, m.keys.Select):
-			if sel, ok := m.list.SelectedItem().(libraryListItem); ok {
+			if sel, ok := m.selectedItem(); ok {
 				return m, func() tea.Msg {
 					return NavigateDetailMsg{Item: sel.Item}
 				}
@@ -268,6 +308,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case key.Matches(msg, m.keys.PageDown):
+			m.pageDown()
+			return m, nil
+		case key.Matches(msg, m.keys.PageUp):
+			m.pageUp()
+			return m, nil
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
 				m.storeCurrentLibraryCache()
@@ -278,12 +324,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				if m.applyCachedLibrary(m.libraryID) {
 					return m, nil
 				}
-				m.items = nil
 				m.page = 0
 				m.totalItems = 0
 				m.loading = true
-				m.syncListItems()
-				return m, m.fetchLibraryItemsCmd(0, pageLimit)
+				m.loadingVisible = false
+				m.loadingGen++
+				m.refreshListItems()
+				return m, tea.Batch(m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
 			}
 			return m, nil
 		}
@@ -359,16 +406,76 @@ func (m *Model) fetchLibraryItemsCmd(page, limit int) tea.Cmd {
 	}
 }
 
-func (m *Model) syncListItems() {
+func (m *Model) refreshListItems() {
+	if m.shouldShowSkeletons() {
+		m.list.SetItems(buildSkeletonRows(m.styles))
+		return
+	}
+
 	items := make([]list.Item, len(m.items))
 	for i, item := range m.items {
-		items[i] = libraryListItem{Item: item}
+		items[i] = libraryListItem{kind: rowKindItem, Item: item}
 	}
 	m.list.SetItems(items)
 }
 
+func (m Model) loadingRevealCmd() tea.Cmd {
+	generation := m.loadingGen
+	return tea.Tick(loadingRevealDelay, func(time.Time) tea.Msg {
+		return loadingRevealMsg{generation: generation}
+	})
+}
+
+func (m Model) shouldShowSkeletons() bool {
+	if !m.loading || !m.loadingVisible {
+		return false
+	}
+	return m.contentLibrary != m.libraryID
+}
+
+func buildSkeletonRows(styles ui.Styles) []list.Item {
+	placeholder := func(width int) string {
+		return styles.Muted.Render(strings.Repeat("-", width))
+	}
+
+	return []list.Item{
+		libraryListItem{kind: rowKindSkeleton, title: placeholder(22), description: placeholder(14) + " • " + placeholder(5)},
+		libraryListItem{kind: rowKindSkeleton, title: placeholder(18), description: placeholder(12) + " • " + placeholder(6)},
+		libraryListItem{kind: rowKindSkeleton, title: placeholder(24), description: placeholder(15) + " • " + placeholder(4)},
+		libraryListItem{kind: rowKindSkeleton, title: placeholder(19), description: placeholder(13) + " • " + placeholder(5)},
+		libraryListItem{kind: rowKindSkeleton, title: placeholder(21), description: placeholder(11) + " • " + placeholder(6)},
+	}
+}
+
+func (m *Model) pageDown() {
+	before := m.list.GlobalIndex()
+	m.list.NextPage()
+	if m.list.GlobalIndex() == before {
+		m.list.GoToEnd()
+	}
+}
+
+func (m *Model) pageUp() {
+	before := m.list.GlobalIndex()
+	m.list.PrevPage()
+	if m.list.GlobalIndex() == before {
+		m.list.GoToStart()
+	}
+}
+
+func (m Model) selectedItem() (libraryListItem, bool) {
+	if m.loading && m.contentLibrary != "" && m.contentLibrary != m.libraryID {
+		return libraryListItem{}, false
+	}
+	sel, ok := m.list.SelectedItem().(libraryListItem)
+	if !ok || sel.kind != rowKindItem {
+		return libraryListItem{}, false
+	}
+	return sel, true
+}
+
 func (m *Model) storeCurrentLibraryCache() {
-	if m.libraryID == "" || len(m.items) == 0 {
+	if m.libraryID == "" || m.contentLibrary != m.libraryID {
 		return
 	}
 	m.cache[m.libraryID] = libraryCacheEntry{
@@ -387,7 +494,9 @@ func (m *Model) applyCachedLibrary(libraryID string) bool {
 	m.page = entry.page
 	m.totalItems = entry.totalItems
 	m.loading = false
-	m.syncListItems()
+	m.loadingVisible = false
+	m.contentLibrary = libraryID
+	m.refreshListItems()
 	return true
 }
 
@@ -434,10 +543,16 @@ func (m Model) Error() error {
 }
 
 type libraryListItem struct {
-	Item abs.LibraryItem
+	kind        rowKind
+	Item        abs.LibraryItem
+	title       string
+	description string
 }
 
 func (i libraryListItem) Title() string {
+	if i.kind != rowKindItem {
+		return i.title
+	}
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
 		return i.Item.RecentEpisode.Title
 	}
@@ -445,6 +560,9 @@ func (i libraryListItem) Title() string {
 }
 
 func (i libraryListItem) Description() string {
+	if i.kind != rowKindItem {
+		return i.description
+	}
 	context := "Unknown author"
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
 		context = i.Item.Media.Metadata.Title
@@ -467,6 +585,9 @@ func (i libraryListItem) Description() string {
 }
 
 func (i libraryListItem) FilterValue() string {
+	if i.kind != rowKindItem {
+		return ""
+	}
 	return i.Item.Media.Metadata.Title
 }
 

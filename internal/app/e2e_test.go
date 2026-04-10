@@ -1510,13 +1510,13 @@ func TestE2E_SleepTimerGeneration(t *testing.T) {
 	m.player.Duration = 3600.0
 
 	// Cycle sleep timer to 15m (generation 1)
-	m, _ = e2ePressKey(m, 's')
+	m, _ = e2ePressKey(m, 'S')
 	if m.sleepGeneration != 1 {
 		t.Fatalf("sleepGeneration = %d, want 1", m.sleepGeneration)
 	}
 
 	// Cycle sleep timer to 30m (generation 2)
-	m, _ = e2ePressKey(m, 's')
+	m, _ = e2ePressKey(m, 'S')
 	if m.sleepGeneration != 2 {
 		t.Fatalf("sleepGeneration = %d, want 2", m.sleepGeneration)
 	}

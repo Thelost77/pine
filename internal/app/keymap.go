@@ -50,7 +50,7 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 		),
 		SleepTimer: key.NewBinding(
 			key.WithKeys(cfg.SleepTimer),
-			key.WithHelp("s", "sleep timer"),
+			key.WithHelp(cfg.SleepTimer, "sleep timer"),
 		),
 	}
 }
