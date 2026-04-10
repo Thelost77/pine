@@ -19,7 +19,8 @@ Do not run linter or type-check — the maintainer verifies manually.
 
 - For user-facing installs, keep the entrypoint at the module root so `go install github.com/Thelost77/pine@latest` installs a `pine` binary.
 - Publish releases with immutable SemVer tags that start with `v`.
-- Use `./scripts/release.sh vX.Y.Z` to create and push the tag after verifying the working tree is clean.
+- Write release notes in `docs/releases/vX.Y.Z.md`.
+- Use `./scripts/release.sh vX.Y.Z` to push the current commit, create the tag, and publish the GitHub Release from that notes file.
 
 ## Architecture
 

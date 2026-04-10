@@ -75,9 +75,10 @@ See `internal/config/config.go` for the current fields and defaults.
 
 ## Releases
 
-Create SemVer tags with a leading `v` so Go can resolve `@latest` and versioned installs correctly.
+Create SemVer tags with a leading `v` so Go can resolve `@latest` and versioned installs correctly. Keep release notes in `docs/releases/` and publish the tag plus the GitHub Release together.
 
 ```sh
+${EDITOR:-vi} docs/releases/v0.1.0.md
 ./scripts/release.sh v0.1.0
 ```
 
