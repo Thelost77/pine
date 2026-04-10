@@ -7,12 +7,19 @@ pine is a TUI client for Audiobookshelf written in Go with bubbletea.
 ## Build & Test
 
 ```sh
-go build -o pine ./cmd/              # build
+go build -o pine .                   # build
+go install github.com/Thelost77/pine@latest
 go test ./... -count=1             # run all tests
 go test ./internal/app/... -v      # verbose app tests (includes E2E)
 ```
 
 Do not run linter or type-check — the maintainer verifies manually.
+
+## Releases
+
+- For user-facing installs, keep the entrypoint at the module root so `go install github.com/Thelost77/pine@latest` installs a `pine` binary.
+- Publish releases with immutable SemVer tags that start with `v`.
+- Use `./scripts/release.sh vX.Y.Z` to create and push the tag after verifying the working tree is clean.
 
 ## Architecture
 

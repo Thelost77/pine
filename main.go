@@ -14,13 +14,11 @@ import (
 )
 
 func main() {
-	// Initialize file logger
 	closeLog := logger.Init()
 	defer closeLog()
 	logger.Session()
 	logger.Info("log file", "path", logger.Path())
 
-	// Load config
 	cfgDir := config.ConfigDir()
 	cfg, err := config.Load(filepath.Join(cfgDir, "config.toml"))
 	if err != nil {
@@ -28,7 +26,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Open database
 	dbPath := filepath.Join(cfgDir, "pine.db")
 	store, err := db.Open(dbPath)
 	if err != nil {
@@ -37,7 +34,6 @@ func main() {
 	}
 	defer store.Close()
 
-	// Check for stored credentials
 	var client *abs.Client
 	if acct, err := store.GetDefaultAccount(); err == nil && acct.Token != "" {
 		serverURL := acct.ServerURL
@@ -56,7 +52,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	}
 
-	// Run cleanup on any exit path (Ctrl+C, q, tea.Quit, etc.)
 	if m, ok := finalModel.(app.Model); ok {
 		m.Cleanup()
 	}

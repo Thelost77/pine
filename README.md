@@ -30,9 +30,7 @@ Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](htt
 ## Installation
 
 ```sh
-git clone https://github.com/Thelost77/pine.git
-cd pine
-go build -o pine ./cmd/
+go install github.com/Thelost77/pine@latest
 ```
 
 ## Usage
@@ -75,10 +73,18 @@ Optional config file: `~/.config/pine/config.toml`
 
 See `internal/config/config.go` for the current fields and defaults.
 
+## Releases
+
+Create SemVer tags with a leading `v` so Go can resolve `@latest` and versioned installs correctly.
+
+```sh
+./scripts/release.sh v0.1.0
+```
+
 ## Architecture
 
 ```
-cmd/            Entry point
+main.go         Entry point
 internal/
   abs/          Audiobookshelf API client
   app/          Root model, screen routing, playback lifecycle
