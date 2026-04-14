@@ -2063,17 +2063,109 @@ func TestE2E_SessionRestore(t *testing.T) {
 	// Call Init which triggers restoreSessionCmd
 	cmd := m.Init()
 
-	// Execute the restore command — it fetches the item from ABS
-	m, cmd = feedCmd(m, cmd)
+	// Execute the restore command chain through playback start.
+	m = feedCmdChain(m, cmd, 3)
 
 	// After restore, should stay on Home screen while restoring paused playback
 	assertScreen(t, m, ScreenHome)
 
-	// Should have restorePaused set, meaning playback will start paused
-	if !m.restorePaused {
-		t.Error("expected restorePaused to be true when restoring session")
+	// Session state should be populated once restore playback starts.
+	if m.sessionID == "" {
+		t.Fatal("expected restored session to start playback")
+	}
+	if m.itemID != "item-001" {
+		t.Errorf("itemID = %q, want %q", m.itemID, "item-001")
+	}
+}
+
+func TestE2E_SessionRestorePodcastMissingEpisodeSkipsSilently(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 42, duration: 3600}
+	m, store := newE2EModelWithDB(t, srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	if err := store.SaveListeningSession(db.ListeningSession{
+		ItemID:      "pod-001",
+		EpisodeID:   "pod-001-ep-missing",
+		SessionID:   "sess-old-pod",
+		CurrentTime: 100.0,
+		Duration:    1800.0,
+	}); err != nil {
+		t.Fatalf("SaveListeningSession: %v", err)
 	}
 
-	// Session state should be populated once play session starts
-	// (the PlayCmd is initiated by RestoreSessionMsg handling)
+	res, _ := m.Update(login.LoginSuccessMsg{
+		Token:     "jwt-token-e2e",
+		ServerURL: srv.URL,
+		Username:  "alice",
+	})
+	m = res.(Model)
+
+	m = feedCmdChain(m, m.Init(), 3)
+
+	assertScreen(t, m, ScreenHome)
+	if m.sessionID != "" {
+		t.Fatalf("expected restore to skip playback, got session %q", m.sessionID)
+	}
+	if m.err.HasError() {
+		t.Fatal("expected missing restore episode to skip without error banner")
+	}
+	if _, err := store.GetLastSession(); err == nil {
+		t.Fatal("expected stale restore session to be cleared")
+	}
+	assertNoAPICall(t, log, http.MethodPost, "/api/items/pod-001/play")
+}
+
+func TestE2E_SessionRestorePodcastNoTracksSkipsSilently(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{
+		bookmarks:      make(map[string][]abs.Bookmark),
+		noTrackEpisode: map[string]bool{"pod-001|pod-001-ep-001": true},
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 42, duration: 3600}
+	m, store := newE2EModelWithDB(t, srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	if err := store.SaveListeningSession(db.ListeningSession{
+		ItemID:      "pod-001",
+		EpisodeID:   "pod-001-ep-001",
+		SessionID:   "sess-old-pod",
+		CurrentTime: 100.0,
+		Duration:    1800.0,
+	}); err != nil {
+		t.Fatalf("SaveListeningSession: %v", err)
+	}
+
+	res, _ := m.Update(login.LoginSuccessMsg{
+		Token:     "jwt-token-e2e",
+		ServerURL: srv.URL,
+		Username:  "alice",
+	})
+	m = res.(Model)
+
+	m = feedCmdChain(m, m.Init(), 4)
+
+	assertScreen(t, m, ScreenHome)
+	if m.sessionID != "" {
+		t.Fatalf("expected restore to skip playback, got session %q", m.sessionID)
+	}
+	if m.err.HasError() {
+		t.Fatal("expected no-track restore to skip without error banner")
+	}
+	if _, err := store.GetLastSession(); err == nil {
+		t.Fatal("expected stale restore session to be cleared")
+	}
+	assertAPICallMade(t, log, http.MethodPost, "/api/items/pod-001/play/pod-001-ep-001")
+	for _, req := range log.get() {
+		if req.Method == http.MethodPost && req.Path == "/api/items/pod-001/play" {
+			t.Fatalf("unexpected fallback book playback call: %s %s", req.Method, req.Path)
+		}
+	}
 }

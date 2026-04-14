@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -323,6 +324,122 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 			return PlaybackErrorMsg{Err: err}
 		}
 		return playMsg
+	}
+}
+
+func (m Model) startRestorePlaybackCmd(msg RestoreSessionMsg) tea.Cmd {
+	if msg.Item == nil || m.client == nil {
+		return nil
+	}
+	if msg.SavedEpisodeID != "" {
+		if msg.Episode == nil {
+			return clearSavedRestoreSessionCmd(
+				m.db,
+				"podcast episode missing",
+				"itemID", msg.Item.ID,
+				"episodeID", msg.SavedEpisodeID,
+			)
+		}
+		return m.startRestoredEpisodePlaybackCmd(*msg.Item, *msg.Episode)
+	}
+	return m.startRestoredBookPlaybackCmd(*msg.Item)
+}
+
+func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
+	client := m.client
+	store := m.db
+	return func() tea.Msg {
+		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		session, err := client.StartPlaySession(context.Background(), item.ID, device)
+		if err != nil {
+			if abs.IsHTTPStatus(err, http.StatusNotFound) {
+				clearSavedRestoreSession(
+					store,
+					"book playback source missing",
+					"itemID", item.ID,
+					"err", err,
+				)
+				return nil
+			}
+			logSkippedRestore("book playback start failed", "itemID", item.ID, "err", err)
+			return nil
+		}
+		playMsg, err := buildBookPlaySessionMsg(
+			client,
+			session,
+			item.ID,
+			item.Media.Metadata.Title,
+			item.Media.TotalDuration(),
+			session.CurrentTime,
+		)
+		if err != nil {
+			if err.Error() == "no audio tracks" {
+				clearSavedRestoreSession(
+					store,
+					"book playback returned no audio tracks",
+					"itemID", item.ID,
+					"sessionID", session.ID,
+				)
+				return nil
+			}
+			logSkippedRestore("book playback session invalid", "itemID", item.ID, "sessionID", session.ID, "err", err)
+			return nil
+		}
+		return RestorePlaySessionMsg{PlaySessionMsg: playMsg}
+	}
+}
+
+func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs.PodcastEpisode) tea.Cmd {
+	client := m.client
+	store := m.db
+	return func() tea.Msg {
+		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
+		if err != nil {
+			if abs.IsHTTPStatus(err, http.StatusNotFound) {
+				clearSavedRestoreSession(
+					store,
+					"podcast episode playback source missing",
+					"itemID", item.ID,
+					"episodeID", episode.ID,
+					"err", err,
+				)
+				return nil
+			}
+			logSkippedRestore("podcast episode playback start failed", "itemID", item.ID, "episodeID", episode.ID, "err", err)
+			return nil
+		}
+		if len(session.AudioTracks) == 0 {
+			clearSavedRestoreSession(
+				store,
+				"podcast episode playback returned no audio tracks",
+				"itemID", item.ID,
+				"episodeID", episode.ID,
+				"sessionID", session.ID,
+			)
+			return nil
+		}
+
+		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL
+		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
+
+		return RestorePlaySessionMsg{
+			PlaySessionMsg: PlaySessionMsg{
+				Session: PlaySessionData{
+					SessionID:        session.ID,
+					ItemID:           item.ID,
+					EpisodeID:        episode.ID,
+					CurrentTime:      session.CurrentTime,
+					Duration:         resolveEpisodeDuration(episode, session),
+					Title:            episode.Title,
+					Chapters:         playSessionChapters(session),
+					TrackStartOffset: session.AudioTracks[0].StartOffset,
+					TrackDuration:    session.AudioTracks[0].Duration,
+				},
+				StreamURL: streamURL,
+				AuthToken: client.Token(),
+			},
+		}
 	}
 }
 
@@ -661,7 +778,17 @@ func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
 		}
 		item, err := client.GetLibraryItem(context.Background(), session.ItemID)
 		if err != nil {
-			logger.Warn("failed to fetch item for session restore", "itemID", session.ItemID, "err", err)
+			if abs.IsHTTPStatus(err, http.StatusNotFound) {
+				clearSavedRestoreSession(
+					store,
+					"saved item missing",
+					"itemID", session.ItemID,
+					"episodeID", session.EpisodeID,
+					"err", err,
+				)
+				return nil
+			}
+			logSkippedRestore("failed to fetch item for session restore", "itemID", session.ItemID, "episodeID", session.EpisodeID, "err", err)
 			return RestoreSessionMsg{}
 		}
 		var episode *abs.PodcastEpisode
@@ -674,6 +801,31 @@ func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
 				}
 			}
 		}
-		return RestoreSessionMsg{Item: item, Episode: episode}
+		return RestoreSessionMsg{Item: item, Episode: episode, SavedEpisodeID: session.EpisodeID}
 	}
+}
+
+func clearSavedRestoreSessionCmd(store *db.Store, reason string, keyvals ...any) tea.Cmd {
+	return func() tea.Msg {
+		clearSavedRestoreSession(store, reason, keyvals...)
+		return nil
+	}
+}
+
+func clearSavedRestoreSession(store *db.Store, reason string, keyvals ...any) {
+	fields := append([]any{"reason", reason}, keyvals...)
+	if store != nil {
+		if err := store.ClearSession(); err != nil {
+			fields = append(fields, "clearedSavedSession", false, "clearErr", err)
+			logger.Info("skipping session restore", fields...)
+			return
+		}
+		fields = append(fields, "clearedSavedSession", true)
+	}
+	logger.Info("skipping session restore", fields...)
+}
+
+func logSkippedRestore(reason string, keyvals ...any) {
+	fields := append([]any{"reason", reason}, keyvals...)
+	logger.Info("skipping session restore", fields...)
 }

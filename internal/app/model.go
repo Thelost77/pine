@@ -399,15 +399,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger.Debug("no session to restore")
 			return m, nil
 		}
-		logger.Info("restoring session", "itemID", msg.Item.ID, "episodeID", msg.Episode)
+		logger.Info("restoring session", "itemID", msg.Item.ID, "savedEpisodeID", msg.SavedEpisodeID, "resolvedEpisodeID", func() string {
+			if msg.Episode == nil {
+				return ""
+			}
+			return msg.Episode.ID
+		}())
+		return m, m.startRestorePlaybackCmd(msg)
+
+	case RestorePlaySessionMsg:
 		m.restorePaused = true
-		var playCmd tea.Cmd
-		if msg.Episode != nil {
-			m, playCmd = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: *msg.Item, Episode: *msg.Episode})
-		} else {
-			m, playCmd = m.handlePlayCmd(detail.PlayCmd{Item: *msg.Item})
-		}
-		return m, playCmd
+		return m.handlePlaySessionMsg(msg.PlaySessionMsg)
 
 	case player.PlayerReadyMsg:
 		return m.handlePlayerReady()

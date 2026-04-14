@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ---------------------------------------------------------------------------
@@ -108,6 +108,16 @@ type e2eServerState struct {
 	progressStatus map[string]int            // itemID → GET /api/me/progress status override
 	meStatus       int                       // GET /api/me status override
 	force401       bool                      // when true, next API call returns 401
+	noTrackEpisode map[string]bool           // itemID|episodeID → return play session without tracks
+}
+
+func (s *e2eServerState) shouldReturnNoTracks(itemID, episodeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.noTrackEpisode == nil {
+		return false
+	}
+	return s.noTrackEpisode[itemID+"|"+episodeID]
 }
 
 func (s *e2eServerState) setForce401(v bool) {
@@ -423,6 +433,11 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			if len(parts) >= 6 {
 				itemID := parts[3]
 				epID := parts[5]
+				if state.shouldReturnNoTracks(itemID, epID) {
+					resp := abs.PlaySession{ID: "sess-ep-empty-e2e", EpisodeID: epID, CurrentTime: 0}
+					json.NewEncoder(w).Encode(resp)
+					return
+				}
 				resp := abs.PlaySession{
 					ID: "sess-ep-e2e",
 					AudioTracks: []abs.AudioTrack{

@@ -109,6 +109,13 @@ type BookDetailLoadedMsg struct {
 // If Item is nil, no session was found or the restore failed — the app
 // proceeds to the Home screen as usual.
 type RestoreSessionMsg struct {
-	Item    *abs.LibraryItem
-	Episode *abs.PodcastEpisode
+	Item           *abs.LibraryItem
+	Episode        *abs.PodcastEpisode
+	SavedEpisodeID string
+}
+
+// RestorePlaySessionMsg carries a restore-initiated play session that should
+// launch paused.
+type RestorePlaySessionMsg struct {
+	PlaySessionMsg PlaySessionMsg
 }
