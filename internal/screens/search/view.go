@@ -7,7 +7,7 @@ import (
 // View renders the search screen.
 func (m Model) View() string {
 	inputLine := m.input.View()
-	body := m.styles.Muted.Render("Type to search…")
+	var body string
 	normalizedQuery := normalizeQuery(m.query)
 
 	if normalizedQuery == "" {

@@ -1,6 +1,7 @@
 package detail
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -70,10 +71,11 @@ type SeekToChapterCmd struct {
 	Time float64
 }
 
-// MarkFinishedCmd requests marking an item as finished.
+// MarkFinishedCmd requests marking an item as finished or undoing that.
 type MarkFinishedCmd struct {
 	Item    abs.LibraryItem
 	Episode *abs.PodcastEpisode
+	Undo    bool
 }
 
 // MarkFinishedMsg updates the item after marking it finished.
@@ -277,6 +279,9 @@ func (m Model) ItemID() string {
 
 // SetEpisodes updates the episode list and refreshes the viewport content.
 func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
+	slices.SortFunc(episodes, func(a, b abs.PodcastEpisode) int {
+		return a.Index - b.Index
+	})
 	m.episodes = episodes
 	if m.item.RecentEpisode != nil {
 		for i, episode := range episodes {
@@ -428,8 +433,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				ep := m.episodes[m.selectedEpisode]
 				episode = &ep
 			}
+			undo := item.UserMediaProgress != nil && item.UserMediaProgress.IsFinished
 			return m, func() tea.Msg {
-				return MarkFinishedCmd{Item: item, Episode: episode}
+				return MarkFinishedCmd{Item: item, Episode: episode, Undo: undo}
 			}
 		case key.Matches(msg, m.keys.ToggleFocus):
 			m.cycleFocus()

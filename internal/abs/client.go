@@ -76,7 +76,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 		logger.Error("http request failed", "method", method, "path", path, "err", err, "duration", time.Since(start))
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	limitedReader := io.LimitReader(resp.Body, maxResponseSize+1)
 	data, err := io.ReadAll(limitedReader)

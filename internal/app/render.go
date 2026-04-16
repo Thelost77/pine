@@ -124,6 +124,8 @@ func (m Model) viewHints() string {
 	if m.isPlaying() {
 		parts = append(parts, key("space", "pause"))
 		parts = append(parts, key("h/l", "seek"))
+		parts = append(parts, key("-/+", "speed"))
+		parts = append(parts, key("[/]", "vol"))
 		parts = append(parts, key("S", "sleep"))
 		if len(m.queue) > 0 {
 			parts = append(parts, key(">", "next queued"))

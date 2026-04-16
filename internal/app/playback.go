@@ -596,12 +596,26 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	client := m.client
 	item := msg.Item
 	episode := msg.Episode
-	duration := item.Media.TotalDuration()
-	if episode != nil && episode.Duration > 0 {
-		duration = episode.Duration
-	}
 	return m, func() tea.Msg {
 		var err error
+		if msg.Undo {
+			if episode != nil {
+				err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, 0, 0, false)
+			} else {
+				err = client.UpdateProgress(context.Background(), item.ID, 0, 0, false)
+			}
+			if err != nil {
+				logger.Warn("failed to unmark finished", "err", err)
+				return PlaybackErrorMsg{Err: err}
+			}
+			return detail.MarkFinishedMsg{Progress: &abs.UserMediaProgress{
+				IsFinished: false,
+			}}
+		}
+		duration := item.Media.TotalDuration()
+		if episode != nil && episode.Duration > 0 {
+			duration = episode.Duration
+		}
 		if episode != nil {
 			err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, duration, 1.0, true)
 		} else {

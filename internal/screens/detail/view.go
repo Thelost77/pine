@@ -2,6 +2,7 @@ package detail
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Thelost77/pine/internal/ui"
@@ -86,7 +87,7 @@ func (m Model) buildContent() string {
 	// Description
 	if meta.Description != nil && *meta.Description != "" {
 		descLabel := m.styles.Subtitle.Render("Description")
-		desc := wordWrap(*meta.Description, m.width)
+		desc := wordWrap(stripMarkdown(*meta.Description), m.width)
 		sections = append(sections, descLabel, desc, "")
 	}
 
@@ -245,4 +246,17 @@ func wordWrap(text string, width int) string {
 		}
 	}
 	return result.String()
+}
+
+var (
+	markdownLinkRe = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	markdownBoldRe = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	markdownItalRe = regexp.MustCompile(`(?:(?:\*([^*]+)\*)|(?:_([^_]+)_))`)
+)
+
+func stripMarkdown(s string) string {
+	s = markdownLinkRe.ReplaceAllString(s, "$1")
+	s = markdownBoldRe.ReplaceAllString(s, "$1")
+	s = markdownItalRe.ReplaceAllString(s, "$1$2")
+	return s
 }

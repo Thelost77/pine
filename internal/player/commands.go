@@ -95,7 +95,7 @@ func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders
 		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
 		socketPath := fmt.Sprintf("%s/pine-mpv-%d.sock", MpvSocketDir(), os.Getpid())
 		// Remove stale socket
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath)
 
 		startStr := fmt.Sprintf("%f", startTime)
 		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders); err != nil {
