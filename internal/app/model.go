@@ -60,6 +60,7 @@ type Model struct {
 	sleepGeneration       uint64
 	queue                 []QueueEntry
 	restorePaused         bool
+	propertyUnavailableCount int
 
 	keys   KeyMap
 	err    components.ErrorBanner

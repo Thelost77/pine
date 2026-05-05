@@ -15,7 +15,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const trackEndRolloverSlack = 2.0
+const (
+	trackEndRolloverSlack        = 2.0
+	maxPropertyUnavailableRetries = 4
+)
 
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
@@ -177,6 +180,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 // handlePlayerReady starts the position tick and sync tick.
 func (m Model) handlePlayerReady() (Model, tea.Cmd) {
 	logger.Info("player ready, starting position ticks", "generation", m.playGeneration)
+	m.propertyUnavailableCount = 0
 	return m, tea.Batch(
 		player.TickCmd(m.mpv, m.playGeneration),
 		syncTickCmd(),
@@ -206,13 +210,25 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			return m.handlePlaybackCompleted()
 		}
 
-		// If mpv exited or errored, clean up session
-		logger.Warn("player position error, stopping playback", "err", msg.Err)
+		if strings.Contains(msg.Err.Error(), "property unavailable") {
+			m.propertyUnavailableCount++
+			if m.propertyUnavailableCount < maxPropertyUnavailableRetries {
+				interval := 500 * time.Millisecond << m.propertyUnavailableCount
+				logger.Debug("mpv properties not ready yet, backing off", "attempt", m.propertyUnavailableCount, "nextTick", interval)
+				return m, tickCmd(m.mpv, m.playGeneration, interval)
+			}
+			logger.Warn("mpv properties unavailable after retries, stopping playback", "err", msg.Err)
+		} else {
+			m.propertyUnavailableCount = 0
+		}
+
 		if m.isPlaying() {
 			return m.stopPlayback()
 		}
 		return m, nil
 	}
+
+	m.propertyUnavailableCount = 0
 
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
@@ -778,6 +794,28 @@ func (m Model) Cleanup() {
 func syncTickCmd() tea.Cmd {
 	return tea.Tick(syncInterval, func(_ time.Time) tea.Msg {
 		return SyncTickMsg{}
+	})
+}
+
+// tickCmd returns a command that polls mpv position after the given interval.
+func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(_ time.Time) tea.Msg {
+		pos, posErr := p.GetPosition()
+		dur, durErr := p.GetDuration()
+		paused, pauseErr := p.GetPaused()
+
+		for _, err := range []error{posErr, durErr, pauseErr} {
+			if err != nil {
+				return player.PositionMsg{Err: err, Generation: generation}
+			}
+		}
+
+		return player.PositionMsg{
+			Position:   pos,
+			Duration:   dur,
+			Paused:     paused,
+			Generation: generation,
+		}
 	})
 }
 
