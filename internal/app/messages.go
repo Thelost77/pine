@@ -119,3 +119,10 @@ type RestoreSessionMsg struct {
 type RestorePlaySessionMsg struct {
 	PlaySessionMsg PlaySessionMsg
 }
+
+// SeriesContinueMsg carries the next book in a series after auto-continue lookup.
+// Empty Item.ID with nil Err means the finished book was the last in the series.
+type SeriesContinueMsg struct {
+	Item abs.LibraryItem
+	Err  error
+}

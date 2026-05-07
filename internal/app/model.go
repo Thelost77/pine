@@ -62,6 +62,10 @@ type Model struct {
 	restorePaused         bool
 	propertyUnavailableCount int
 
+	// Series auto-continue
+	playbackLibraryID string
+	playbackSeriesID  string
+
 	keys   KeyMap
 	err    components.ErrorBanner
 	help   components.HelpOverlay
@@ -406,6 +410,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return msg.Episode.ID
 		}())
+		m.setSeriesContext(*msg.Item)
 		return m, m.startRestorePlaybackCmd(msg)
 
 	case RestorePlaySessionMsg:
@@ -444,6 +449,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, stopCmd
 		}
 		return m, nil
+
+	case SeriesContinueMsg:
+		if msg.Err != nil {
+			logger.Warn("series continue failed", "err", msg.Err)
+			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+				return m2, cmd
+			}
+			cmd := m.err.SetError(msg.Err)
+			m.propagateSize()
+			return m, cmd
+		}
+		if msg.Item.ID == "" {
+			return m, nil
+		}
+		logger.Info("auto-continuing series", "nextItemID", msg.Item.ID, "title", msg.Item.Media.Metadata.Title)
+		return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
 
 	case PlaybackErrorMsg:
 		if msg.Err != nil {
@@ -693,6 +714,8 @@ func (m *Model) clearPlaybackSessionState() {
 	m.player.Title = ""
 	m.player.Position = 0
 	m.player.Duration = 0
+	m.playbackSeriesID = ""
+	m.playbackLibraryID = ""
 }
 
 // checkUnauthorized checks if the error indicates a 401 response.

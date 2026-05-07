@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1077,5 +1078,428 @@ func executeBatchCmds(cmd tea.Cmd) {
 	case <-time.After(50 * time.Millisecond):
 		// Command is a tea.Tick or similar blocking cmd — skip it.
 		return
+	}
+}
+
+func TestPlaybackCompletionSeriesAutoContinue(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-series-lib/series/series-abc":
+			_ = json.NewEncoder(w).Encode(abs.Series{
+				ID:   "series-abc",
+				Name: "Test Series",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-series-lib/items"):
+			_ = json.NewEncoder(w).Encode(abs.LibraryItemsResponse{
+				Results: []abs.LibraryItem{
+					{
+						ID:        "item-current",
+						LibraryID: "lib-series-lib",
+						MediaType: "book",
+						Media: abs.Media{
+							Metadata: abs.MediaMetadata{
+								Title: "Current Book",
+								Series: &abs.SeriesSequence{
+									ID:       "series-abc",
+									Name:     "Test Series",
+									Sequence: "1",
+								},
+							},
+						},
+					},
+					{
+						ID:        "item-next-series",
+						LibraryID: "lib-series-lib",
+						MediaType: "book",
+						Media: abs.Media{
+							Metadata: abs.MediaMetadata{
+								Title: "Next Book In Series",
+								Series: &abs.SeriesSequence{
+									ID:       "series-abc",
+									Name:     "Test Series",
+									Sequence: "2",
+								},
+							},
+						},
+					},
+				},
+				Total: 2,
+				Limit: 50,
+				Page:  0,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-next-series/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-next-series",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-next-series/audio.mp3", Duration: 7200},
+				},
+				CurrentTime: 0,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Title = "Current Book"
+	m.player.Position = 3600
+	m.player.Duration = 3600
+	m.trackStartOffset = 0
+	m.trackDuration = 3600
+	m.playGeneration = 1
+	m.playbackSeriesID = "series-abc"
+	m.playbackLibraryID = "lib-series-lib"
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	m = feedCmdChain(m, cmd, 6)
+
+	if m.sessionID != "sess-next-series" {
+		t.Fatalf("sessionID = %q, want sess-next-series", m.sessionID)
+	}
+	if m.itemID != "item-next-series" {
+		t.Fatalf("itemID = %q, want item-next-series", m.itemID)
+	}
+	if m.player.Title != "Next Book In Series" {
+		t.Fatalf("player title = %q, want Next Book In Series", m.player.Title)
+	}
+}
+
+func TestPlaybackCompletionSeriesLastBookStops(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-series-lib/series/series-abc":
+			_ = json.NewEncoder(w).Encode(abs.Series{
+				ID:   "series-abc",
+				Name: "Test Series",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-series-lib/items"):
+			_ = json.NewEncoder(w).Encode(abs.LibraryItemsResponse{
+				Results: []abs.LibraryItem{{
+					ID:        "item-current",
+					LibraryID: "lib-series-lib",
+					MediaType: "book",
+					Media: abs.Media{
+						Metadata: abs.MediaMetadata{
+							Title: "Last Book",
+							Series: &abs.SeriesSequence{
+								ID:       "series-abc",
+								Name:     "Test Series",
+								Sequence: "5",
+							},
+						},
+					},
+				}},
+				Total: 1,
+				Limit: 50,
+				Page:  0,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Title = "Last Book"
+	m.player.Position = 5400
+	m.player.Duration = 5400
+	m.trackStartOffset = 0
+	m.trackDuration = 5400
+	m.playGeneration = 1
+	m.playbackSeriesID = "series-abc"
+	m.playbackLibraryID = "lib-series-lib"
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+
+	if m.sessionID != "" {
+		t.Fatalf("sessionID should be cleared, got %q", m.sessionID)
+	}
+	if m.player.Playing {
+		t.Fatal("expected playback to stop")
+	}
+
+	executeBatchCmds(cmd)
+
+	// Verify no play session was started for a next book
+	reqs := log.get()
+	for _, r := range reqs {
+		if r.Method == http.MethodPost && r.Path == "/api/items/item-next-series/play" {
+			t.Fatal("did not expect play call for next series book when it was the last one")
+		}
+	}
+}
+
+func TestPlaybackCompletionQueueTakesPriorityOverSeries(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-queued/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-queued",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-queued/audio.mp3", Duration: 3600},
+				},
+				CurrentTime: 0,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Title = "Current Book"
+	m.player.Position = 3600
+	m.player.Duration = 3600
+	m.trackStartOffset = 0
+	m.trackDuration = 3600
+	m.playGeneration = 1
+	m.playbackSeriesID = "series-abc"
+	m.playbackLibraryID = "lib-series-lib"
+	m.queue = []QueueEntry{{
+		Item: abs.LibraryItem{
+			ID:        "item-queued",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title: "Queued Book",
+				},
+			},
+		},
+	}}
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	m = feedCmdChain(m, cmd, 5)
+
+	if m.sessionID != "sess-queued" {
+		t.Fatalf("sessionID = %q, want sess-queued (queue takes priority)", m.sessionID)
+	}
+	if m.itemID != "item-queued" {
+		t.Fatalf("itemID = %q, want item-queued", m.itemID)
+	}
+
+	// Verify series API was NOT called
+	reqs := log.get()
+	for _, r := range reqs {
+		if r.Path == "/api/libraries/lib-series-lib/series/series-abc" {
+			t.Fatal("did not expect series API call when queue has items")
+		}
+	}
+}
+
+func TestSeriesContinueAPIErrorShowsBanner(t *testing.T) {
+	log := &apiLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		log.record(r.Method, r.URL.Path, body)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-current/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-current":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-series-lib/series/series-abc":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"boom"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Position = 3600
+	m.player.Duration = 3600
+	m.trackStartOffset = 0
+	m.trackDuration = 3600
+	m.playGeneration = 1
+	m.playbackSeriesID = "series-abc"
+	m.playbackLibraryID = "lib-series-lib"
+
+	result, cmd := m.Update(player.PositionMsg{
+		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Generation: 1,
+	})
+	m = result.(Model)
+	m = feedCmdChain(m, cmd, 3)
+
+	if m.sessionID != "" {
+		t.Fatalf("sessionID should be cleared, got %q", m.sessionID)
+	}
+	if !m.err.HasError() {
+		t.Fatal("expected error banner after series API failure")
+	}
+}
+
+func TestEpisodePlaybackClearsSeriesContext(t *testing.T) {
+	mp := &mockPlayer{}
+	m := NewWithPlayer(config.Default(), nil, nil, mp)
+	m.playbackSeriesID = "series-prev"
+	m.playbackLibraryID = "lib-prev"
+
+	m, _ = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
+		Item: abs.LibraryItem{
+			ID:        "pod-001",
+			MediaType: "podcast",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{Title: "Podcast Show"},
+			},
+		},
+		Episode: abs.PodcastEpisode{
+			ID:    "ep-001",
+			Title: "Episode 1",
+		},
+	})
+
+	if m.playbackSeriesID != "" {
+		t.Fatalf("playbackSeriesID = %q, want empty after episode start", m.playbackSeriesID)
+	}
+	if m.playbackLibraryID != "" {
+		t.Fatalf("playbackLibraryID = %q, want empty after episode start", m.playbackLibraryID)
+	}
+}
+
+func TestSessionRestoreSetsSeriesContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/items/item-series-book":
+			_ = json.NewEncoder(w).Encode(abs.LibraryItem{
+				ID:        "item-series-book",
+				LibraryID: "lib-series-lib",
+				MediaType: "book",
+				Media: abs.Media{
+					Metadata: abs.MediaMetadata{
+						Title: "Series Book",
+						Series: &abs.SeriesSequence{
+							ID:       "series-xyz",
+							Name:     "Test Trilogy",
+							Sequence: "1",
+						},
+					},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-series-book/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-restored-series",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-series-book/audio.mp3", Duration: 3600},
+				},
+				CurrentTime: 120,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, client, &mockPlayer{})
+
+	result, _ := m.Update(RestoreSessionMsg{
+		Item: &abs.LibraryItem{
+			ID:        "item-series-book",
+			LibraryID: "lib-series-lib",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title: "Series Book",
+					Series: &abs.SeriesSequence{
+						ID:       "series-xyz",
+						Name:     "Test Trilogy",
+						Sequence: "1",
+					},
+				},
+			},
+		},
+	})
+	m = result.(Model)
+
+	if m.playbackSeriesID != "series-xyz" {
+		t.Fatalf("playbackSeriesID = %q, want series-xyz", m.playbackSeriesID)
+	}
+	if m.playbackLibraryID != "lib-series-lib" {
+		t.Fatalf("playbackLibraryID = %q, want lib-series-lib", m.playbackLibraryID)
 	}
 }

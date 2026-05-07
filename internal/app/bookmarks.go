@@ -55,6 +55,7 @@ func (m Model) handleSeekToBookmark(msg detail.SeekToBookmarkCmd) (Model, tea.Cm
 		if m.client == nil || msg.Item.ID == "" {
 			return m, nil
 		}
+		m.setSeriesContext(msg.Item)
 		return m, m.startPlaybackAtBookPositionCmd(msg.Item, msg.Time)
 	}
 	return m.seekToBookGlobalPosition(msg.Time)

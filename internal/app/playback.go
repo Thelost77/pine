@@ -29,10 +29,6 @@ func (m Model) isPlaying() bool {
 // If the same item is already playing, toggles pause.
 // If a different item is playing, stops it first and starts the new one.
 func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
-	if m.client == nil {
-		return m, nil
-	}
-
 	// Same book already playing → toggle pause
 	if m.isPlaying() && m.itemID == msg.Item.ID && m.episodeID == "" {
 		m.player.Playing = !m.player.Playing
@@ -42,12 +38,20 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	m.setSeriesContext(msg.Item)
+
+	if m.client == nil {
+		return m, nil
+	}
+
 	// Different item playing → stop it first
 	var stopCmd tea.Cmd
 	if m.isPlaying() {
 		logger.Info("switching playback", "from", m.itemID, "to", msg.Item.ID)
 		m, stopCmd = m.stopPlayback()
 	}
+
+	m.setSeriesContext(msg.Item)
 
 	item := msg.Item
 	client := m.client
@@ -84,16 +88,19 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 // If the same episode is already playing, toggles pause.
 // If a different item/episode is playing, stops it first and starts the new one.
 func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) {
-	if m.client == nil {
-		return m, nil
-	}
-
 	// Same episode already playing → toggle pause
 	if m.isPlaying() && m.itemID == msg.Item.ID && m.episodeID == msg.Episode.ID {
 		m.player.Playing = !m.player.Playing
 		if m.mpv != nil {
 			return m, player.TogglePauseCmd(m.mpv, m.player.Playing)
 		}
+		return m, nil
+	}
+
+	m.playbackSeriesID = ""
+	m.playbackLibraryID = ""
+
+	if m.client == nil {
 		return m, nil
 	}
 
@@ -461,11 +468,20 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 
 func (m Model) handlePlaybackCompleted() (Model, tea.Cmd) {
 	next, hasNext := m.dequeueQueueEntry()
+	seriesID := m.playbackSeriesID
+	libraryID := m.playbackLibraryID
+	currentItemID := m.itemID
+	client := m.client
+
 	m, stopCmd := m.stopPlayback()
-	if !hasNext {
+	if hasNext {
+		return m.startQueuedEntry(next, stopCmd)
+	}
+	if seriesID == "" || libraryID == "" || client == nil {
 		return m, stopCmd
 	}
-	return m.startQueuedEntry(next, stopCmd)
+	cmd := seriesContinueCmd(client, libraryID, seriesID, currentItemID)
+	return m, tea.Batch(stopCmd, cmd)
 }
 
 func (m Model) skipToNextQueued() (Model, tea.Cmd) {
@@ -880,4 +896,34 @@ func clearSavedRestoreSession(store *db.Store, reason string, keyvals ...any) {
 func logSkippedRestore(reason string, keyvals ...any) {
 	fields := append([]any{"reason", reason}, keyvals...)
 	logger.Info("skipping session restore", fields...)
+}
+
+func (m *Model) setSeriesContext(item abs.LibraryItem) {
+	if item.Media.Metadata.Series != nil {
+		m.playbackSeriesID = item.Media.Metadata.Series.ID
+		m.playbackLibraryID = item.LibraryID
+	} else {
+		m.playbackSeriesID = ""
+		m.playbackLibraryID = ""
+	}
+}
+
+func seriesContinueCmd(client *abs.Client, libraryID, seriesID, currentItemID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		contents, err := client.GetSeriesContents(ctx, libraryID, seriesID)
+		if err != nil {
+			return SeriesContinueMsg{Err: err}
+		}
+		found := false
+		for _, item := range contents.Items {
+			if found {
+				return SeriesContinueMsg{Item: item}
+			}
+			if item.ID == currentItemID {
+				found = true
+			}
+		}
+		return SeriesContinueMsg{}
+	}
 }
