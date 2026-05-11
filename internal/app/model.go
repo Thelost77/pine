@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
 const headerHeight = 2
@@ -62,6 +63,7 @@ type Model struct {
 	queue                 []QueueEntry
 	restorePaused         bool
 	propertyUnavailableCount int
+	lastMprisEmit         time.Time
 
 	// Series auto-continue
 	playbackLibraryID string
@@ -129,6 +131,46 @@ func (m Model) Queue() []QueueEntry {
 // SetProgram sets the bubbletea program reference needed for MPRIS.
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
+}
+
+func (m *Model) emitMprisPlayback() {
+	if m.mprisBridge == nil {
+		return
+	}
+	_ = m.mprisBridge.EventHandler().Player.OnPlayback()
+}
+
+func (m *Model) emitMprisPlayPause() {
+	if m.mprisBridge == nil {
+		return
+	}
+	_ = m.mprisBridge.EventHandler().Player.OnPlayPause()
+}
+
+func (m *Model) emitMprisEnded() {
+	if m.mprisBridge == nil {
+		return
+	}
+	_ = m.mprisBridge.EventHandler().Player.OnEnded()
+}
+
+func (m *Model) emitMprisPosition() {
+	if m.mprisBridge == nil {
+		return
+	}
+	now := time.Now()
+	if now.Sub(m.lastMprisEmit) < time.Second {
+		return
+	}
+	m.lastMprisEmit = now
+	_ = m.mprisBridge.EventHandler().Player.OnSeek(types.Microseconds(m.player.Position * 1_000_000))
+}
+
+func (m *Model) emitMprisVolume() {
+	if m.mprisBridge == nil {
+		return
+	}
+	_ = m.mprisBridge.EventHandler().Player.OnVolume()
 }
 
 // Init returns the initial command for the active screen.
@@ -454,6 +496,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mpris.PlayPauseMsg:
 		if m.isPlaying() {
 			m.player.Playing = !m.player.Playing
+			m.emitMprisPlayPause()
 			if m.mpv != nil {
 				return m, player.TogglePauseCmd(m.mpv, m.player.Playing)
 			}
@@ -468,6 +511,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mpris.SetVolumeMsg:
 		m.player.Volume = msg.Volume
+		m.emitMprisVolume()
 		if m.mpv != nil {
 			return m, player.SetVolumeCmd(m.mpv, msg.Volume)
 		}
@@ -475,6 +519,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mpris.SetRateMsg:
 		m.player.Speed = msg.Rate
+		m.emitMprisPlayback()
 		if m.mpv != nil {
 			return m, player.SetSpeedCmd(m.mpv, msg.Rate)
 		}

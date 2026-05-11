@@ -173,6 +173,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
+	m.emitMprisPlayback()
 	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
 
 	paused := m.restorePaused
@@ -247,6 +248,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 
 	m.player.Position = bookPos
 	m.player.Playing = !msg.Paused
+	m.emitMprisPosition()
 
 	// Update sleep timer display
 	if !m.sleepDeadline.IsZero() {
@@ -681,6 +683,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 
 	// Clear session state
 	m.clearPlaybackSessionState()
+	m.emitMprisEnded()
 	m.propagateSize()
 
 	var progress float64
