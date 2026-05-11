@@ -8,6 +8,7 @@ import (
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
+	"github.com/Thelost77/pine/internal/mpris"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/home"
@@ -74,8 +75,10 @@ type Model struct {
 	styles ui.Styles
 	config config.Config
 	db     *db.Store
-	client *abs.Client
-	mpv    player.Player
+	client      *abs.Client
+	mpv         player.Player
+	mprisBridge *mpris.Bridge
+	program     *tea.Program
 }
 
 // New creates a new root model. If client is non-nil (authenticated),
@@ -123,11 +126,21 @@ func (m Model) Queue() []QueueEntry {
 	return cp
 }
 
+// SetProgram sets the bubbletea program reference needed for MPRIS.
+func (m *Model) SetProgram(p *tea.Program) {
+	m.program = p
+}
+
 // Init returns the initial command for the active screen.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.initScreen(m.screen)}
 	if m.client != nil && m.db != nil {
 		cmds = append(cmds, restoreSessionCmd(m.client, m.db))
+	}
+	if m.program != nil {
+		m.mprisBridge = mpris.NewBridge(m.program)
+		m.mprisBridge.Bind(m, float64(m.config.Player.SeekSeconds))
+		m.mprisBridge.Start()
 	}
 	return tea.Batch(cmds...)
 }
@@ -436,6 +449,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case player.PlayerQuitMsg:
 		return m, nil
 
+	// --- MPRIS control messages ---
+
+	case mpris.PlayPauseMsg:
+		if m.isPlaying() {
+			m.player.Playing = !m.player.Playing
+			if m.mpv != nil {
+				return m, player.TogglePauseCmd(m.mpv, m.player.Playing)
+			}
+		}
+		return m, nil
+
+	case mpris.SeekMsg:
+		if m.isPlaying() {
+			return m.handleSeek(msg.Offset)
+		}
+		return m, nil
+
+	case mpris.SetVolumeMsg:
+		m.player.Volume = msg.Volume
+		if m.mpv != nil {
+			return m, player.SetVolumeCmd(m.mpv, msg.Volume)
+		}
+		return m, nil
+
+	case mpris.SetRateMsg:
+		m.player.Speed = msg.Rate
+		if m.mpv != nil {
+			return m, player.SetSpeedCmd(m.mpv, msg.Rate)
+		}
+		return m, nil
+
 	case PlaybackStoppedMsg:
 		return m, nil
 
@@ -736,3 +780,17 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	m.propagateSize()
 	return m, cmd, true
 }
+
+// --- MPRIS ModelAccessor implementation ---
+
+func (m Model) IsPlaying() bool        { return m.isPlaying() && m.player.Playing }
+func (m Model) IsPaused() bool         { return m.isPlaying() && !m.player.Playing }
+func (m Model) HasActiveItem() bool    { return m.isPlaying() }
+func (m Model) CurrentTitle() string   { return m.player.Title }
+func (m Model) CurrentAuthors() []string { return nil }
+func (m Model) CurrentItemID() string  { return m.itemID }
+func (m Model) PlayerPosition() float64 { return m.player.Position }
+func (m Model) PlayerDuration() float64 { return m.player.Duration }
+func (m Model) PlayerVolume() int      { return m.player.Volume }
+func (m Model) PlayerSpeed() float64   { return m.player.Speed }
+func (m Model) QueueLength() int       { return len(m.queue) }

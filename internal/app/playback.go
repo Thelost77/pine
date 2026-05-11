@@ -749,6 +749,9 @@ func playSessionChapters(session *abs.PlaySession) []abs.Chapter {
 
 // Cleanup performs synchronous cleanup of playback resources.
 func (m Model) Cleanup() {
+	if m.mprisBridge != nil {
+		_ = m.mprisBridge.Stop()
+	}
 	if m.mpv != nil {
 		_ = m.mpv.Quit()
 	}
