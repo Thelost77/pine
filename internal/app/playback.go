@@ -173,6 +173,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
+	m.syncMprisState()
 	m.emitMprisPlayback()
 	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
 
@@ -241,13 +242,37 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
 
+	// If a seek is pending, wait for mpv to confirm the new position
+	if m.seekPending {
+		if bookPos >= m.player.Position-2 && bookPos <= m.player.Position+2 {
+			m.seekPending = false
+		}
+		// Still update playing state and emit MPRIS signals
+		wasPlaying := m.player.Playing
+		m.player.Playing = !msg.Paused
+		if wasPlaying != m.player.Playing {
+			m.syncMprisState()
+			m.emitMprisPlayback()
+		}
+		m.emitMprisPosition()
+		if m.mpv != nil {
+			return m, player.TickCmd(m.mpv, m.playGeneration)
+		}
+		return m, nil
+	}
+
 	// Track time listened (delta from last position)
 	if bookPos > m.player.Position {
 		m.timeListened += bookPos - m.player.Position
 	}
 
 	m.player.Position = bookPos
+	wasPlaying := m.player.Playing
 	m.player.Playing = !msg.Paused
+	if wasPlaying != m.player.Playing {
+		m.syncMprisState()
+		m.emitMprisPlayback()
+	}
 	m.emitMprisPosition()
 
 	// Update sleep timer display
@@ -681,9 +706,15 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	store := m.db
 	mpvPlayer := m.mpv
 
+	// Cache last played item for MPRIS metadata after stop
+	m.lastPlayedTitle = m.player.Title
+	m.lastPlayedItemID = m.itemID
+
 	// Clear session state
 	m.clearPlaybackSessionState()
+	m.syncMprisState()
 	m.emitMprisEnded()
+	m.emitMprisTitle()
 	m.propagateSize()
 
 	var progress float64

@@ -7,7 +7,6 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
-	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -233,13 +232,12 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 		trackRelative := bookPos - m.trackStartOffset
 		logger.Debug("in-track seek", "bookPosition", bookPos, "trackStart", m.trackStartOffset, "trackEnd", trackEnd, "trackRelative", trackRelative)
 		m.player.Position = bookPos
+		m.seekPending = true
 		mpvPlayer := m.mpv
-		return m, func() tea.Msg {
-			if err := mpvPlayer.Seek(trackRelative); err != nil {
-				return player.PositionMsg{Err: err}
-			}
-			return nil
-		}
+		go func() {
+			_ = mpvPlayer.Seek(trackRelative)
+		}()
+		return m, nil
 	}
 
 	// Cross-track seek: restart playback at the new book-global position.

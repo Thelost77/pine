@@ -33,6 +33,10 @@ func (m *mockAccessor) PlayerVolume() int       { return m.volume }
 func (m *mockAccessor) PlayerSpeed() float64    { return m.speed }
 func (m *mockAccessor) QueueLength() int        { return m.queueLen }
 
+func accessorFn(a *mockAccessor) func() ModelAccessor {
+	return func() ModelAccessor { return a }
+}
+
 func TestRootAdapterIdentity(t *testing.T) {
 	r := RootAdapter{}
 
@@ -76,7 +80,7 @@ func TestPlayerAdapterPlaybackStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewPlayerAdapter(tt.accessor, PlayerActions{})
+			p := NewPlayerAdapter(accessorFn(tt.accessor), PlayerActions{})
 			got, err := p.PlaybackStatus()
 			if err != nil {
 				t.Fatalf("PlaybackStatus() error: %v", err)
@@ -102,7 +106,7 @@ func TestPlayerAdapterVolumeConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &mockAccessor{volume: tt.pineVol}
-			p := NewPlayerAdapter(a, PlayerActions{})
+			p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 			got, err := p.Volume()
 			if err != nil {
 				t.Fatalf("Volume() error: %v", err)
@@ -123,7 +127,7 @@ func TestPlayerAdapterSetVolumeConversion(t *testing.T) {
 		},
 	}
 	a := &mockAccessor{}
-	p := NewPlayerAdapter(a, actions)
+	p := NewPlayerAdapter(accessorFn(a), actions)
 
 	if err := p.SetVolume(0.75); err != nil {
 		t.Fatalf("SetVolume() error: %v", err)
@@ -141,7 +145,7 @@ func TestPlayerAdapterMetadata(t *testing.T) {
 		itemID:   "item-123",
 		duration: 3600,
 	}
-	p := NewPlayerAdapter(a, PlayerActions{})
+	p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 
 	meta, err := p.Metadata()
 	if err != nil {
@@ -156,7 +160,7 @@ func TestPlayerAdapterMetadata(t *testing.T) {
 	if meta.Length != types.Microseconds(3600*1_000_000) {
 		t.Errorf("Metadata().Length = %d; want %d", meta.Length, 3600*1_000_000)
 	}
-	expectedPath := dbus.ObjectPath("/org/pine/track/item-123")
+	expectedPath := dbus.ObjectPath("/org/pine/track/item_123")
 	if meta.TrackId != expectedPath {
 		t.Errorf("Metadata().TrackId = %q; want %q", meta.TrackId, expectedPath)
 	}
@@ -164,7 +168,7 @@ func TestPlayerAdapterMetadata(t *testing.T) {
 
 func TestPlayerAdapterMetadataNoItem(t *testing.T) {
 	a := &mockAccessor{}
-	p := NewPlayerAdapter(a, PlayerActions{})
+	p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 
 	meta, err := p.Metadata()
 	if err != nil {
@@ -177,7 +181,7 @@ func TestPlayerAdapterMetadataNoItem(t *testing.T) {
 
 func TestPlayerAdapterPosition(t *testing.T) {
 	a := &mockAccessor{position: 42.5}
-	p := NewPlayerAdapter(a, PlayerActions{})
+	p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 
 	pos, err := p.Position()
 	if err != nil {
@@ -197,7 +201,7 @@ func TestPlayerAdapterSeek(t *testing.T) {
 		},
 	}
 	a := &mockAccessor{}
-	p := NewPlayerAdapter(a, actions)
+	p := NewPlayerAdapter(accessorFn(a), actions)
 
 	if err := p.Seek(types.Microseconds(10_000_000)); err != nil {
 		t.Fatalf("Seek() error: %v", err)
@@ -209,7 +213,7 @@ func TestPlayerAdapterSeek(t *testing.T) {
 
 func TestPlayerAdapterCanGoNext(t *testing.T) {
 	a := &mockAccessor{queueLen: 2}
-	p := NewPlayerAdapter(a, PlayerActions{})
+	p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 
 	v, err := p.CanGoNext()
 	if err != nil {
@@ -231,7 +235,7 @@ func TestPlayerAdapterCanGoNext(t *testing.T) {
 
 func TestPlayerAdapterCanControl(t *testing.T) {
 	a := &mockAccessor{}
-	p := NewPlayerAdapter(a, PlayerActions{})
+	p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 
 	v, err := p.CanControl()
 	if err != nil {
@@ -244,7 +248,7 @@ func TestPlayerAdapterCanControl(t *testing.T) {
 
 func TestPlayerAdapterRates(t *testing.T) {
 	a := &mockAccessor{speed: 1.5}
-	p := NewPlayerAdapter(a, PlayerActions{})
+	p := NewPlayerAdapter(accessorFn(a), PlayerActions{})
 
 	rate, err := p.Rate()
 	if err != nil {

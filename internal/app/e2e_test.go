@@ -1397,12 +1397,9 @@ func TestE2E_SeekKeysWorkDuringPlayback(t *testing.T) {
 	m.player.Duration = 3600.0
 
 	// Press 'h' (seek backward) — should NOT navigate back
-	m, cmd := e2ePressKey(m, 'h')
+	m, _ = e2ePressKey(m, 'h')
 	if m.ActiveScreen() != ScreenDetail {
 		t.Errorf("pressing 'h' during playback should seek, not go back; screen = %v", m.ActiveScreen())
-	}
-	if cmd == nil {
-		t.Error("expected seek command from 'h' during playback")
 	}
 	// Position should be adjusted (100 - 10 = 90)
 	if m.player.Position != 90.0 {
@@ -1410,10 +1407,7 @@ func TestE2E_SeekKeysWorkDuringPlayback(t *testing.T) {
 	}
 
 	// Press 'l' (seek forward) — should NOT be swallowed by screen
-	m, cmd = e2ePressKey(m, 'l')
-	if cmd == nil {
-		t.Error("expected seek command from 'l' during playback")
-	}
+	m, _ = e2ePressKey(m, 'l')
 	// Position should be adjusted (90 + 10 = 100)
 	if m.player.Position != 100.0 {
 		t.Errorf("position after 'l' = %f, want 100.0", m.player.Position)
@@ -1569,21 +1563,15 @@ func TestE2E_ChapterNavigation(t *testing.T) {
 
 	// Position is 42 (in chapter 1: 0-1800)
 	// Press 'n' → next chapter start (1800)
-	m, cmd = e2ePressKey(m, 'n')
+	m, _ = e2ePressKey(m, 'n')
 	if m.player.Position != 1800.0 {
 		t.Errorf("after 'n', position = %f, want 1800.0", m.player.Position)
 	}
-	if cmd == nil {
-		t.Error("expected seek command from 'n'")
-	}
 
 	// Press 'N' → previous chapter start (0)
-	m, cmd = e2ePressKey(m, 'N')
+	m, _ = e2ePressKey(m, 'N')
 	if m.player.Position != 0.0 {
 		t.Errorf("after 'N', position = %f, want 0.0", m.player.Position)
-	}
-	if cmd == nil {
-		t.Error("expected seek command from 'N'")
 	}
 }
 

@@ -2,6 +2,7 @@ package mpris
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/quarckster/go-mpris-server/pkg/types"
@@ -18,6 +19,7 @@ func (r RootAdapter) HasTrackList() (bool, error)        { return false, nil }
 func (r RootAdapter) Identity() (string, error)          { return "pine", nil }
 func (r RootAdapter) SupportedUriSchemes() ([]string, error) { return nil, nil }
 func (r RootAdapter) SupportedMimeTypes() ([]string, error)  { return nil, nil }
+func (r RootAdapter) DesktopEntry() (string, error)         { return "pine", nil }
 
 // PlayerAdapter implements types.OrgMprisMediaPlayer2PlayerAdapter using closures.
 // Each method field is a closure that reads from a ModelAccessor.
@@ -76,7 +78,8 @@ func (p PlayerAdapter) CanSeek() (bool, error)                   { return p.OnCa
 func (p PlayerAdapter) CanControl() (bool, error)                { return p.OnCanControl() }
 
 // NewPlayerAdapter creates a PlayerAdapter whose closures read from the accessor.
-func NewPlayerAdapter(accessor ModelAccessor, actions PlayerActions) PlayerAdapter {
+// accessor is a function that returns the current ModelAccessor, called on each read.
+func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) PlayerAdapter {
 	return PlayerAdapter{
 		OnNext:     actions.Next,
 		OnPrevious: actions.Previous,
@@ -88,46 +91,51 @@ func NewPlayerAdapter(accessor ModelAccessor, actions PlayerActions) PlayerAdapt
 		OnSetPosition: actions.SetPosition,
 		OnOpenUri:  func(string) error { return nil },
 		OnPlaybackStatus: func() (types.PlaybackStatus, error) {
-			if accessor.IsPlaying() {
+			a := accessor()
+			if a.IsPlaying() {
 				return types.PlaybackStatusPlaying, nil
 			}
-			if accessor.IsPaused() {
+			if a.IsPaused() {
 				return types.PlaybackStatusPaused, nil
 			}
 			return types.PlaybackStatusStopped, nil
 		},
-		OnRate:    func() (float64, error) { return accessor.PlayerSpeed(), nil },
+		OnRate:    func() (float64, error) { return accessor().PlayerSpeed(), nil },
 		OnSetRate: actions.SetRate,
 		OnMetadata: func() (types.Metadata, error) {
-			if !accessor.HasActiveItem() {
-				return types.Metadata{}, nil
+			a := accessor()
+			title := a.CurrentTitle()
+			if title == "" {
+				return types.Metadata{
+					TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/NoTrack"),
+				}, nil
 			}
-			itemID := accessor.CurrentItemID()
+			itemID := strings.ReplaceAll(a.CurrentItemID(), "-", "_")
 			trackID := dbus.ObjectPath(fmt.Sprintf("/org/pine/track/%s", itemID))
-			durationMicro := types.Microseconds(accessor.PlayerDuration() * 1_000_000)
+			durationMicro := types.Microseconds(a.PlayerDuration() * 1_000_000)
 			return types.Metadata{
 				TrackId: trackID,
 				Length:  durationMicro,
-				Title:   accessor.CurrentTitle(),
-				Artist:  accessor.CurrentAuthors(),
+				Title:   title,
+				Artist:  a.CurrentAuthors(),
 			}, nil
 		},
 		OnVolume: func() (float64, error) {
-			return float64(accessor.PlayerVolume()) / 100.0, nil
+			return float64(accessor().PlayerVolume()) / 100.0, nil
 		},
 		OnSetVolume: func(vol float64) error {
 			return actions.SetVolume(int(vol * 100))
 		},
 		OnPosition: func() (int64, error) {
-			return int64(accessor.PlayerPosition() * 1_000_000), nil
+			return int64(accessor().PlayerPosition() * 1_000_000), nil
 		},
 		OnMinimumRate:  func() (float64, error) { return 0.5, nil },
 		OnMaximumRate:  func() (float64, error) { return 4.0, nil },
-		OnCanGoNext:    func() (bool, error) { return accessor.QueueLength() > 0, nil },
-		OnCanGoPrevious: func() (bool, error) { return accessor.HasActiveItem(), nil },
-		OnCanPlay:      func() (bool, error) { return accessor.HasActiveItem(), nil },
-		OnCanPause:     func() (bool, error) { return accessor.HasActiveItem(), nil },
-		OnCanSeek:      func() (bool, error) { return accessor.HasActiveItem(), nil },
+		OnCanGoNext:    func() (bool, error) { return accessor().QueueLength() > 0, nil },
+		OnCanGoPrevious: func() (bool, error) { return true, nil },
+		OnCanPlay:      func() (bool, error) { return true, nil },
+		OnCanPause:     func() (bool, error) { return true, nil },
+		OnCanSeek:      func() (bool, error) { return true, nil },
 		OnCanControl:   func() (bool, error) { return true, nil },
 	}
 }

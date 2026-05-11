@@ -20,52 +20,55 @@ func NewBridge(program *tea.Program) *Bridge {
 	return &Bridge{program: program}
 }
 
+// send dispatches a message to the bubbletea program without blocking the caller.
+// The D-Bus handler goroutine must return quickly; the program's msg channel is unbuffered.
+func (b *Bridge) send(msg tea.Msg) {
+	go b.program.Send(msg)
+}
+
 // Bind wires the adapter closures to read from accessor and send messages via program.Send().
+// accessor is a function that returns the current ModelAccessor, called on each read.
 // seekSeconds is the seek amount for Next/Previous (non-standard MPRIS).
-func (b *Bridge) Bind(accessor ModelAccessor, seekSeconds float64) {
+func (b *Bridge) Bind(accessor func() ModelAccessor, seekSeconds float64) {
 	actions := PlayerActions{
 		Next: func() error {
-			// Non-standard: Next seeks forward instead of skipping tracks.
-			// Headphones/speakers have no dedicated seek button, so
-			// Next/Previous are mapped to seek forward/backward for audiobook use.
-			b.program.Send(SeekMsg{Offset: seekSeconds})
+			b.send(SeekMsg{Offset: seekSeconds})
 			return nil
 		},
 		Previous: func() error {
-			// Non-standard: Previous seeks backward instead of skipping tracks.
-			b.program.Send(SeekMsg{Offset: -seekSeconds})
+			b.send(SeekMsg{Offset: -seekSeconds})
 			return nil
 		},
 		Pause: func() error {
-			b.program.Send(PlayPauseMsg{})
+			b.send(PlayPauseMsg{})
 			return nil
 		},
 		PlayPause: func() error {
-			b.program.Send(PlayPauseMsg{})
+			b.send(PlayPauseMsg{})
 			return nil
 		},
 		Stop: func() error {
-			b.program.Send(PlayPauseMsg{})
+			b.send(PlayPauseMsg{})
 			return nil
 		},
 		Play: func() error {
-			b.program.Send(PlayPauseMsg{})
+			b.send(PlayPauseMsg{})
 			return nil
 		},
 		Seek: func(offset types.Microseconds) error {
-			b.program.Send(SeekMsg{Offset: float64(offset) / 1_000_000})
+			b.send(SeekMsg{Offset: float64(offset) / 1_000_000})
 			return nil
 		},
 		SetPosition: func(trackId string, pos types.Microseconds) error {
-			b.program.Send(SeekMsg{Offset: float64(pos) / 1_000_000})
+			b.send(SeekMsg{Offset: float64(pos) / 1_000_000})
 			return nil
 		},
 		SetRate: func(rate float64) error {
-			b.program.Send(SetRateMsg{Rate: rate})
+			b.send(SetRateMsg{Rate: rate})
 			return nil
 		},
 		SetVolume: func(vol int) error {
-			b.program.Send(SetVolumeMsg{Volume: vol})
+			b.send(SetVolumeMsg{Volume: vol})
 			return nil
 		},
 	}

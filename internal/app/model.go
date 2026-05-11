@@ -64,6 +64,7 @@ type Model struct {
 	restorePaused         bool
 	propertyUnavailableCount int
 	lastMprisEmit         time.Time
+	seekPending           bool
 
 	// Series auto-continue
 	playbackLibraryID string
@@ -81,6 +82,10 @@ type Model struct {
 	mpv         player.Player
 	mprisBridge *mpris.Bridge
 	program     *tea.Program
+	mprisState  *MprisState
+
+	lastPlayedTitle  string
+	lastPlayedItemID string
 }
 
 // New creates a new root model. If client is non-nil (authenticated),
@@ -116,6 +121,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		db:          store,
 		client:      client,
 		mpv:         mpv,
+		mprisState:  &MprisState{},
 	}
 }
 
@@ -128,10 +134,31 @@ func (m Model) Queue() []QueueEntry {
 	return cp
 }
 
-// SetProgram sets the bubbletea program reference needed for MPRIS.
+// SetProgram sets the bubbletea program reference and starts the MPRIS bridge.
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
+	m.mprisBridge = mpris.NewBridge(p)
+	state := m.mprisState
+	m.mprisBridge.Bind(func() mpris.ModelAccessor {
+		return mprisStateAccessor{state}
+	}, float64(m.config.Player.SeekSeconds))
+	m.mprisBridge.Start()
 }
+
+// mprisStateAccessor implements mpris.ModelAccessor by reading from shared MprisState.
+type mprisStateAccessor struct{ s *MprisState }
+
+func (a mprisStateAccessor) IsPlaying() bool          { return a.s.IsPlaying }
+func (a mprisStateAccessor) IsPaused() bool           { return a.s.IsPaused }
+func (a mprisStateAccessor) HasActiveItem() bool      { return a.s.HasActiveItem }
+func (a mprisStateAccessor) CurrentTitle() string     { return a.s.Title }
+func (a mprisStateAccessor) CurrentAuthors() []string { return a.s.Authors }
+func (a mprisStateAccessor) CurrentItemID() string    { return a.s.ItemID }
+func (a mprisStateAccessor) PlayerPosition() float64  { return a.s.Position }
+func (a mprisStateAccessor) PlayerDuration() float64  { return a.s.Duration }
+func (a mprisStateAccessor) PlayerVolume() int        { return a.s.Volume }
+func (a mprisStateAccessor) PlayerSpeed() float64     { return a.s.Speed }
+func (a mprisStateAccessor) QueueLength() int         { return a.s.QueueLength }
 
 func (m *Model) emitMprisPlayback() {
 	if m.mprisBridge == nil {
@@ -154,6 +181,13 @@ func (m *Model) emitMprisEnded() {
 	_ = m.mprisBridge.EventHandler().Player.OnEnded()
 }
 
+func (m *Model) emitMprisTitle() {
+	if m.mprisBridge == nil {
+		return
+	}
+	_ = m.mprisBridge.EventHandler().Player.OnTitle()
+}
+
 func (m *Model) emitMprisPosition() {
 	if m.mprisBridge == nil {
 		return
@@ -173,16 +207,30 @@ func (m *Model) emitMprisVolume() {
 	_ = m.mprisBridge.EventHandler().Player.OnVolume()
 }
 
+func (m *Model) syncMprisState() {
+	m.mprisState.IsPlaying = m.isPlaying() && m.player.Playing
+	m.mprisState.IsPaused = m.isPlaying() && !m.player.Playing
+	m.mprisState.HasActiveItem = m.isPlaying()
+	m.mprisState.ItemID = m.itemID
+	if m.itemID == "" {
+		m.mprisState.ItemID = m.lastPlayedItemID
+	}
+	m.mprisState.Title = m.player.Title
+	if m.player.Title == "" {
+		m.mprisState.Title = m.lastPlayedTitle
+	}
+	m.mprisState.Position = m.player.Position
+	m.mprisState.Duration = m.player.Duration
+	m.mprisState.Volume = m.player.Volume
+	m.mprisState.Speed = m.player.Speed
+	m.mprisState.QueueLength = len(m.queue)
+}
+
 // Init returns the initial command for the active screen.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.initScreen(m.screen)}
 	if m.client != nil && m.db != nil {
 		cmds = append(cmds, restoreSessionCmd(m.client, m.db))
-	}
-	if m.program != nil {
-		m.mprisBridge = mpris.NewBridge(m.program)
-		m.mprisBridge.Bind(m, float64(m.config.Player.SeekSeconds))
-		m.mprisBridge.Start()
 	}
 	return tea.Batch(cmds...)
 }
@@ -496,6 +544,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mpris.PlayPauseMsg:
 		if m.isPlaying() {
 			m.player.Playing = !m.player.Playing
+			m.syncMprisState()
 			m.emitMprisPlayPause()
 			if m.mpv != nil {
 				return m, player.TogglePauseCmd(m.mpv, m.player.Playing)
@@ -511,6 +560,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mpris.SetVolumeMsg:
 		m.player.Volume = msg.Volume
+		m.syncMprisState()
 		m.emitMprisVolume()
 		if m.mpv != nil {
 			return m, player.SetVolumeCmd(m.mpv, msg.Volume)
@@ -519,6 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mpris.SetRateMsg:
 		m.player.Speed = msg.Rate
+		m.syncMprisState()
 		m.emitMprisPlayback()
 		if m.mpv != nil {
 			return m, player.SetSpeedCmd(m.mpv, msg.Rate)
@@ -679,6 +730,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateScreen(msg)
 	}
 
+	m.syncMprisState()
 	return m.updateScreen(msg)
 }
 
@@ -826,16 +878,3 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	return m, cmd, true
 }
 
-// --- MPRIS ModelAccessor implementation ---
-
-func (m Model) IsPlaying() bool        { return m.isPlaying() && m.player.Playing }
-func (m Model) IsPaused() bool         { return m.isPlaying() && !m.player.Playing }
-func (m Model) HasActiveItem() bool    { return m.isPlaying() }
-func (m Model) CurrentTitle() string   { return m.player.Title }
-func (m Model) CurrentAuthors() []string { return nil }
-func (m Model) CurrentItemID() string  { return m.itemID }
-func (m Model) PlayerPosition() float64 { return m.player.Position }
-func (m Model) PlayerDuration() float64 { return m.player.Duration }
-func (m Model) PlayerVolume() int      { return m.player.Volume }
-func (m Model) PlayerSpeed() float64   { return m.player.Speed }
-func (m Model) QueueLength() int       { return len(m.queue) }
