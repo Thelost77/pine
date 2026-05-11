@@ -9,6 +9,8 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/dexterlb/mpvipc v0.0.0-20241005113212-7cdefca0e933
+	github.com/godbus/dbus/v5 v5.1.0
+	github.com/quarckster/go-mpris-server v1.0.3
 	github.com/sahilm/fuzzy v0.1.1
 	modernc.org/sqlite v1.48.0
 )
