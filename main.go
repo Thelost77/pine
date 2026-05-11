@@ -45,6 +45,7 @@ func main() {
 
 	model := app.New(cfg, store, client)
 	p := tea.NewProgram(model, tea.WithAltScreen())
+	model.SetProgram(p)
 	logger.Info("starting TUI")
 	finalModel, err := p.Run()
 	if err != nil {
