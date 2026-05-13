@@ -160,51 +160,76 @@ func (a mprisStateAccessor) PlayerVolume() int        { return a.s.Volume }
 func (a mprisStateAccessor) PlayerSpeed() float64     { return a.s.Speed }
 func (a mprisStateAccessor) QueueLength() int         { return a.s.QueueLength }
 
-func (m *Model) emitMprisPlayback() {
+func (m *Model) mprisPlaybackCmd() tea.Cmd {
 	if m.mprisBridge == nil {
-		return
+		return nil
 	}
-	_ = m.mprisBridge.EventHandler().Player.OnPlayback()
+	handler := m.mprisBridge.EventHandler()
+	return func() tea.Msg {
+		_ = handler.Player.OnPlayback()
+		return nil
+	}
 }
 
-func (m *Model) emitMprisPlayPause() {
+func (m *Model) mprisPlayPauseCmd() tea.Cmd {
 	if m.mprisBridge == nil {
-		return
+		return nil
 	}
-	_ = m.mprisBridge.EventHandler().Player.OnPlayPause()
+	handler := m.mprisBridge.EventHandler()
+	return func() tea.Msg {
+		_ = handler.Player.OnPlayPause()
+		return nil
+	}
 }
 
-func (m *Model) emitMprisEnded() {
+func (m *Model) mprisEndedCmd() tea.Cmd {
 	if m.mprisBridge == nil {
-		return
+		return nil
 	}
-	_ = m.mprisBridge.EventHandler().Player.OnEnded()
+	handler := m.mprisBridge.EventHandler()
+	return func() tea.Msg {
+		_ = handler.Player.OnEnded()
+		return nil
+	}
 }
 
-func (m *Model) emitMprisTitle() {
+func (m *Model) mprisTitleCmd() tea.Cmd {
 	if m.mprisBridge == nil {
-		return
+		return nil
 	}
-	_ = m.mprisBridge.EventHandler().Player.OnTitle()
+	handler := m.mprisBridge.EventHandler()
+	return func() tea.Msg {
+		_ = handler.Player.OnTitle()
+		return nil
+	}
 }
 
-func (m *Model) emitMprisPosition() {
+func (m *Model) mprisPositionCmd() tea.Cmd {
 	if m.mprisBridge == nil {
-		return
+		return nil
 	}
 	now := time.Now()
 	if now.Sub(m.lastMprisEmit) < time.Second {
-		return
+		return nil
 	}
 	m.lastMprisEmit = now
-	_ = m.mprisBridge.EventHandler().Player.OnSeek(types.Microseconds(m.player.Position * 1_000_000))
+	handler := m.mprisBridge.EventHandler()
+	pos := types.Microseconds(m.player.Position * 1_000_000)
+	return func() tea.Msg {
+		_ = handler.Player.OnSeek(pos)
+		return nil
+	}
 }
 
-func (m *Model) emitMprisVolume() {
+func (m *Model) mprisVolumeCmd() tea.Cmd {
 	if m.mprisBridge == nil {
-		return
+		return nil
 	}
-	_ = m.mprisBridge.EventHandler().Player.OnVolume()
+	handler := m.mprisBridge.EventHandler()
+	return func() tea.Msg {
+		_ = handler.Player.OnVolume()
+		return nil
+	}
 }
 
 func (m *Model) syncMprisState() {
@@ -545,10 +570,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isPlaying() {
 			m.player.Playing = !m.player.Playing
 			m.syncMprisState()
-			m.emitMprisPlayPause()
 			if m.mpv != nil {
-				return m, player.TogglePauseCmd(m.mpv, m.player.Playing)
+				return m, tea.Batch(m.mprisPlayPauseCmd(), player.TogglePauseCmd(m.mpv, m.player.Playing))
 			}
+			return m, m.mprisPlayPauseCmd()
 		}
 		return m, nil
 
@@ -561,20 +586,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mpris.SetVolumeMsg:
 		m.player.Volume = msg.Volume
 		m.syncMprisState()
-		m.emitMprisVolume()
 		if m.mpv != nil {
-			return m, player.SetVolumeCmd(m.mpv, msg.Volume)
+			return m, tea.Batch(m.mprisVolumeCmd(), player.SetVolumeCmd(m.mpv, msg.Volume))
 		}
-		return m, nil
+		return m, m.mprisVolumeCmd()
 
 	case mpris.SetRateMsg:
 		m.player.Speed = msg.Rate
 		m.syncMprisState()
-		m.emitMprisPlayback()
 		if m.mpv != nil {
-			return m, player.SetSpeedCmd(m.mpv, msg.Rate)
+			return m, tea.Batch(m.mprisPlaybackCmd(), player.SetSpeedCmd(m.mpv, msg.Rate))
 		}
-		return m, nil
+		return m, m.mprisPlaybackCmd()
 
 	case PlaybackStoppedMsg:
 		return m, nil

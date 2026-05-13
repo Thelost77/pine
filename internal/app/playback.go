@@ -174,7 +174,6 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
 	m.syncMprisState()
-	m.emitMprisPlayback()
 	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
 
 	paused := m.restorePaused
@@ -183,7 +182,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	if msg.AuthToken != "" {
 		headers = []string{"Authorization: Bearer " + msg.AuthToken}
 	}
-	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers)
+	return m, tea.Batch(m.mprisPlaybackCmd(), player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers))
 }
 
 // handlePlayerReady starts the position tick and sync tick.
@@ -250,15 +249,16 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		// Still update playing state and emit MPRIS signals
 		wasPlaying := m.player.Playing
 		m.player.Playing = !msg.Paused
+		var mprisCmds []tea.Cmd
 		if wasPlaying != m.player.Playing {
 			m.syncMprisState()
-			m.emitMprisPlayback()
+			mprisCmds = append(mprisCmds, m.mprisPlaybackCmd())
 		}
-		m.emitMprisPosition()
+		mprisCmds = append(mprisCmds, m.mprisPositionCmd())
 		if m.mpv != nil {
-			return m, player.TickCmd(m.mpv, m.playGeneration)
+			return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
 		}
-		return m, nil
+		return m, tea.Batch(mprisCmds...)
 	}
 
 	// Track time listened (delta from last position)
@@ -269,11 +269,12 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	wasPlaying := m.player.Playing
 	m.player.Playing = !msg.Paused
+	var mprisCmds []tea.Cmd
 	if wasPlaying != m.player.Playing {
 		m.syncMprisState()
-		m.emitMprisPlayback()
+		mprisCmds = append(mprisCmds, m.mprisPlaybackCmd())
 	}
-	m.emitMprisPosition()
+	mprisCmds = append(mprisCmds, m.mprisPositionCmd())
 
 	// Update sleep timer display
 	if !m.sleepDeadline.IsZero() {
@@ -286,9 +287,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if m.mpv != nil {
-		return m, player.TickCmd(m.mpv, m.playGeneration)
+		return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
 	}
-	return m, nil
+	return m, tea.Batch(mprisCmds...)
 }
 
 func (m Model) trackEndRolloverTarget(err error) (float64, bool) {
@@ -713,8 +714,6 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	// Clear session state
 	m.clearPlaybackSessionState()
 	m.syncMprisState()
-	m.emitMprisEnded()
-	m.emitMprisTitle()
 	m.propagateSize()
 
 	var progress float64
@@ -766,6 +765,8 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 			return nil
 		},
 		player.QuitCmd(mpvPlayer),
+		m.mprisEndedCmd(),
+		m.mprisTitleCmd(),
 	}
 
 	return m, tea.Batch(cmds...)

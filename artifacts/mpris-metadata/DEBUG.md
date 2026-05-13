@@ -41,6 +41,16 @@ bubbletea's `msg` channel is unbuffered (`make(chan Msg)`). `program.Send()` blo
 
 **Symptom:** Consecutive seeks via headphone buttons are terribly slow (several seconds between them).
 
+### 11. MPRIS signal emission blocking bubbletea event loop (FIXED)
+
+**Root cause:** All `emitMpris*()` calls were synchronous inside `Update()`. Each emission did:
+- Reflection-based property reads via `internal.Changes()`
+- Synchronous D-Bus signal emission via `conn.Emit()`
+
+While `Update()` was busy with reflection + D-Bus I/O, bubbletea's unbuffered `msg` channel couldn't receive incoming `SeekMsg` from MPRIS. Keyboard seeks weren't affected because bubbletea's stdin reader runs in a separate goroutine.
+
+**Fix:** Changed all `emitMpris*()` methods to return `tea.Cmd` (renamed to `mpris*Cmd()`). Emissions now run asynchronously via `tea.Batch()` alongside other commands. `syncMprisState()` stays synchronous (writes model state before Cmd runs).
+
 **What we know:**
 - The seek IPC call itself (`mpvipc.Call("seek", ...)`) is synchronous — holds a mutex lock and waits for mpv response
 - Position tick (`TickCmd`) fires every 500ms and makes 3 sequential IPC calls (`GetPosition`, `GetDuration`, `GetPaused`), each acquiring the same lock
@@ -54,9 +64,12 @@ bubbletea's `msg` channel is unbuffered (`make(chan Msg)`). `program.Send()` blo
 - Debouncing seeks — user correctly pointed out it's wrong (each seek is relative to current position)
 - seekPending flag — prevents UI jumps but doesn't fix the slowness
 
+**What worked:**
+- Moving MPRIS signal emission out of `Update()` into `tea.Cmd` — eliminates D-Bus I/O from the event loop, freeing the message channel to receive seeks immediately
+
 **Suspected root cause:** The position tick's 3 sequential IPC calls (every 500ms) saturate the mpv IPC lock. Seek goroutine has to wait behind them. With IPC round-trip ~100ms per call, tick holds lock ~300ms/500ms = 60% of the time. Seek waits up to 300ms per attempt. With rapid seeks, they queue up.
 
-**Possible solutions to investigate:**
+**Remaining optimizations to investigate (if still needed):**
 1. **Batch IPC calls** — read position+duration+paused in a single `mpvipc.Call` (if mpv supports it)
 2. **Reduce tick frequency** — change from 500ms to 2000ms (trade off: slower position updates)
 3. **Skip tick during seek** — add atomic flag on `Mpv` struct, tick checks it and skips IPC if seek is pending
