@@ -26,6 +26,10 @@ var testDescription = "A test audiobook for E2E testing"
 var testPodcastAuthor = "Podcast Host"
 var testEpisodeDuration = 1800.0
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func testLibraryItem(id, title string) abs.LibraryItem {
 	return abs.LibraryItem{
 		ID:        id,
@@ -62,7 +66,7 @@ func testPodcastItem(id, title string) abs.LibraryItem {
 			Episodes: []abs.PodcastEpisode{
 				{
 					ID:       id + "-ep-001",
-					Index:    1,
+					Index:    intPtr(1),
 					Title:    "Episode 1 - Pilot",
 					Duration: testEpisodeDuration,
 					AudioTrack: abs.AudioTrack{
@@ -74,7 +78,7 @@ func testPodcastItem(id, title string) abs.LibraryItem {
 				},
 				{
 					ID:       id + "-ep-002",
-					Index:    2,
+					Index:    intPtr(2),
 					Title:    "Episode 2 - Deep Dive",
 					Duration: 2400.0,
 					AudioTrack: abs.AudioTrack{

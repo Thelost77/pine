@@ -710,3 +710,99 @@ func TestSearchPodcastEpisodesHTTP_FindsEpisodeWhenShowSearchWouldMiss(t *testin
 		t.Fatalf("expected Jason episode hit, got %#v", items[0].RecentEpisode)
 	}
 }
+
+func TestGetRecentEpisodesHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/libraries/lib-pod/recent-episodes" {
+			t.Errorf("path = %q, want /api/libraries/lib-pod/recent-episodes", r.URL.Path)
+		}
+		if r.URL.Query().Get("limit") != "3" {
+			t.Errorf("limit = %q, want 3", r.URL.Query().Get("limit"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"episodes": [
+				{
+					"libraryItemId": "li-pod-001",
+					"id": "ep-001",
+					"index": 1,
+					"title": "Pilot",
+					"description": "First episode",
+					"duration": 1454.18,
+					"publishedAt": 1339761600000,
+					"addedAt": 1667326679503,
+					"podcast": {
+						"metadata": {
+							"title": "Welcome to Night Vale",
+							"author": "Night Vale Presents"
+						},
+						"coverPath": "/podcasts/wtnv/cover.jpg"
+					}
+				},
+				{
+					"libraryItemId": "li-pod-002",
+					"id": "ep-002",
+					"index": 5,
+					"title": "Episode 5",
+					"duration": 2400,
+					"addedAt": 1667400000000,
+					"podcast": {
+						"metadata": {
+							"title": "Another Podcast"
+						}
+					}
+				}
+			],
+			"total": 2,
+			"limit": 3,
+			"page": 0
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	items, err := c.GetRecentEpisodes(context.Background(), "lib-pod", 3)
+	if err != nil {
+		t.Fatalf("GetRecentEpisodes() error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	item := items[0]
+	if item.ID != "li-pod-001" {
+		t.Errorf("ID = %q, want li-pod-001", item.ID)
+	}
+	if item.MediaType != "podcast" {
+		t.Errorf("MediaType = %q, want podcast", item.MediaType)
+	}
+	if item.Media.Metadata.Title != "Welcome to Night Vale" {
+		t.Errorf("Title = %q, want Welcome to Night Vale", item.Media.Metadata.Title)
+	}
+	if item.Media.Metadata.AuthorName == nil || *item.Media.Metadata.AuthorName != "Night Vale Presents" {
+		t.Errorf("AuthorName = %v, want Night Vale Presents", item.Media.Metadata.AuthorName)
+	}
+	if item.RecentEpisode == nil {
+		t.Fatal("RecentEpisode is nil")
+	}
+	if item.RecentEpisode.ID != "ep-001" {
+		t.Errorf("RecentEpisode.ID = %q, want ep-001", item.RecentEpisode.ID)
+	}
+	if item.RecentEpisode.Title != "Pilot" {
+		t.Errorf("RecentEpisode.Title = %q, want Pilot", item.RecentEpisode.Title)
+	}
+	if item.RecentEpisode.Duration != 1454.18 {
+		t.Errorf("RecentEpisode.Duration = %f, want 1454.18", item.RecentEpisode.Duration)
+	}
+	if item.Media.CoverPath == nil || *item.Media.CoverPath != "/podcasts/wtnv/cover.jpg" {
+		t.Errorf("CoverPath = %v, want /podcasts/wtnv/cover.jpg", item.Media.CoverPath)
+	}
+
+	item2 := items[1]
+	if item2.ID != "li-pod-002" {
+		t.Errorf("ID = %q, want li-pod-002", item2.ID)
+	}
+	if item2.Media.Metadata.AuthorName == nil || *item2.Media.Metadata.AuthorName != "" {
+		t.Errorf("AuthorName = %v, want empty string", item2.Media.Metadata.AuthorName)
+	}
+}

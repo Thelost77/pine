@@ -50,6 +50,102 @@ func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]Perso
 	return sections, nil
 }
 
+// recentEpisodeResponse is the ABS response shape for GET /api/libraries/{id}/recent-episodes.
+type recentEpisodeResponse struct {
+	Episodes []recentEpisodeEntry `json:"episodes"`
+	Total    int                  `json:"total"`
+	Limit    int                  `json:"limit"`
+	Page     int                  `json:"page"`
+}
+
+// recentEpisodeEntry represents a single episode in the recent-episodes response.
+type recentEpisodeEntry struct {
+	LibraryItemID string               `json:"libraryItemId"`
+	ID            string               `json:"id"`
+	Index         *int                 `json:"index"`
+	Title         string               `json:"title"`
+	Description   string               `json:"description,omitempty"`
+	Duration      float64              `json:"duration"`
+	PublishedAt   *int64               `json:"publishedAt,omitempty"`
+	AddedAt       int64                `json:"addedAt,omitempty"`
+	Podcast       recentEpisodePodcast `json:"podcast"`
+}
+
+// recentEpisodePodcast contains podcast metadata attached to a recent episode.
+type recentEpisodePodcast struct {
+	Metadata  recentEpisodePodcastMetadata `json:"metadata"`
+	CoverPath string                       `json:"coverPath,omitempty"`
+}
+
+// recentEpisodePodcastMetadata contains podcast-level metadata.
+type recentEpisodePodcastMetadata struct {
+	Title  string `json:"title"`
+	Author string `json:"author,omitempty"`
+}
+
+// GetRecentEpisodes fetches recently added podcast episodes for a library.
+func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit int) ([]LibraryItem, error) {
+	query := url.Values{}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	path := fmt.Sprintf("/api/libraries/%s/recent-episodes", libraryID)
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get recent episodes: %w", err)
+	}
+
+	var resp recentEpisodeResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("decode recent episodes response: %w", err)
+	}
+
+	items := make([]LibraryItem, 0, len(resp.Episodes))
+	for _, ep := range resp.Episodes {
+		authorName := ep.Podcast.Metadata.Author
+		var index *int
+		if ep.Index != nil {
+			index = ep.Index
+		}
+		var publishedAt *int64
+		if ep.PublishedAt != nil {
+			publishedAt = ep.PublishedAt
+		}
+		items = append(items, LibraryItem{
+			ID:        ep.LibraryItemID,
+			MediaType: "podcast",
+			AddedAt:   ep.AddedAt,
+			Media: Media{
+				Metadata: MediaMetadata{
+					Title:      ep.Podcast.Metadata.Title,
+					AuthorName: &authorName,
+				},
+				CoverPath: strPtr(ep.Podcast.CoverPath),
+			},
+			RecentEpisode: &PodcastEpisode{
+				ID:          ep.ID,
+				Index:       index,
+				Title:       ep.Title,
+				Description: ep.Description,
+				Duration:    ep.Duration,
+				PublishedAt: publishedAt,
+				AddedAt:     ep.AddedAt,
+			},
+		})
+	}
+	return items, nil
+}
+
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // GetRecentlyAdded fetches and merges the "recently-added" personalized shelf for the given libraries.
 func (c *Client) GetRecentlyAdded(ctx context.Context, libraries []Library) ([]LibraryItem, error) {
 	items := make([]LibraryItem, 0)

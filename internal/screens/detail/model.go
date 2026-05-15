@@ -280,7 +280,14 @@ func (m Model) ItemID() string {
 // SetEpisodes updates the episode list and refreshes the viewport content.
 func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
 	slices.SortFunc(episodes, func(a, b abs.PodcastEpisode) int {
-		return a.Index - b.Index
+		aIdx, bIdx := 0, 0
+		if a.Index != nil {
+			aIdx = *a.Index
+		}
+		if b.Index != nil {
+			bIdx = *b.Index
+		}
+		return aIdx - bIdx
 	})
 	m.episodes = episodes
 	if m.item.RecentEpisode != nil {

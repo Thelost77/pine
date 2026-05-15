@@ -1,7 +1,6 @@
 package home
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -761,43 +760,73 @@ func TestPersonalizedMsg_DedupesRecentlyAddedByTitle(t *testing.T) {
 	}
 }
 
-func TestHydrateRecentlyAddedPodcastsUsesLatestEpisode(t *testing.T) {
+func TestFetchPersonalizedPodcastLibraryUsesRecentEpisodes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/items/pod-1" || r.URL.Query().Get("expanded") != "1" {
-			http.NotFound(w, r)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(abs.LibraryItem{
-			ID:        "pod-1",
-			LibraryID: "lib-pod",
-			MediaType: "podcast",
-			Media: abs.Media{
-				Metadata: abs.MediaMetadata{Title: "Podcast Show"},
-				Episodes: []abs.PodcastEpisode{
-					{ID: "ep-old", Title: "Older", AddedAt: 10, PublishedAt: 10, Index: 1, Duration: 1200},
-					{ID: "ep-new", Title: "Newer", AddedAt: 20, PublishedAt: 20, Index: 2, Duration: 1800},
+		switch r.URL.Path {
+		case "/api/libraries":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"libraries": []abs.Library{
+					{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"},
 				},
-			},
-		})
+			})
+		case "/api/libraries/lib-pod/personalized":
+			_ = json.NewEncoder(w).Encode([]abs.PersonalizedResponse{
+				{ID: "continue-listening", Entities: nil},
+				{ID: "recently-added", Entities: []abs.LibraryItem{
+					{ID: "pod-1", MediaType: "podcast", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Old Show"}}},
+				}},
+			})
+		case "/api/libraries/lib-pod/recent-episodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"episodes": []map[string]any{
+					{
+						"libraryItemId": "pod-1",
+						"id":            "ep-new",
+						"title":         "Latest Episode",
+						"duration":      1800.0,
+						"addedAt":       20,
+						"podcast": map[string]any{
+							"metadata": map[string]any{
+								"title":  "My Podcast",
+								"author": "Host",
+							},
+						},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer srv.Close()
 
 	client := abs.NewClient(srv.URL, "tok")
-	items := []abs.LibraryItem{{
-		ID:        "pod-1",
-		MediaType: "podcast",
-		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast Show"}},
-	}}
+	styles := ui.DefaultStyles()
+	m := New(styles, client)
+	m.SetSize(80, 24)
+	m.libraries = []abs.Library{{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"}}
+	m.selectedLibrary = 0
 
-	hydrated := hydrateRecentlyAddedPodcasts(context.Background(), client, items)
-	if hydrated[0].RecentEpisode == nil {
-		t.Fatal("expected recent episode to be hydrated")
+	cmd := m.fetchPersonalizedCmd()
+	msg := cmd()
+	pMsg, ok := msg.(PersonalizedMsg)
+	if !ok {
+		t.Fatalf("expected PersonalizedMsg, got %T", msg)
 	}
-	if hydrated[0].RecentEpisode.ID != "ep-new" {
-		t.Fatalf("expected newest episode to be selected, got %q", hydrated[0].RecentEpisode.ID)
+	if pMsg.Err != nil {
+		t.Fatalf("unexpected error: %v", pMsg.Err)
 	}
-	if itemTitle(hydrated[0]) != "Newer" {
-		t.Fatalf("expected item title to use hydrated episode title, got %q", itemTitle(hydrated[0]))
+	if len(pMsg.RecentlyAdded) != 1 {
+		t.Fatalf("expected 1 recently added item, got %d", len(pMsg.RecentlyAdded))
+	}
+	if pMsg.RecentlyAdded[0].RecentEpisode == nil {
+		t.Fatal("expected RecentEpisode to be set")
+	}
+	if pMsg.RecentlyAdded[0].RecentEpisode.ID != "ep-new" {
+		t.Fatalf("expected episode ID ep-new, got %q", pMsg.RecentlyAdded[0].RecentEpisode.ID)
+	}
+	if pMsg.RecentlyAdded[0].Media.Metadata.Title != "My Podcast" {
+		t.Fatalf("expected podcast title 'My Podcast', got %q", pMsg.RecentlyAdded[0].Media.Metadata.Title)
 	}
 }

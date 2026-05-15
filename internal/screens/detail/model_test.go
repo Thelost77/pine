@@ -10,6 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func sampleItem() abs.LibraryItem {
 	author := "Jane Author"
 	dur := 36000.0
@@ -883,7 +887,7 @@ func TestPodcastHelp_DoesNotAdvertiseBookmarkFocusWhenBookmarksEmpty(t *testing.
 				Title:       "Podcast Help",
 				Description: &desc,
 			},
-			Episodes: []abs.PodcastEpisode{{ID: "ep-001", Index: 1, Title: "Episode 1", Duration: 1800}},
+			Episodes: []abs.PodcastEpisode{{ID: "ep-001", Index: intPtr(1), Title: "Episode 1", Duration: 1800}},
 		},
 	}
 

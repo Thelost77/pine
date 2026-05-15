@@ -382,7 +382,12 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 				recentlyAdded = section.Entities
 			}
 		}
-		recentlyAdded = hydrateRecentlyAddedPodcasts(context.Background(), client, recentlyAdded)
+
+		if libs[idx].MediaType == "podcast" {
+			if eps, err := client.GetRecentEpisodes(context.Background(), libs[idx].ID, recentlyAddedLimit); err == nil {
+				recentlyAdded = eps
+			}
+		}
 
 		return PersonalizedMsg{
 			Items:         continueListening,
@@ -554,9 +559,14 @@ func dedupeRecentlyAdded(primary, recent []abs.LibraryItem, limit int) []abs.Lib
 
 	result := make([]abs.LibraryItem, 0, limit)
 	for _, item := range recent {
-		title := strings.TrimSpace(item.Media.Metadata.Title)
-		key := strings.ToLower(title)
-		if title != "" {
+		var key string
+		if item.MediaType == "podcast" && item.RecentEpisode != nil {
+			key = item.RecentEpisode.ID
+		} else {
+			title := strings.TrimSpace(item.Media.Metadata.Title)
+			key = strings.ToLower(title)
+		}
+		if key != "" {
 			if _, exists := seenTitles[key]; exists {
 				continue
 			}
@@ -726,67 +736,6 @@ func selectionStep(msg tea.KeyMsg) int {
 	default:
 		return 0
 	}
-}
-
-func hydrateRecentlyAddedPodcasts(ctx context.Context, client *abs.Client, items []abs.LibraryItem) []abs.LibraryItem {
-	if client == nil || len(items) == 0 {
-		return items
-	}
-
-	type pending struct {
-		index int
-		id    string
-	}
-	var toFetch []pending
-	for i, item := range items {
-		if item.MediaType == "podcast" && item.RecentEpisode == nil {
-			toFetch = append(toFetch, pending{index: i, id: item.ID})
-		}
-	}
-	if len(toFetch) == 0 {
-		return items
-	}
-
-	ids := make([]string, len(toFetch))
-	for i, p := range toFetch {
-		ids[i] = p.id
-	}
-	fullItems, err := client.GetLibraryItemsBatch(ctx, ids)
-	if err != nil {
-		return items
-	}
-
-	hydrated := make([]abs.LibraryItem, len(items))
-	copy(hydrated, items)
-	for i, fullItem := range fullItems {
-		if fullItem == nil {
-			continue
-		}
-		if episode := latestEpisode(fullItem.Media.Episodes); episode != nil {
-			idx := toFetch[i].index
-			hydrated[idx].RecentEpisode = episode
-		}
-	}
-	return hydrated
-}
-
-func latestEpisode(episodes []abs.PodcastEpisode) *abs.PodcastEpisode {
-	if len(episodes) == 0 {
-		return nil
-	}
-
-	best := episodes[0]
-	for _, episode := range episodes[1:] {
-		switch {
-		case episode.AddedAt > best.AddedAt:
-			best = episode
-		case episode.AddedAt == best.AddedAt && episode.PublishedAt > best.PublishedAt:
-			best = episode
-		case episode.AddedAt == best.AddedAt && episode.PublishedAt == best.PublishedAt && episode.Index > best.Index:
-			best = episode
-		}
-	}
-	return cloneEpisode(&best)
 }
 
 func cloneEpisode(episode *abs.PodcastEpisode) *abs.PodcastEpisode {
