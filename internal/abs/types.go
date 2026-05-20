@@ -76,7 +76,7 @@ func (m Media) HasDuration() bool {
 // PodcastEpisode represents a single episode of a podcast.
 type PodcastEpisode struct {
 	ID          string     `json:"id"`
-	Index       int        `json:"index"`
+	Index       *int       `json:"index"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
 	Season      string     `json:"season,omitempty"`
@@ -85,7 +85,7 @@ type PodcastEpisode struct {
 	Duration    float64    `json:"duration"`
 	Size        int64      `json:"size,omitempty"`
 	AudioTrack  AudioTrack `json:"audioTrack,omitempty"`
-	PublishedAt int64      `json:"publishedAt,omitempty"`
+	PublishedAt *int64     `json:"publishedAt,omitempty"`
 	AddedAt     int64      `json:"addedAt,omitempty"`
 }
 

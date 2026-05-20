@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,7 +15,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const trackEndRolloverSlack = 2.0
+const (
+	trackEndRolloverSlack        = 2.0
+	maxPropertyUnavailableRetries = 4
+)
 
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
@@ -25,10 +29,6 @@ func (m Model) isPlaying() bool {
 // If the same item is already playing, toggles pause.
 // If a different item is playing, stops it first and starts the new one.
 func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
-	if m.client == nil {
-		return m, nil
-	}
-
 	// Same book already playing → toggle pause
 	if m.isPlaying() && m.itemID == msg.Item.ID && m.episodeID == "" {
 		m.player.Playing = !m.player.Playing
@@ -38,12 +38,20 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	m.setSeriesContext(msg.Item)
+
+	if m.client == nil {
+		return m, nil
+	}
+
 	// Different item playing → stop it first
 	var stopCmd tea.Cmd
 	if m.isPlaying() {
 		logger.Info("switching playback", "from", m.itemID, "to", msg.Item.ID)
 		m, stopCmd = m.stopPlayback()
 	}
+
+	m.setSeriesContext(msg.Item)
 
 	item := msg.Item
 	client := m.client
@@ -80,16 +88,19 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 // If the same episode is already playing, toggles pause.
 // If a different item/episode is playing, stops it first and starts the new one.
 func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) {
-	if m.client == nil {
-		return m, nil
-	}
-
 	// Same episode already playing → toggle pause
 	if m.isPlaying() && m.itemID == msg.Item.ID && m.episodeID == msg.Episode.ID {
 		m.player.Playing = !m.player.Playing
 		if m.mpv != nil {
 			return m, player.TogglePauseCmd(m.mpv, m.player.Playing)
 		}
+		return m, nil
+	}
+
+	m.playbackSeriesID = ""
+	m.playbackLibraryID = ""
+
+	if m.client == nil {
 		return m, nil
 	}
 
@@ -116,7 +127,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
 		}
 
-		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL + "?token=" + client.Token()
+		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL
 		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
 
 		return PlaySessionMsg{
@@ -132,6 +143,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				TrackDuration:    session.AudioTracks[0].Duration,
 			},
 			StreamURL: streamURL,
+			AuthToken: client.Token(),
 		}
 	}
 
@@ -161,16 +173,22 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
+	m.syncMprisState()
 	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
 
 	paused := m.restorePaused
 	m.restorePaused = false
-	return m, player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused)
+	var headers []string
+	if msg.AuthToken != "" {
+		headers = []string{"Authorization: Bearer " + msg.AuthToken}
+	}
+	return m, tea.Batch(m.mprisPlaybackCmd(), player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers))
 }
 
 // handlePlayerReady starts the position tick and sync tick.
 func (m Model) handlePlayerReady() (Model, tea.Cmd) {
 	logger.Info("player ready, starting position ticks", "generation", m.playGeneration)
+	m.propertyUnavailableCount = 0
 	return m, tea.Batch(
 		player.TickCmd(m.mpv, m.playGeneration),
 		syncTickCmd(),
@@ -200,16 +218,48 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			return m.handlePlaybackCompleted()
 		}
 
-		// If mpv exited or errored, clean up session
-		logger.Warn("player position error, stopping playback", "err", msg.Err)
+		if strings.Contains(msg.Err.Error(), "property unavailable") {
+			m.propertyUnavailableCount++
+			if m.propertyUnavailableCount < maxPropertyUnavailableRetries {
+				interval := 500 * time.Millisecond << m.propertyUnavailableCount
+				logger.Debug("mpv properties not ready yet, backing off", "attempt", m.propertyUnavailableCount, "nextTick", interval)
+				return m, tickCmd(m.mpv, m.playGeneration, interval)
+			}
+			logger.Warn("mpv properties unavailable after retries, stopping playback", "err", msg.Err)
+		} else {
+			m.propertyUnavailableCount = 0
+		}
+
 		if m.isPlaying() {
 			return m.stopPlayback()
 		}
 		return m, nil
 	}
 
+	m.propertyUnavailableCount = 0
+
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
+
+	// If a seek is pending, wait for mpv to confirm the new position
+	if m.seekPending {
+		if bookPos >= m.player.Position-2 && bookPos <= m.player.Position+2 {
+			m.seekPending = false
+		}
+		// Still update playing state and emit MPRIS signals
+		wasPlaying := m.player.Playing
+		m.player.Playing = !msg.Paused
+		var mprisCmds []tea.Cmd
+		if wasPlaying != m.player.Playing {
+			m.syncMprisState()
+			mprisCmds = append(mprisCmds, m.mprisPlaybackCmd())
+		}
+		mprisCmds = append(mprisCmds, m.mprisPositionCmd())
+		if m.mpv != nil {
+			return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
+		}
+		return m, tea.Batch(mprisCmds...)
+	}
 
 	// Track time listened (delta from last position)
 	if bookPos > m.player.Position {
@@ -217,7 +267,14 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	m.player.Position = bookPos
+	wasPlaying := m.player.Playing
 	m.player.Playing = !msg.Paused
+	var mprisCmds []tea.Cmd
+	if wasPlaying != m.player.Playing {
+		m.syncMprisState()
+		mprisCmds = append(mprisCmds, m.mprisPlaybackCmd())
+	}
+	mprisCmds = append(mprisCmds, m.mprisPositionCmd())
 
 	// Update sleep timer display
 	if !m.sleepDeadline.IsZero() {
@@ -230,9 +287,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if m.mpv != nil {
-		return m, player.TickCmd(m.mpv, m.playGeneration)
+		return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
 	}
-	return m, nil
+	return m, tea.Batch(mprisCmds...)
 }
 
 func (m Model) trackEndRolloverTarget(err error) (float64, bool) {
@@ -321,13 +378,138 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 	}
 }
 
+func (m Model) startRestorePlaybackCmd(msg RestoreSessionMsg) tea.Cmd {
+	if msg.Item == nil || m.client == nil {
+		return nil
+	}
+	if msg.SavedEpisodeID != "" {
+		if msg.Episode == nil {
+			return clearSavedRestoreSessionCmd(
+				m.db,
+				"podcast episode missing",
+				"itemID", msg.Item.ID,
+				"episodeID", msg.SavedEpisodeID,
+			)
+		}
+		return m.startRestoredEpisodePlaybackCmd(*msg.Item, *msg.Episode)
+	}
+	return m.startRestoredBookPlaybackCmd(*msg.Item)
+}
+
+func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
+	client := m.client
+	store := m.db
+	return func() tea.Msg {
+		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		session, err := client.StartPlaySession(context.Background(), item.ID, device)
+		if err != nil {
+			if abs.IsHTTPStatus(err, http.StatusNotFound) {
+				clearSavedRestoreSession(
+					store,
+					"book playback source missing",
+					"itemID", item.ID,
+					"err", err,
+				)
+				return nil
+			}
+			logSkippedRestore("book playback start failed", "itemID", item.ID, "err", err)
+			return nil
+		}
+		playMsg, err := buildBookPlaySessionMsg(
+			client,
+			session,
+			item.ID,
+			item.Media.Metadata.Title,
+			item.Media.TotalDuration(),
+			session.CurrentTime,
+		)
+		if err != nil {
+			if err.Error() == "no audio tracks" {
+				clearSavedRestoreSession(
+					store,
+					"book playback returned no audio tracks",
+					"itemID", item.ID,
+					"sessionID", session.ID,
+				)
+				return nil
+			}
+			logSkippedRestore("book playback session invalid", "itemID", item.ID, "sessionID", session.ID, "err", err)
+			return nil
+		}
+		return RestorePlaySessionMsg{PlaySessionMsg: playMsg}
+	}
+}
+
+func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs.PodcastEpisode) tea.Cmd {
+	client := m.client
+	store := m.db
+	return func() tea.Msg {
+		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
+		if err != nil {
+			if abs.IsHTTPStatus(err, http.StatusNotFound) {
+				clearSavedRestoreSession(
+					store,
+					"podcast episode playback source missing",
+					"itemID", item.ID,
+					"episodeID", episode.ID,
+					"err", err,
+				)
+				return nil
+			}
+			logSkippedRestore("podcast episode playback start failed", "itemID", item.ID, "episodeID", episode.ID, "err", err)
+			return nil
+		}
+		if len(session.AudioTracks) == 0 {
+			clearSavedRestoreSession(
+				store,
+				"podcast episode playback returned no audio tracks",
+				"itemID", item.ID,
+				"episodeID", episode.ID,
+				"sessionID", session.ID,
+			)
+			return nil
+		}
+
+		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL
+		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
+
+		return RestorePlaySessionMsg{
+			PlaySessionMsg: PlaySessionMsg{
+				Session: PlaySessionData{
+					SessionID:        session.ID,
+					ItemID:           item.ID,
+					EpisodeID:        episode.ID,
+					CurrentTime:      session.CurrentTime,
+					Duration:         resolveEpisodeDuration(episode, session),
+					Title:            episode.Title,
+					Chapters:         playSessionChapters(session),
+					TrackStartOffset: session.AudioTracks[0].StartOffset,
+					TrackDuration:    session.AudioTracks[0].Duration,
+				},
+				StreamURL: streamURL,
+				AuthToken: client.Token(),
+			},
+		}
+	}
+}
+
 func (m Model) handlePlaybackCompleted() (Model, tea.Cmd) {
 	next, hasNext := m.dequeueQueueEntry()
+	seriesID := m.playbackSeriesID
+	libraryID := m.playbackLibraryID
+	currentItemID := m.itemID
+	client := m.client
+
 	m, stopCmd := m.stopPlayback()
-	if !hasNext {
+	if hasNext {
+		return m.startQueuedEntry(next, stopCmd)
+	}
+	if seriesID == "" || libraryID == "" || client == nil {
 		return m, stopCmd
 	}
-	return m.startQueuedEntry(next, stopCmd)
+	cmd := seriesContinueCmd(client, libraryID, seriesID, currentItemID)
+	return m, tea.Batch(stopCmd, cmd)
 }
 
 func (m Model) skipToNextQueued() (Model, tea.Cmd) {
@@ -378,7 +560,7 @@ func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemI
 	}
 	logger.Info("track selected for playback", "itemID", itemID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", bookPos, "seekTime", seekTime)
 
-	streamURL := client.BaseURL() + track.ContentURL + "?token=" + client.Token()
+	streamURL := client.BaseURL() + track.ContentURL
 
 	return PlaySessionMsg{
 		Session: PlaySessionData{
@@ -392,6 +574,7 @@ func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemI
 			TrackDuration:    track.Duration,
 		},
 		StreamURL: streamURL,
+		AuthToken: client.Token(),
 	}, nil
 }
 
@@ -473,12 +656,26 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	client := m.client
 	item := msg.Item
 	episode := msg.Episode
-	duration := item.Media.TotalDuration()
-	if episode != nil && episode.Duration > 0 {
-		duration = episode.Duration
-	}
 	return m, func() tea.Msg {
 		var err error
+		if msg.Undo {
+			if episode != nil {
+				err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, 0, 0, false)
+			} else {
+				err = client.UpdateProgress(context.Background(), item.ID, 0, 0, false)
+			}
+			if err != nil {
+				logger.Warn("failed to unmark finished", "err", err)
+				return PlaybackErrorMsg{Err: err}
+			}
+			return detail.MarkFinishedMsg{Progress: &abs.UserMediaProgress{
+				IsFinished: false,
+			}}
+		}
+		duration := item.Media.TotalDuration()
+		if episode != nil && episode.Duration > 0 {
+			duration = episode.Duration
+		}
 		if episode != nil {
 			err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, duration, 1.0, true)
 		} else {
@@ -510,8 +707,13 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	store := m.db
 	mpvPlayer := m.mpv
 
+	// Cache last played item for MPRIS metadata after stop
+	m.lastPlayedTitle = m.player.Title
+	m.lastPlayedItemID = m.itemID
+
 	// Clear session state
 	m.clearPlaybackSessionState()
+	m.syncMprisState()
 	m.propagateSize()
 
 	var progress float64
@@ -563,6 +765,8 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 			return nil
 		},
 		player.QuitCmd(mpvPlayer),
+		m.mprisEndedCmd(),
+		m.mprisTitleCmd(),
 	}
 
 	return m, tea.Batch(cmds...)
@@ -580,6 +784,9 @@ func playSessionChapters(session *abs.PlaySession) []abs.Chapter {
 
 // Cleanup performs synchronous cleanup of playback resources.
 func (m Model) Cleanup() {
+	if m.mprisBridge != nil {
+		_ = m.mprisBridge.Stop()
+	}
 	if m.mpv != nil {
 		_ = m.mpv.Quit()
 	}
@@ -644,6 +851,28 @@ func syncTickCmd() tea.Cmd {
 	})
 }
 
+// tickCmd returns a command that polls mpv position after the given interval.
+func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(_ time.Time) tea.Msg {
+		pos, posErr := p.GetPosition()
+		dur, durErr := p.GetDuration()
+		paused, pauseErr := p.GetPaused()
+
+		for _, err := range []error{posErr, durErr, pauseErr} {
+			if err != nil {
+				return player.PositionMsg{Err: err, Generation: generation}
+			}
+		}
+
+		return player.PositionMsg{
+			Position:   pos,
+			Duration:   dur,
+			Paused:     paused,
+			Generation: generation,
+		}
+	})
+}
+
 // restoreSessionCmd fetches the last saved session from the DB and resolves
 // the full LibraryItem from ABS so playback can resume.
 func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
@@ -655,7 +884,17 @@ func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
 		}
 		item, err := client.GetLibraryItem(context.Background(), session.ItemID)
 		if err != nil {
-			logger.Warn("failed to fetch item for session restore", "itemID", session.ItemID, "err", err)
+			if abs.IsHTTPStatus(err, http.StatusNotFound) {
+				clearSavedRestoreSession(
+					store,
+					"saved item missing",
+					"itemID", session.ItemID,
+					"episodeID", session.EpisodeID,
+					"err", err,
+				)
+				return nil
+			}
+			logSkippedRestore("failed to fetch item for session restore", "itemID", session.ItemID, "episodeID", session.EpisodeID, "err", err)
 			return RestoreSessionMsg{}
 		}
 		var episode *abs.PodcastEpisode
@@ -668,6 +907,61 @@ func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
 				}
 			}
 		}
-		return RestoreSessionMsg{Item: item, Episode: episode}
+		return RestoreSessionMsg{Item: item, Episode: episode, SavedEpisodeID: session.EpisodeID}
+	}
+}
+
+func clearSavedRestoreSessionCmd(store *db.Store, reason string, keyvals ...any) tea.Cmd {
+	return func() tea.Msg {
+		clearSavedRestoreSession(store, reason, keyvals...)
+		return nil
+	}
+}
+
+func clearSavedRestoreSession(store *db.Store, reason string, keyvals ...any) {
+	fields := append([]any{"reason", reason}, keyvals...)
+	if store != nil {
+		if err := store.ClearSession(); err != nil {
+			fields = append(fields, "clearedSavedSession", false, "clearErr", err)
+			logger.Info("skipping session restore", fields...)
+			return
+		}
+		fields = append(fields, "clearedSavedSession", true)
+	}
+	logger.Info("skipping session restore", fields...)
+}
+
+func logSkippedRestore(reason string, keyvals ...any) {
+	fields := append([]any{"reason", reason}, keyvals...)
+	logger.Info("skipping session restore", fields...)
+}
+
+func (m *Model) setSeriesContext(item abs.LibraryItem) {
+	if item.Media.Metadata.Series != nil {
+		m.playbackSeriesID = item.Media.Metadata.Series.ID
+		m.playbackLibraryID = item.LibraryID
+	} else {
+		m.playbackSeriesID = ""
+		m.playbackLibraryID = ""
+	}
+}
+
+func seriesContinueCmd(client *abs.Client, libraryID, seriesID, currentItemID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		contents, err := client.GetSeriesContents(ctx, libraryID, seriesID)
+		if err != nil {
+			return SeriesContinueMsg{Err: err}
+		}
+		found := false
+		for _, item := range contents.Items {
+			if found {
+				return SeriesContinueMsg{Item: item}
+			}
+			if item.ID == currentItemID {
+				found = true
+			}
+		}
+		return SeriesContinueMsg{}
 	}
 }

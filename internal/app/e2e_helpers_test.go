@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,6 +25,10 @@ var testAuthor = "Test Author"
 var testDescription = "A test audiobook for E2E testing"
 var testPodcastAuthor = "Podcast Host"
 var testEpisodeDuration = 1800.0
+
+func intPtr(v int) *int {
+	return &v
+}
 
 func testLibraryItem(id, title string) abs.LibraryItem {
 	return abs.LibraryItem{
@@ -62,7 +66,7 @@ func testPodcastItem(id, title string) abs.LibraryItem {
 			Episodes: []abs.PodcastEpisode{
 				{
 					ID:       id + "-ep-001",
-					Index:    1,
+					Index:    intPtr(1),
 					Title:    "Episode 1 - Pilot",
 					Duration: testEpisodeDuration,
 					AudioTrack: abs.AudioTrack{
@@ -74,7 +78,7 @@ func testPodcastItem(id, title string) abs.LibraryItem {
 				},
 				{
 					ID:       id + "-ep-002",
-					Index:    2,
+					Index:    intPtr(2),
 					Title:    "Episode 2 - Deep Dive",
 					Duration: 2400.0,
 					AudioTrack: abs.AudioTrack{
@@ -108,6 +112,16 @@ type e2eServerState struct {
 	progressStatus map[string]int            // itemID → GET /api/me/progress status override
 	meStatus       int                       // GET /api/me status override
 	force401       bool                      // when true, next API call returns 401
+	noTrackEpisode map[string]bool           // itemID|episodeID → return play session without tracks
+}
+
+func (s *e2eServerState) shouldReturnNoTracks(itemID, episodeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.noTrackEpisode == nil {
+		return false
+	}
+	return s.noTrackEpisode[itemID+"|"+episodeID]
 }
 
 func (s *e2eServerState) setForce401(v bool) {
@@ -423,6 +437,11 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			if len(parts) >= 6 {
 				itemID := parts[3]
 				epID := parts[5]
+				if state.shouldReturnNoTracks(itemID, epID) {
+					resp := abs.PlaySession{ID: "sess-ep-empty-e2e", EpisodeID: epID, CurrentTime: 0}
+					json.NewEncoder(w).Encode(resp)
+					return
+				}
 				resp := abs.PlaySession{
 					ID: "sess-ep-e2e",
 					AudioTracks: []abs.AudioTrack{

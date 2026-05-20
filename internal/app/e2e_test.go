@@ -548,7 +548,7 @@ func TestE2E_BookmarkCRUD(t *testing.T) {
 	m, cmd := e2ePressKey(m, 'b')
 
 	// cmd returns from detail.AddBookmarkCmd → root handleAddBookmark
-	// which calls CreateBookmark + GetBookmarks
+	// which calls CreateBookmark + optimistic local update
 	m, cmd = feedCmd(m, cmd)
 	m = feedCmdChain(m, cmd, 5)
 
@@ -1397,12 +1397,9 @@ func TestE2E_SeekKeysWorkDuringPlayback(t *testing.T) {
 	m.player.Duration = 3600.0
 
 	// Press 'h' (seek backward) — should NOT navigate back
-	m, cmd := e2ePressKey(m, 'h')
+	m, _ = e2ePressKey(m, 'h')
 	if m.ActiveScreen() != ScreenDetail {
 		t.Errorf("pressing 'h' during playback should seek, not go back; screen = %v", m.ActiveScreen())
-	}
-	if cmd == nil {
-		t.Error("expected seek command from 'h' during playback")
 	}
 	// Position should be adjusted (100 - 10 = 90)
 	if m.player.Position != 90.0 {
@@ -1410,10 +1407,7 @@ func TestE2E_SeekKeysWorkDuringPlayback(t *testing.T) {
 	}
 
 	// Press 'l' (seek forward) — should NOT be swallowed by screen
-	m, cmd = e2ePressKey(m, 'l')
-	if cmd == nil {
-		t.Error("expected seek command from 'l' during playback")
-	}
+	m, _ = e2ePressKey(m, 'l')
 	// Position should be adjusted (90 + 10 = 100)
 	if m.player.Position != 100.0 {
 		t.Errorf("position after 'l' = %f, want 100.0", m.player.Position)
@@ -1510,13 +1504,13 @@ func TestE2E_SleepTimerGeneration(t *testing.T) {
 	m.player.Duration = 3600.0
 
 	// Cycle sleep timer to 15m (generation 1)
-	m, _ = e2ePressKey(m, 's')
+	m, _ = e2ePressKey(m, 'S')
 	if m.sleepGeneration != 1 {
 		t.Fatalf("sleepGeneration = %d, want 1", m.sleepGeneration)
 	}
 
 	// Cycle sleep timer to 30m (generation 2)
-	m, _ = e2ePressKey(m, 's')
+	m, _ = e2ePressKey(m, 'S')
 	if m.sleepGeneration != 2 {
 		t.Fatalf("sleepGeneration = %d, want 2", m.sleepGeneration)
 	}
@@ -1569,21 +1563,15 @@ func TestE2E_ChapterNavigation(t *testing.T) {
 
 	// Position is 42 (in chapter 1: 0-1800)
 	// Press 'n' → next chapter start (1800)
-	m, cmd = e2ePressKey(m, 'n')
+	m, _ = e2ePressKey(m, 'n')
 	if m.player.Position != 1800.0 {
 		t.Errorf("after 'n', position = %f, want 1800.0", m.player.Position)
 	}
-	if cmd == nil {
-		t.Error("expected seek command from 'n'")
-	}
 
 	// Press 'N' → previous chapter start (0)
-	m, cmd = e2ePressKey(m, 'N')
+	m, _ = e2ePressKey(m, 'N')
 	if m.player.Position != 0.0 {
 		t.Errorf("after 'N', position = %f, want 0.0", m.player.Position)
-	}
-	if cmd == nil {
-		t.Error("expected seek command from 'N'")
 	}
 }
 
@@ -2063,17 +2051,109 @@ func TestE2E_SessionRestore(t *testing.T) {
 	// Call Init which triggers restoreSessionCmd
 	cmd := m.Init()
 
-	// Execute the restore command — it fetches the item from ABS
-	m, cmd = feedCmd(m, cmd)
+	// Execute the restore command chain through playback start.
+	m = feedCmdChain(m, cmd, 3)
 
 	// After restore, should stay on Home screen while restoring paused playback
 	assertScreen(t, m, ScreenHome)
 
-	// Should have restorePaused set, meaning playback will start paused
-	if !m.restorePaused {
-		t.Error("expected restorePaused to be true when restoring session")
+	// Session state should be populated once restore playback starts.
+	if m.sessionID == "" {
+		t.Fatal("expected restored session to start playback")
+	}
+	if m.itemID != "item-001" {
+		t.Errorf("itemID = %q, want %q", m.itemID, "item-001")
+	}
+}
+
+func TestE2E_SessionRestorePodcastMissingEpisodeSkipsSilently(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 42, duration: 3600}
+	m, store := newE2EModelWithDB(t, srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	if err := store.SaveListeningSession(db.ListeningSession{
+		ItemID:      "pod-001",
+		EpisodeID:   "pod-001-ep-missing",
+		SessionID:   "sess-old-pod",
+		CurrentTime: 100.0,
+		Duration:    1800.0,
+	}); err != nil {
+		t.Fatalf("SaveListeningSession: %v", err)
 	}
 
-	// Session state should be populated once play session starts
-	// (the PlayCmd is initiated by RestoreSessionMsg handling)
+	res, _ := m.Update(login.LoginSuccessMsg{
+		Token:     "jwt-token-e2e",
+		ServerURL: srv.URL,
+		Username:  "alice",
+	})
+	m = res.(Model)
+
+	m = feedCmdChain(m, m.Init(), 3)
+
+	assertScreen(t, m, ScreenHome)
+	if m.sessionID != "" {
+		t.Fatalf("expected restore to skip playback, got session %q", m.sessionID)
+	}
+	if m.err.HasError() {
+		t.Fatal("expected missing restore episode to skip without error banner")
+	}
+	if _, err := store.GetLastSession(); err == nil {
+		t.Fatal("expected stale restore session to be cleared")
+	}
+	assertNoAPICall(t, log, http.MethodPost, "/api/items/pod-001/play")
+}
+
+func TestE2E_SessionRestorePodcastNoTracksSkipsSilently(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{
+		bookmarks:      make(map[string][]abs.Bookmark),
+		noTrackEpisode: map[string]bool{"pod-001|pod-001-ep-001": true},
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 42, duration: 3600}
+	m, store := newE2EModelWithDB(t, srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	if err := store.SaveListeningSession(db.ListeningSession{
+		ItemID:      "pod-001",
+		EpisodeID:   "pod-001-ep-001",
+		SessionID:   "sess-old-pod",
+		CurrentTime: 100.0,
+		Duration:    1800.0,
+	}); err != nil {
+		t.Fatalf("SaveListeningSession: %v", err)
+	}
+
+	res, _ := m.Update(login.LoginSuccessMsg{
+		Token:     "jwt-token-e2e",
+		ServerURL: srv.URL,
+		Username:  "alice",
+	})
+	m = res.(Model)
+
+	m = feedCmdChain(m, m.Init(), 4)
+
+	assertScreen(t, m, ScreenHome)
+	if m.sessionID != "" {
+		t.Fatalf("expected restore to skip playback, got session %q", m.sessionID)
+	}
+	if m.err.HasError() {
+		t.Fatal("expected no-track restore to skip without error banner")
+	}
+	if _, err := store.GetLastSession(); err == nil {
+		t.Fatal("expected stale restore session to be cleared")
+	}
+	assertAPICallMade(t, log, http.MethodPost, "/api/items/pod-001/play/pod-001-ep-001")
+	for _, req := range log.get() {
+		if req.Method == http.MethodPost && req.Path == "/api/items/pod-001/play" {
+			t.Fatalf("unexpected fallback book playback call: %s %s", req.Method, req.Path)
+		}
+	}
 }

@@ -50,6 +50,7 @@ type BackMsg struct{}
 type PlaySessionMsg struct {
 	Session   PlaySessionData
 	StreamURL string
+	AuthToken string
 }
 
 // PlaySessionData carries the data returned from ABS when starting a session.
@@ -108,6 +109,20 @@ type BookDetailLoadedMsg struct {
 // If Item is nil, no session was found or the restore failed — the app
 // proceeds to the Home screen as usual.
 type RestoreSessionMsg struct {
-	Item    *abs.LibraryItem
-	Episode *abs.PodcastEpisode
+	Item           *abs.LibraryItem
+	Episode        *abs.PodcastEpisode
+	SavedEpisodeID string
+}
+
+// RestorePlaySessionMsg carries a restore-initiated play session that should
+// launch paused.
+type RestorePlaySessionMsg struct {
+	PlaySessionMsg PlaySessionMsg
+}
+
+// SeriesContinueMsg carries the next book in a series after auto-continue lookup.
+// Empty Item.ID with nil Err means the finished book was the last in the series.
+type SeriesContinueMsg struct {
+	Item abs.LibraryItem
+	Err  error
 }

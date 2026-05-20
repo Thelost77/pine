@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/screens/library"
 )
 
 func TestViewRendersChapterOverlay(t *testing.T) {
@@ -112,6 +113,33 @@ func TestViewHintsAdvertiseSearchOnLibrary(t *testing.T) {
 	hints := m.viewHints()
 	if !containsString(hints, "/ search") {
 		t.Fatalf("library hints should advertise search\n%s", hints)
+	}
+}
+
+func TestViewHintsKeepSeriesVisibleDuringPlayback(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenLibrary
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	m.library = library.New(m.styles, m.client, "lib-books", []abs.Library{{ID: "lib-books", Name: "Books", MediaType: "book"}})
+
+	hints := m.viewHints()
+	if !containsString(hints, "s series") {
+		t.Fatalf("library hints should keep series visible during playback\n%s", hints)
+	}
+	if !containsString(hints, "S sleep") {
+		t.Fatalf("library hints should advertise sleep on S when playback is active\n%s", hints)
+	}
+}
+
+func TestViewHintsHideSeriesOnPodcastLibrary(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenLibrary
+	m.library = library.New(m.styles, m.client, "lib-pod", []abs.Library{{ID: "lib-pod", Name: "Pods", MediaType: "podcast"}})
+
+	hints := m.viewHints()
+	if containsString(hints, "s series") {
+		t.Fatalf("library hints should hide series on podcast libraries\n%s", hints)
 	}
 }
 

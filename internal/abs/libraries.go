@@ -12,9 +12,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Thelost77/pine/internal/logger"
 )
+
+const batchFetchConcurrency = 10
 
 // GetLibraries returns all libraries on the server.
 func (c *Client) GetLibraries(ctx context.Context) ([]Library, error) {
@@ -45,6 +48,102 @@ func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]Perso
 		return nil, fmt.Errorf("decode personalized response: %w", err)
 	}
 	return sections, nil
+}
+
+// recentEpisodeResponse is the ABS response shape for GET /api/libraries/{id}/recent-episodes.
+type recentEpisodeResponse struct {
+	Episodes []recentEpisodeEntry `json:"episodes"`
+	Total    int                  `json:"total"`
+	Limit    int                  `json:"limit"`
+	Page     int                  `json:"page"`
+}
+
+// recentEpisodeEntry represents a single episode in the recent-episodes response.
+type recentEpisodeEntry struct {
+	LibraryItemID string               `json:"libraryItemId"`
+	ID            string               `json:"id"`
+	Index         *int                 `json:"index"`
+	Title         string               `json:"title"`
+	Description   string               `json:"description,omitempty"`
+	Duration      float64              `json:"duration"`
+	PublishedAt   *int64               `json:"publishedAt,omitempty"`
+	AddedAt       int64                `json:"addedAt,omitempty"`
+	Podcast       recentEpisodePodcast `json:"podcast"`
+}
+
+// recentEpisodePodcast contains podcast metadata attached to a recent episode.
+type recentEpisodePodcast struct {
+	Metadata  recentEpisodePodcastMetadata `json:"metadata"`
+	CoverPath string                       `json:"coverPath,omitempty"`
+}
+
+// recentEpisodePodcastMetadata contains podcast-level metadata.
+type recentEpisodePodcastMetadata struct {
+	Title  string `json:"title"`
+	Author string `json:"author,omitempty"`
+}
+
+// GetRecentEpisodes fetches recently added podcast episodes for a library.
+func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit int) ([]LibraryItem, error) {
+	query := url.Values{}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	path := fmt.Sprintf("/api/libraries/%s/recent-episodes", libraryID)
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get recent episodes: %w", err)
+	}
+
+	var resp recentEpisodeResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("decode recent episodes response: %w", err)
+	}
+
+	items := make([]LibraryItem, 0, len(resp.Episodes))
+	for _, ep := range resp.Episodes {
+		authorName := ep.Podcast.Metadata.Author
+		var index *int
+		if ep.Index != nil {
+			index = ep.Index
+		}
+		var publishedAt *int64
+		if ep.PublishedAt != nil {
+			publishedAt = ep.PublishedAt
+		}
+		items = append(items, LibraryItem{
+			ID:        ep.LibraryItemID,
+			MediaType: "podcast",
+			AddedAt:   ep.AddedAt,
+			Media: Media{
+				Metadata: MediaMetadata{
+					Title:      ep.Podcast.Metadata.Title,
+					AuthorName: &authorName,
+				},
+				CoverPath: strPtr(ep.Podcast.CoverPath),
+			},
+			RecentEpisode: &PodcastEpisode{
+				ID:          ep.ID,
+				Index:       index,
+				Title:       ep.Title,
+				Description: ep.Description,
+				Duration:    ep.Duration,
+				PublishedAt: publishedAt,
+				AddedAt:     ep.AddedAt,
+			},
+		})
+	}
+	return items, nil
+}
+
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // GetRecentlyAdded fetches and merges the "recently-added" personalized shelf for the given libraries.
@@ -142,11 +241,15 @@ func (c *Client) SearchPodcastEpisodes(ctx context.Context, libraryID, query str
 			return nil, fmt.Errorf("list podcast library items: %w", err)
 		}
 
-		for _, libraryItem := range resp.Results {
-			item, err := c.GetLibraryItem(ctx, libraryItem.ID)
-			if err != nil {
-				return nil, fmt.Errorf("expand podcast %s: %w", libraryItem.ID, err)
-			}
+		ids := make([]string, len(resp.Results))
+		for i, li := range resp.Results {
+			ids[i] = li.ID
+		}
+		fullItems, err := c.GetLibraryItemsBatch(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range fullItems {
 			for _, episode := range item.Media.Episodes {
 				if !strings.HasPrefix(strings.ToLower(episode.Title), normalized) {
 					continue
@@ -189,6 +292,50 @@ func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*LibraryIte
 	}
 	logger.Info("library item fetched", "itemID", item.ID, "mediaType", item.MediaType, "episodes", len(item.Media.Episodes))
 	return &item, nil
+}
+
+// GetLibraryItemsBatch fetches multiple library items concurrently.
+func (c *Client) GetLibraryItemsBatch(ctx context.Context, ids []string) ([]*LibraryItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]*LibraryItem, len(ids))
+	var firstErr error
+	var errOnce sync.Once
+	sem := make(chan struct{}, batchFetchConcurrency)
+	var wg sync.WaitGroup
+
+	for i, id := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			item, err := c.GetLibraryItem(ctx, id)
+			if err != nil {
+				errOnce.Do(func() {
+					firstErr = fmt.Errorf("expand item %s: %w", id, err)
+					cancel()
+				})
+				return
+			}
+			results[i] = item
+		}()
+	}
+
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 // GetSeries returns series metadata scoped to a library.
@@ -299,34 +446,55 @@ const audioCheckSampleSize = 10
 // FilterAudioLibraries filters out "book" type libraries that contain no audio content
 // (ebooks without audio). Podcasts are always kept. For book libraries, it samples
 // items and checks if any has Duration > 0 to determine if it's an audio library.
+// Audio checks for book libraries run in parallel.
 func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Library, error) {
 	if len(libs) == 0 {
 		return libs, nil
 	}
 
 	logger.Debug("filtering audio libraries", "inputCount", len(libs))
+
+	type checkResult struct {
+		include bool
+		err     error
+	}
+
+	// Run audio checks in parallel for book libraries.
+	// Each goroutine writes to its own index — no mutex needed.
+	checks := make([]checkResult, len(libs))
+	var wg sync.WaitGroup
+	for i, lib := range libs {
+		if lib.MediaType != "book" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, lib Library) {
+			defer wg.Done()
+
+			hasAudio, err := c.libraryHasAudio(ctx, lib.ID)
+			checks[i] = checkResult{include: hasAudio, err: err}
+			if err != nil {
+				logger.Warn("failed to check library for audio", "libraryID", lib.ID, "err", err)
+				return
+			}
+			if !hasAudio {
+				logger.Info("excluding ebook-only library", "libraryID", lib.ID, "name", lib.Name)
+			}
+		}(i, lib)
+	}
+	wg.Wait()
+
 	result := make([]Library, 0, len(libs))
-	for _, lib := range libs {
-		// Always keep podcasts
+	for i, lib := range libs {
 		if lib.MediaType == "podcast" {
 			result = append(result, lib)
 			continue
 		}
-
-		// For "book" type libraries, check if any item has audio
 		if lib.MediaType == "book" {
-			hasAudio, err := c.libraryHasAudio(ctx, lib.ID)
-			if err != nil {
-				logger.Warn("failed to check library for audio", "libraryID", lib.ID, "err", err)
-				// On error, include the library to be safe
+			if checks[i].err != nil || checks[i].include {
 				result = append(result, lib)
-				continue
 			}
-			if hasAudio {
-				result = append(result, lib)
-			} else {
-				logger.Info("excluding ebook-only library", "libraryID", lib.ID, "name", lib.Name)
-			}
+			continue
 		}
 	}
 

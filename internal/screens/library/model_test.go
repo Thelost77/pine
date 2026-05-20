@@ -46,6 +46,22 @@ func TestInitReturnsCommand(t *testing.T) {
 	}
 }
 
+func TestNewStartsWithSkeletonRows(t *testing.T) {
+	m := newTestModel()
+
+	rows := m.list.Items()
+	if len(rows) == 0 {
+		t.Fatal("expected initial skeleton rows")
+	}
+	row, ok := rows[0].(libraryListItem)
+	if !ok {
+		t.Fatalf("expected libraryListItem, got %T", rows[0])
+	}
+	if row.kind != rowKindSkeleton {
+		t.Fatalf("expected first row to be skeleton, got kind %v", row.kind)
+	}
+}
+
 func TestInitNoClientReturnsError(t *testing.T) {
 	m := newTestModelNoClient()
 	cmd := m.Init()
@@ -53,12 +69,25 @@ func TestInitNoClientReturnsError(t *testing.T) {
 		t.Fatal("Init() should return a command even without client")
 	}
 	msg := cmd()
-	lm, ok := msg.(LibraryItemsMsg)
+	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
-		t.Fatalf("expected LibraryItemsMsg, got %T", msg)
+		t.Fatalf("expected tea.BatchMsg, got %T", msg)
 	}
-	if lm.Err == nil {
-		t.Error("expected error for nil client")
+
+	var gotErr bool
+	for _, batchCmd := range batch {
+		batchMsg := batchCmd()
+		lm, ok := batchMsg.(LibraryItemsMsg)
+		if !ok {
+			continue
+		}
+		if lm.Err != nil {
+			gotErr = true
+			break
+		}
+	}
+	if !gotErr {
+		t.Error("expected LibraryItemsMsg error from init batch")
 	}
 }
 
@@ -188,13 +217,13 @@ func TestSKeyEmitsNavigateSeriesListMsg(t *testing.T) {
 	}
 }
 
-func TestViewShowsLoadingWhenEmpty(t *testing.T) {
+func TestViewDoesNotShowLoadingWhenEmpty(t *testing.T) {
 	m := newTestModel()
 	m.loading = true
 
 	view := m.View()
-	if !containsString(view, "Loading") {
-		t.Error("View() should show loading message when loading with no items")
+	if containsString(view, "Loading library") {
+		t.Error("View() should not show loading message")
 	}
 }
 
@@ -367,7 +396,7 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestViewShowsLoadingOnlyWhenNoItems(t *testing.T) {
+func TestViewNeverShowsLoadingMessage(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
 	m.loading = true
@@ -379,7 +408,26 @@ func TestViewShowsLoadingOnlyWhenNoItems(t *testing.T) {
 
 	view := m.View()
 	if containsString(view, "Loading library") {
-		t.Error("View() should not show loading message when items are already displayed")
+		t.Error("View() should not show loading message")
+	}
+}
+
+func TestLoadingRevealShowsSkeletonRows(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+
+	m, _ = m.Update(loadingRevealMsg{generation: m.loadingGen})
+
+	rows := m.list.Items()
+	if len(rows) == 0 {
+		t.Fatal("expected skeleton rows after loading reveal")
+	}
+	row, ok := rows[0].(libraryListItem)
+	if !ok {
+		t.Fatalf("expected libraryListItem, got %T", rows[0])
+	}
+	if row.kind != rowKindSkeleton {
+		t.Fatalf("expected skeleton row, got kind %v", row.kind)
 	}
 }
 
@@ -398,6 +446,49 @@ func TestUpdateDelegatesListKeys(t *testing.T) {
 
 	if after != before+1 {
 		t.Errorf("j key should move cursor from %d to %d, got %d", before, before+1, after)
+	}
+}
+
+func TestLKeyPagesDown(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 8)
+
+	items := makeItems(30)
+	m, _ = m.Update(LibraryItemsMsg{Items: items, Total: 30, Page: 0})
+
+	before := m.list.GlobalIndex()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	after := m.list.GlobalIndex()
+
+	if after <= before {
+		t.Fatalf("expected L to page down from %d, got %d", before, after)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	if m.list.GlobalIndex() >= after {
+		t.Fatalf("expected H to page up from %d, got %d", after, m.list.GlobalIndex())
+	}
+}
+
+func TestLKeyFallsBackToEndAndHToStart(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+
+	items := makeItems(30)
+	m, _ = m.Update(LibraryItemsMsg{Items: items, Total: 30, Page: 0})
+
+	for i := 0; i < 5; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	}
+	if got, want := m.list.GlobalIndex(), len(m.list.Items())-1; got != want {
+		t.Fatalf("L at end should jump to last item: got %d want %d", got, want)
+	}
+
+	for i := 0; i < 5; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	}
+	if got := m.list.GlobalIndex(); got != 0 {
+		t.Fatalf("H at start should jump to first item: got %d want 0", got)
 	}
 }
 
@@ -545,11 +636,30 @@ func TestTabSwitchUsesCachedLibraryItems(t *testing.T) {
 	if !m.Loading() {
 		t.Fatal("expected loading=true while fetching uncached library")
 	}
-	if len(m.Items()) != 0 {
-		t.Fatalf("expected items to be cleared for uncached library loading, got %d", len(m.Items()))
+	if len(m.Items()) != len(firstItems) {
+		t.Fatalf("expected stale items to remain visible while loading, got %d items", len(m.Items()))
 	}
-	if !containsString(m.View(), "Loading library") {
-		t.Fatal("expected loading view when switching to uncached library")
+	if m.Items()[0].ID != firstItems[0].ID {
+		t.Fatalf("first visible item ID = %q, want stale item %q", m.Items()[0].ID, firstItems[0].ID)
+	}
+	if containsString(m.View(), "Loading library") {
+		t.Fatal("expected library view to avoid loading text during switch")
+	}
+
+	m, _ = m.Update(loadingRevealMsg{generation: m.loadingGen})
+	rows := m.list.Items()
+	if len(rows) == 0 {
+		t.Fatal("expected rows after loading reveal")
+	}
+	row, ok := rows[0].(libraryListItem)
+	if !ok {
+		t.Fatalf("expected libraryListItem, got %T", rows[0])
+	}
+	if row.kind != rowKindSkeleton {
+		t.Fatal("expected skeleton rows after delayed reveal on uncached switch")
+	}
+	if _, ok := m.selectedItem(); ok {
+		t.Fatal("expected stale or skeleton rows to be non-selectable while loading")
 	}
 
 	m, _ = m.Update(LibraryItemsMsg{
@@ -615,13 +725,96 @@ func TestConfigureUsesCachedLibraryItems(t *testing.T) {
 	}
 }
 
+func TestConfigureUsesCachedEmptyLibraryResults(t *testing.T) {
+	libs := []abs.Library{
+		{ID: "lib-001", Name: "Books", MediaType: "book"},
+		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+
+	firstItems := makeItems(2)
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     firstItems,
+		Total:     2,
+		Page:      0,
+		LibraryID: "lib-001",
+	})
+
+	m.Configure("lib-002", libs)
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     nil,
+		Total:     0,
+		Page:      0,
+		LibraryID: "lib-002",
+	})
+
+	m.Configure("lib-001", libs)
+	m.Configure("lib-002", libs)
+	if m.Loading() {
+		t.Fatal("expected loading=false when configuring cached empty library")
+	}
+	if len(m.Items()) != 0 {
+		t.Fatalf("items length = %d, want 0", len(m.Items()))
+	}
+}
+
 func TestInitSkipsFetchWhenItemsAlreadyLoaded(t *testing.T) {
 	m := newTestModel()
 	m.items = makeItems(2)
+	m.contentLibrary = m.libraryID
 	m.totalItems = 2
 
 	if cmd := m.Init(); cmd != nil {
 		t.Fatal("expected no init command when items are already loaded")
+	}
+}
+
+func TestInitFetchesWhenConfiguredLibraryDiffersFromVisibleItems(t *testing.T) {
+	libs := []abs.Library{
+		{ID: "lib-001", Name: "Books", MediaType: "book"},
+		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m := New(ui.DefaultStyles(), nil, "lib-001", libs)
+	m.SetSize(80, 24)
+
+	firstItems := makeItems(2)
+	m, _ = m.Update(LibraryItemsMsg{
+		Items:     firstItems,
+		Total:     2,
+		Page:      0,
+		LibraryID: "lib-001",
+	})
+
+	m.Configure("lib-002", libs)
+	if len(m.Items()) != len(firstItems) {
+		t.Fatalf("expected stale items to remain visible, got %d items", len(m.Items()))
+	}
+	if m.contentLibrary != "lib-001" {
+		t.Fatalf("contentLibrary = %q, want lib-001 before fetch", m.contentLibrary)
+	}
+
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("expected init to fetch uncached configured library even with stale items visible")
+	}
+
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", msg)
+	}
+	var gotFetch bool
+	for _, batchCmd := range batch {
+		batchMsg := batchCmd()
+		if lm, ok := batchMsg.(LibraryItemsMsg); ok {
+			if lm.Err != nil {
+				gotFetch = true
+				break
+			}
+		}
+	}
+	if !gotFetch {
+		t.Fatal("expected init batch to include library fetch command")
 	}
 }
 

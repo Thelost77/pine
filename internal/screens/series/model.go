@@ -3,6 +3,7 @@ package series
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
@@ -27,8 +28,10 @@ type BackMsg struct{}
 
 // KeyMap defines series screen bindings.
 type KeyMap struct {
-	Enter key.Binding
-	Back  key.Binding
+	Enter    key.Binding
+	Back     key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
 }
 
 // DefaultKeyMap returns default series bindings.
@@ -41,6 +44,14 @@ func DefaultKeyMap() KeyMap {
 		Back: key.NewBinding(
 			key.WithKeys("esc", "left"),
 			key.WithHelp("esc/left", "back"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("H"),
+			key.WithHelp("H", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("L"),
+			key.WithHelp("L", "page down"),
 		),
 	}
 }
@@ -63,13 +74,7 @@ type Model struct {
 
 // New creates a series screen model.
 func New(styles ui.Styles, client *abs.Client, libraryID, seriesID, currentItemID string) Model {
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(styles.Accent.GetForeground()).
-		BorderForeground(styles.Accent.GetForeground())
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(styles.Muted.GetForeground()).
-		BorderForeground(styles.Accent.GetForeground())
+	delegate := newDelegate(styles, false)
 
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = "Series"
@@ -77,6 +82,7 @@ func New(styles ui.Styles, client *abs.Client, libraryID, seriesID, currentItemI
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
+	l.SetItems(buildSkeletonRows(styles))
 
 	return Model{
 		list:          l,
@@ -104,6 +110,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, nil
 		}
+		m.list.SetDelegate(newDelegate(m.styles, true))
 		m.series = msg.Contents
 		m.list.Title = "Series"
 		if msg.Contents.Series.Name != "" {
@@ -132,6 +139,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return NavigateDetailMsg{Item: sel.item}
 				}
 			}
+		case key.Matches(msg, m.keys.PageDown):
+			m.pageDown()
+			return m, nil
+		case key.Matches(msg, m.keys.PageUp):
+			m.pageUp()
+			return m, nil
 		}
 	}
 
@@ -144,9 +157,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.err != nil {
 		return m.styles.Error.Render(m.err.Error())
-	}
-	if m.loading {
-		return m.styles.Muted.Render("Loading series…")
 	}
 	return m.list.View()
 }
@@ -192,6 +202,53 @@ func (m Model) fetchSeriesCmd() tea.Cmd {
 	}
 }
 
+func (m *Model) pageDown() {
+	before := m.list.GlobalIndex()
+	m.list.NextPage()
+	if m.list.GlobalIndex() == before {
+		m.list.GoToEnd()
+	}
+}
+
+func (m *Model) pageUp() {
+	before := m.list.GlobalIndex()
+	m.list.PrevPage()
+	if m.list.GlobalIndex() == before {
+		m.list.GoToStart()
+	}
+}
+
+func buildSkeletonRows(styles ui.Styles) []list.Item {
+	placeholder := func(width int) string {
+		return styles.Muted.Render(strings.Repeat("-", width))
+	}
+
+	return []list.Item{
+		seriesSkeletonItem{title: placeholder(22), description: placeholder(7)},
+		seriesSkeletonItem{title: placeholder(18), description: placeholder(7)},
+		seriesSkeletonItem{title: placeholder(24), description: placeholder(7)},
+		seriesSkeletonItem{title: placeholder(20), description: placeholder(7)},
+		seriesSkeletonItem{title: placeholder(19), description: placeholder(7)},
+	}
+}
+
+func newDelegate(styles ui.Styles, highlightSelected bool) list.DefaultDelegate {
+	delegate := list.NewDefaultDelegate()
+	if highlightSelected {
+		delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+			Foreground(styles.Accent.GetForeground()).
+			BorderForeground(styles.Accent.GetForeground())
+		delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+			Foreground(styles.Muted.GetForeground()).
+			BorderForeground(styles.Accent.GetForeground())
+		return delegate
+	}
+
+	delegate.Styles.SelectedTitle = delegate.Styles.NormalTitle
+	delegate.Styles.SelectedDesc = delegate.Styles.NormalDesc
+	return delegate
+}
+
 type seriesBookItem struct {
 	item    abs.LibraryItem
 	current bool
@@ -214,4 +271,21 @@ func (i seriesBookItem) Description() string {
 
 func (i seriesBookItem) FilterValue() string {
 	return i.item.Media.Metadata.Title
+}
+
+type seriesSkeletonItem struct {
+	title       string
+	description string
+}
+
+func (i seriesSkeletonItem) Title() string {
+	return i.title
+}
+
+func (i seriesSkeletonItem) Description() string {
+	return i.description
+}
+
+func (i seriesSkeletonItem) FilterValue() string {
+	return ""
 }

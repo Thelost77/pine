@@ -1,7 +1,6 @@
 package home
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -230,12 +229,87 @@ func TestSlashKey_NavigateSearch(t *testing.T) {
 	}
 }
 
+func TestLKeyPagesDown(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 8)
+
+	items := make([]abs.LibraryItem, 0, 5)
+	recent := make([]abs.LibraryItem, 0, 5)
+	for i := 0; i < 5; i++ {
+		items = append(items, abs.LibraryItem{
+			ID:        fmt.Sprintf("item-%d", i),
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: fmt.Sprintf("Book %d", i)}},
+		})
+		recent = append(recent, abs.LibraryItem{
+			ID:        fmt.Sprintf("recent-%d", i),
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: fmt.Sprintf("Recent %d", i)}},
+		})
+	}
+
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: recent})
+
+	before := m.list.GlobalIndex()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	after := m.list.GlobalIndex()
+	if after <= before {
+		t.Fatalf("expected L to page down from %d, got %d", before, after)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	if m.list.GlobalIndex() >= after {
+		t.Fatalf("expected H to page up from %d, got %d", after, m.list.GlobalIndex())
+	}
+}
+
+func TestLKeyFallsBackToEndAndHToStart(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+
+	items := make([]abs.LibraryItem, 0, 10)
+	recent := make([]abs.LibraryItem, 0, 10)
+	for i := 0; i < 10; i++ {
+		items = append(items, abs.LibraryItem{
+			ID:        fmt.Sprintf("item-%d", i),
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: fmt.Sprintf("Book %d", i)}},
+		})
+		recent = append(recent, abs.LibraryItem{
+			ID:        fmt.Sprintf("recent-%d", i),
+			MediaType: "book",
+			Media:     abs.Media{Metadata: abs.MediaMetadata{Title: fmt.Sprintf("Recent %d", i)}},
+		})
+	}
+
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: recent})
+
+	for i := 0; i < 4; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	}
+	lastIndex := len(m.list.Items()) - 1
+	if got := m.list.GlobalIndex(); got != lastIndex {
+		t.Fatalf("L at end should jump to last row: got %d want %d", got, lastIndex)
+	}
+
+	for i := 0; i < 4; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	}
+	if got := m.list.GlobalIndex(); got != 0 {
+		t.Fatalf("H at start should jump to first row: got %d want 0", got)
+	}
+}
+
 func TestView_Loading(t *testing.T) {
 	m := newTestModel()
+	m.SetSize(80, 24)
 	m.loading = true
 	v := m.View()
 	if v == "" {
 		t.Error("expected non-empty view when loading")
+	}
+	if !strings.Contains(v, "Continue Listening") {
+		t.Fatalf("expected title to remain visible while loading, got %q", v)
 	}
 }
 
@@ -271,6 +345,141 @@ func TestView_WithItems(t *testing.T) {
 		if !strings.Contains(v, item.Media.Metadata.Title) {
 			t.Errorf("expected view to contain recently added title %q", item.Media.Metadata.Title)
 		}
+	}
+}
+
+func TestView_LoadingWithItemsKeepsListVisible(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	items := sampleItems()
+	m, _ = m.Update(PersonalizedMsg{Items: items, RecentlyAdded: sampleRecentlyAddedItems()})
+	m.loading = true
+
+	view := m.View()
+	if !strings.Contains(view, items[0].Media.Metadata.Title) {
+		t.Fatalf("expected cached content to stay visible during refresh\n%s", view)
+	}
+}
+
+func TestLoadingRevealShowsSkeletonRows(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m.loading = true
+	m.refreshListRows()
+
+	view := m.View()
+	if !strings.Contains(view, "Recently Added") {
+		t.Fatalf("expected skeleton layout to include Recently Added section\n%s", view)
+	}
+	if !strings.Contains(view, "----------------------") {
+		t.Fatalf("expected skeleton rows in loading view\n%s", view)
+	}
+}
+
+func TestTabSwitchToUncachedLibraryDelaysSkeletons(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	libs := []abs.Library{
+		{ID: "lib-1", Name: "Books", MediaType: "book"},
+		{ID: "lib-2", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m, _ = m.Update(PersonalizedMsg{
+		Items:         sampleItems(),
+		RecentlyAdded: sampleRecentlyAddedItems(),
+		Libraries:     libs,
+		LibraryID:     "lib-1",
+	})
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	if !m.Loading() {
+		t.Fatal("expected loading to be true after switching to uncached library")
+	}
+	if cmd == nil {
+		t.Fatal("expected refresh command after switching libraries")
+	}
+	view := m.View()
+	if !strings.Contains(view, sampleItems()[0].Media.Metadata.Title) {
+		t.Fatalf("expected previous content to remain visible before reveal delay\n%s", view)
+	}
+	if strings.Contains(view, "No items in continue listening") {
+		t.Fatalf("expected previous content instead of empty state\n%s", view)
+	}
+	if strings.Contains(view, "----------------------") {
+		t.Fatalf("expected skeletons to stay hidden before reveal delay\n%s", view)
+	}
+}
+
+func TestTabSwitchToUncachedLibraryShowsLoadingHintAfterRevealDelay(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	libs := []abs.Library{
+		{ID: "lib-1", Name: "Books", MediaType: "book"},
+		{ID: "lib-2", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m, _ = m.Update(PersonalizedMsg{
+		Items:         sampleItems(),
+		RecentlyAdded: sampleRecentlyAddedItems(),
+		Libraries:     libs,
+		LibraryID:     "lib-1",
+	})
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(loadingRevealMsg{generation: m.loadingGen})
+
+	view := m.View()
+	if !strings.Contains(view, "(loading...)") {
+		t.Fatalf("expected loading hint in title after reveal delay\n%s", view)
+	}
+	if !strings.Contains(view, sampleItems()[0].Media.Metadata.Title) {
+		t.Fatalf("expected stale content to remain visible while loading\n%s", view)
+	}
+}
+
+func TestStalePersonalizedMsgDoesNotClearLoadingForCurrentLibrary(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	libs := []abs.Library{
+		{ID: "lib-1", Name: "Books", MediaType: "book"},
+		{ID: "lib-2", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m, _ = m.Update(PersonalizedMsg{
+		Items:         sampleItems(),
+		RecentlyAdded: sampleRecentlyAddedItems(),
+		Libraries:     libs,
+		LibraryID:     "lib-1",
+	})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	if !m.Loading() {
+		t.Fatal("expected loading to be true after switching libraries")
+	}
+
+	m, _ = m.Update(PersonalizedMsg{LibraryID: "lib-1", Items: sampleItems()})
+
+	if !m.Loading() {
+		t.Fatal("stale message should not clear loading for the active library")
+	}
+}
+
+func TestTabSwitchToUncachedLibraryDisablesStaleSelection(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	libs := []abs.Library{
+		{ID: "lib-1", Name: "Books", MediaType: "book"},
+		{ID: "lib-2", Name: "Podcasts", MediaType: "podcast"},
+	}
+	m, _ = m.Update(PersonalizedMsg{
+		Items:         sampleItems(),
+		RecentlyAdded: sampleRecentlyAddedItems(),
+		Libraries:     libs,
+		LibraryID:     "lib-1",
+	})
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("expected selection to be disabled while stale content is shown for another library")
 	}
 }
 
@@ -503,12 +712,24 @@ func TestInit_NilClient(t *testing.T) {
 		t.Fatal("expected a command from Init")
 	}
 	msg := cmd()
-	pm, ok := msg.(PersonalizedMsg)
+	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
-		t.Fatalf("expected PersonalizedMsg, got %T", msg)
+		t.Fatalf("expected BatchMsg, got %T", msg)
 	}
-	if pm.Err == nil {
-		t.Error("expected error when client is nil")
+	var sawPersonalized bool
+	for _, cmd := range batch {
+		if cmd == nil {
+			continue
+		}
+		if pm, ok := cmd().(PersonalizedMsg); ok {
+			sawPersonalized = true
+			if pm.Err == nil {
+				t.Error("expected error when client is nil")
+			}
+		}
+	}
+	if !sawPersonalized {
+		t.Fatal("expected batch to contain PersonalizedMsg command")
 	}
 }
 
@@ -539,43 +760,73 @@ func TestPersonalizedMsg_DedupesRecentlyAddedByTitle(t *testing.T) {
 	}
 }
 
-func TestHydrateRecentlyAddedPodcastsUsesLatestEpisode(t *testing.T) {
+func TestFetchPersonalizedPodcastLibraryUsesRecentEpisodes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/items/pod-1" || r.URL.Query().Get("expanded") != "1" {
-			http.NotFound(w, r)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(abs.LibraryItem{
-			ID:        "pod-1",
-			LibraryID: "lib-pod",
-			MediaType: "podcast",
-			Media: abs.Media{
-				Metadata: abs.MediaMetadata{Title: "Podcast Show"},
-				Episodes: []abs.PodcastEpisode{
-					{ID: "ep-old", Title: "Older", AddedAt: 10, PublishedAt: 10, Index: 1, Duration: 1200},
-					{ID: "ep-new", Title: "Newer", AddedAt: 20, PublishedAt: 20, Index: 2, Duration: 1800},
+		switch r.URL.Path {
+		case "/api/libraries":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"libraries": []abs.Library{
+					{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"},
 				},
-			},
-		})
+			})
+		case "/api/libraries/lib-pod/personalized":
+			_ = json.NewEncoder(w).Encode([]abs.PersonalizedResponse{
+				{ID: "continue-listening", Entities: nil},
+				{ID: "recently-added", Entities: []abs.LibraryItem{
+					{ID: "pod-1", MediaType: "podcast", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Old Show"}}},
+				}},
+			})
+		case "/api/libraries/lib-pod/recent-episodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"episodes": []map[string]any{
+					{
+						"libraryItemId": "pod-1",
+						"id":            "ep-new",
+						"title":         "Latest Episode",
+						"duration":      1800.0,
+						"addedAt":       20,
+						"podcast": map[string]any{
+							"metadata": map[string]any{
+								"title":  "My Podcast",
+								"author": "Host",
+							},
+						},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer srv.Close()
 
 	client := abs.NewClient(srv.URL, "tok")
-	items := []abs.LibraryItem{{
-		ID:        "pod-1",
-		MediaType: "podcast",
-		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast Show"}},
-	}}
+	styles := ui.DefaultStyles()
+	m := New(styles, client)
+	m.SetSize(80, 24)
+	m.libraries = []abs.Library{{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"}}
+	m.selectedLibrary = 0
 
-	hydrated := hydrateRecentlyAddedPodcasts(context.Background(), client, items)
-	if hydrated[0].RecentEpisode == nil {
-		t.Fatal("expected recent episode to be hydrated")
+	cmd := m.fetchPersonalizedCmd()
+	msg := cmd()
+	pMsg, ok := msg.(PersonalizedMsg)
+	if !ok {
+		t.Fatalf("expected PersonalizedMsg, got %T", msg)
 	}
-	if hydrated[0].RecentEpisode.ID != "ep-new" {
-		t.Fatalf("expected newest episode to be selected, got %q", hydrated[0].RecentEpisode.ID)
+	if pMsg.Err != nil {
+		t.Fatalf("unexpected error: %v", pMsg.Err)
 	}
-	if itemTitle(hydrated[0]) != "Newer" {
-		t.Fatalf("expected item title to use hydrated episode title, got %q", itemTitle(hydrated[0]))
+	if len(pMsg.RecentlyAdded) != 1 {
+		t.Fatalf("expected 1 recently added item, got %d", len(pMsg.RecentlyAdded))
+	}
+	if pMsg.RecentlyAdded[0].RecentEpisode == nil {
+		t.Fatal("expected RecentEpisode to be set")
+	}
+	if pMsg.RecentlyAdded[0].RecentEpisode.ID != "ep-new" {
+		t.Fatalf("expected episode ID ep-new, got %q", pMsg.RecentlyAdded[0].RecentEpisode.ID)
+	}
+	if pMsg.RecentlyAdded[0].Media.Metadata.Title != "My Podcast" {
+		t.Fatalf("expected podcast title 'My Podcast', got %q", pMsg.RecentlyAdded[0].Media.Metadata.Title)
 	}
 }

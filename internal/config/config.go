@@ -81,7 +81,7 @@ func Default() Config {
 			VolumeDown:   "[",
 			NextChapter:  "n",
 			PrevChapter:  "N",
-			SleepTimer:   "s",
+			SleepTimer:   "S",
 			Back:         "esc",
 		},
 	}

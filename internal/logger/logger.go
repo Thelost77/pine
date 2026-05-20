@@ -44,7 +44,7 @@ func Init() func() {
 		instance = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 		}))
-		cleanup = func() { f.Close() }
+		cleanup = func() { _ = f.Close() }
 	})
 	if cleanup == nil {
 		cleanup = func() {}

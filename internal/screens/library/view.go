@@ -2,10 +2,6 @@ package library
 
 // View renders the library screen.
 func (m Model) View() string {
-	if m.loading && len(m.items) == 0 {
-		return m.styles.Muted.Render("Loading library…")
-	}
-
 	if m.err != nil {
 		return m.styles.Error.Render("Error: " + m.err.Error())
 	}
