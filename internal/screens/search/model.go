@@ -281,11 +281,15 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 	if !ok {
 		return nil
 	}
+	payload := ""
+	if sel.Item.MediaType == "series" {
+		payload = "series"
+	}
 	items := []components.PaletteItem{
 		{Label: "Context Actions", IsHeader: true},
-		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item, Payload: payload},
 	}
-	if sel.Item.MediaType != "podcast" {
+	if sel.Item.MediaType == "book" {
 		items = append(items,
 			components.PaletteItem{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
 			components.PaletteItem{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},

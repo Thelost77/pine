@@ -1172,6 +1172,10 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		}
 		if data != nil {
 			if item, ok := data.(abs.LibraryItem); ok {
+				if item.MediaType == "series" {
+					m.series = series.New(m.styles, m.client, libraryID, itemID, "")
+					return m.navigate(ScreenSeries)
+				}
 				m.detail = detail.New(m.styles, item)
 				m2, navCmd := m.navigate(ScreenDetail)
 				return m2, tea.Batch(m.detailLoadCmds(item, navCmd)...)
@@ -1289,6 +1293,10 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	case components.ActionContentNavigate:
 		if data != nil {
 			if item, ok := data.(abs.LibraryItem); ok {
+				if item.MediaType == "series" {
+					m.series = series.New(m.styles, m.client, libraryID, itemID, "")
+					return m.navigate(ScreenSeries)
+				}
 				m.detail = detail.New(m.styles, item)
 				m2, navCmd := m.navigate(ScreenDetail)
 				return m2, tea.Batch(m.detailLoadCmds(item, navCmd)...)
