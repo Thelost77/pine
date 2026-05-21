@@ -202,33 +202,6 @@ func TestOKey_NavigateLibrary(t *testing.T) {
 	}
 }
 
-func TestSlashKey_NavigateSearch(t *testing.T) {
-	m := newTestModel()
-	m, _ = m.Update(PersonalizedMsg{
-		Items: sampleItems(),
-		Libraries: []abs.Library{
-			{ID: "lib-books", Name: "Books", MediaType: "book"},
-		},
-	})
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-
-	if cmd == nil {
-		t.Fatal("expected a command from / key")
-	}
-	msg := cmd()
-	searchMsg, ok := msg.(NavigateSearchMsg)
-	if !ok {
-		t.Errorf("expected NavigateSearchMsg, got %T", msg)
-	}
-	if searchMsg.LibraryID != "lib-books" {
-		t.Fatalf("libraryID = %q, want lib-books", searchMsg.LibraryID)
-	}
-	if searchMsg.LibraryMediaType != "book" {
-		t.Fatalf("libraryMediaType = %q, want book", searchMsg.LibraryMediaType)
-	}
-}
-
 func TestLKeyPagesDown(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 8)

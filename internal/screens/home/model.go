@@ -75,7 +75,6 @@ type KeyMap struct {
 	Enter      key.Binding
 	Back       key.Binding
 	Library    key.Binding
-	Search     key.Binding
 	NextLib    key.Binding
 	PageUp     key.Binding
 	PageDown   key.Binding
@@ -102,10 +101,6 @@ func DefaultKeyMap() KeyMap {
 		Library: key.NewBinding(
 			key.WithKeys("o"),
 			key.WithHelp("o", "open library"),
-		),
-		Search: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "search"),
 		),
 		NextLib: key.NewBinding(
 			key.WithKeys("tab"),
@@ -279,12 +274,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return NavigateLibraryMsg{LibraryID: libID, Libraries: libs}
 			}
-		case key.Matches(msg, m.keys.Search):
-			libID := m.SelectedLibraryID()
-			libMediaType := m.SelectedLibraryMediaType()
-			return m, func() tea.Msg {
-				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
-			}
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
 				// Cache current library's items
@@ -431,12 +420,6 @@ type PlayNextMsg struct {
 type NavigateLibraryMsg struct {
 	LibraryID string
 	Libraries []abs.Library
-}
-
-// NavigateSearchMsg requests navigation to the search screen.
-type NavigateSearchMsg struct {
-	LibraryID        string
-	LibraryMediaType string
 }
 
 // GoBackMsg requests navigating back from the home screen.

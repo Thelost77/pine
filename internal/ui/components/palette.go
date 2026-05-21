@@ -25,7 +25,6 @@ const (
 	ActionNone PaletteAction = iota
 	ActionGoHome
 	ActionGoLibrary
-	ActionGoSearch
 	ActionGoSeriesList
 	ActionTogglePlay
 	ActionNextChapter

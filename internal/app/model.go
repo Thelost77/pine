@@ -41,7 +41,6 @@ type Model struct {
 	home        home.Model
 	library     library.Model
 	detail      detail.Model
-	search      search.Model
 	seriesList  serieslist.Model
 	searchCache *search.Cache
 	series      series.Model
@@ -115,7 +114,6 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		home:        home.New(styles, client),
 		library:     library.New(styles, client, "", nil),
 		searchCache: searchCache,
-		search:      search.New(styles, searchCache, "", ""),
 		seriesList:  serieslist.New(styles, client, "", ""),
 		series:      series.New(styles, client, "", "", ""),
 		player:      player.NewModel(mpv, cfg, styles),
@@ -286,10 +284,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Error("app error", "err", msg.Err, "screen", m.screen)
 		if components.IsUnauthorized(msg.Err) {
 			logger.Warn("401 unauthorized, redirecting to login")
-			m.client = nil
-			m.searchCache = search.NewCache(nil)
-			m.search = search.New(m.styles, m.searchCache, "", "")
-			m.screen = ScreenLogin
+		m.client = nil
+		m.searchCache = search.NewCache(nil)
+		m.screen = ScreenLogin
 			m.backStack = nil
 			m.login = login.New(m.styles)
 			return m, m.login.Init()
@@ -327,7 +324,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.home = home.New(m.styles, m.client)
 		m.library = library.New(m.styles, m.client, "", nil)
 		m.searchCache = search.NewCache(m.client)
-		m.search = search.New(m.styles, m.searchCache, "", "")
 		m.seriesList = serieslist.New(m.styles, m.client, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
 		m.login, _ = m.login.Update(msg)
@@ -376,10 +372,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.library.Configure(msg.LibraryID, msg.Libraries)
 		return m.navigate(ScreenLibrary)
 
-	case home.NavigateSearchMsg:
-		m.search = search.New(m.styles, m.searchCache, msg.LibraryID, msg.LibraryMediaType)
-		return m.navigate(ScreenSearch)
-
 	case home.GoBackMsg:
 		if len(m.backStack) > 0 {
 			return m.back()
@@ -399,14 +391,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
-	case search.NavigateDetailMsg:
-		m.detail = detail.New(m.styles, msg.Item)
-		m, navCmd := m.navigate(ScreenDetail)
-		return m, tea.Batch(m.detailLoadCmds(msg.Item, navCmd)...)
-
-	case search.BackMsg:
-		return m.back()
-
 	case library.LibraryItemsMsg:
 		var cmd tea.Cmd
 		m.library, cmd = m.library.Update(msg)
@@ -422,10 +406,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.back()
 		}
 		return m, nil
-
-	case library.NavigateSearchMsg:
-		m.search = search.New(m.styles, m.searchCache, msg.LibraryID, msg.LibraryMediaType)
-		return m.navigate(ScreenSearch)
 
 	case library.NavigateSeriesListMsg:
 		m.seriesList = serieslist.New(m.styles, m.client, msg.LibraryID, msg.LibraryName)
@@ -732,9 +712,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openGlobalPalette()
 			return m, nil
 		}
-		if m.screen == ScreenSearch {
-			return m.updateScreen(msg)
-		}
 		if key.Matches(msg, m.keys.ChapterOverlay) {
 			if m.canOpenChapterOverlay() {
 				m.openChapterOverlay()
@@ -750,7 +727,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		// Global back: esc/left goes back but never quits.
-		if m.screen != ScreenLogin && m.screen != ScreenSearch {
+		if m.screen != ScreenLogin {
 			if key.Matches(msg, m.keys.Back) {
 				if len(m.backStack) > 0 {
 					return m.back()
@@ -929,7 +906,6 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	logger.Warn("401 unauthorized, redirecting to login")
 	m.client = nil
 	m.searchCache = search.NewCache(nil)
-	m.search = search.New(m.styles, m.searchCache, "", "")
 	m.screen = ScreenLogin
 	m.backStack = nil
 	m.login = login.New(m.styles)
@@ -990,7 +966,6 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 		{Label: "Navigation", IsHeader: true},
 		{Label: "Go Home", Action: components.ActionGoHome},
 		{Label: "Go Library", Action: components.ActionGoLibrary},
-		{Label: "Go Search", Action: components.ActionGoSearch},
 		{Label: "Go Series List", Action: components.ActionGoSeriesList},
 	}
 
@@ -1042,8 +1017,6 @@ func (m Model) buildContextPaletteItems() []components.PaletteItem {
 		items = getPaletteActions(&m.library)
 	case ScreenDetail:
 		items = getPaletteActions(&m.detail)
-	case ScreenSearch:
-		items = getPaletteActions(&m.search)
 	case ScreenSeriesList:
 		items = getPaletteActions(&m.seriesList)
 	case ScreenSeries:
@@ -1085,9 +1058,6 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		return m.navigateWithCleanup(ScreenHome)
 	case components.ActionGoLibrary:
 		return m.navigateWithCleanup(ScreenLibrary)
-	case components.ActionGoSearch:
-		m.search = search.New(m.styles, m.searchCache, "", "")
-		return m.navigate(ScreenSearch)
 	case components.ActionGoSeriesList:
 		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
 		return m.navigate(ScreenSeriesList)

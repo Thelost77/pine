@@ -10,7 +10,6 @@ const (
 	ScreenHome
 	ScreenLibrary
 	ScreenDetail
-	ScreenSearch
 	ScreenSeriesList
 	ScreenSeries
 )
@@ -26,8 +25,6 @@ func (s Screen) String() string {
 		return "Library"
 	case ScreenDetail:
 		return "Detail"
-	case ScreenSearch:
-		return "Search"
 	case ScreenSeriesList:
 		return "Series"
 	case ScreenSeries:

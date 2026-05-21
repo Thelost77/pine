@@ -138,8 +138,6 @@ func (m Model) viewScreen() string {
 		return m.library.View()
 	case ScreenDetail:
 		return m.detail.View()
-	case ScreenSearch:
-		return m.search.View()
 	case ScreenSeriesList:
 		return m.seriesList.View()
 	case ScreenSeries:
@@ -165,7 +163,6 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("a", "queue"))
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("o", "library"))
-		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("tab", "switch lib"))
 	case ScreenLibrary:
 		parts = append(parts, key("→/enter", "open"))
@@ -173,7 +170,6 @@ func (m Model) viewHints() string {
 		if m.library.SelectedLibraryMediaType() == "book" {
 			parts = append(parts, key("s", "series"))
 		}
-		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenDetail:
 		parts = append(parts, key("enter/p", "play"))
@@ -182,9 +178,6 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("tab", "focus"))
 		parts = append(parts, key("←/esc", "back"))
-	case ScreenSearch:
-		parts = append(parts, key("enter", "open"))
-		parts = append(parts, key("esc", "back"))
 	case ScreenSeriesList:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("←/esc", "back"))

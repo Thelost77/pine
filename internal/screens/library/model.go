@@ -55,12 +55,6 @@ type NavigateDetailMsg struct {
 	Item abs.LibraryItem
 }
 
-// NavigateSearchMsg requests navigation to the search screen for the current library.
-type NavigateSearchMsg struct {
-	LibraryID        string
-	LibraryMediaType string
-}
-
 // NavigateSeriesListMsg requests navigation to the current library's series browser.
 type NavigateSeriesListMsg struct {
 	LibraryID   string
@@ -74,7 +68,6 @@ type KeyMap struct {
 	NextLib  key.Binding
 	PageUp   key.Binding
 	PageDown key.Binding
-	Search   key.Binding
 	Series   key.Binding
 	Select   key.Binding
 }
@@ -101,10 +94,6 @@ func DefaultKeyMap() KeyMap {
 		PageDown: key.NewBinding(
 			key.WithKeys("L"),
 			key.WithHelp("L", "page down"),
-		),
-		Search: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "search"),
 		),
 		Series: key.NewBinding(
 			key.WithKeys("s"),
@@ -294,12 +283,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Back):
 			return m, func() tea.Msg { return GoBackMsg{} }
-		case key.Matches(msg, m.keys.Search):
-			libID := m.libraryID
-			libMediaType := m.SelectedLibraryMediaType()
-			return m, func() tea.Msg {
-				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
-			}
 		case key.Matches(msg, m.keys.Series):
 			if m.SelectedLibraryMediaType() == "book" {
 				libID := m.libraryID

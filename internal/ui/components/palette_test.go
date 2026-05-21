@@ -381,7 +381,7 @@ func TestPaletteViewStaticHeight(t *testing.T) {
 		p.Open([]PaletteItem{
 			{Label: "Item 1", Action: ActionGoHome},
 			{Label: "Item 2", Action: ActionGoLibrary},
-			{Label: "Item 3", Action: ActionGoSearch},
+			{Label: "Item 3", Action: ActionGoSeriesList},
 			{Label: "Item 4", Action: ActionShowQueue},
 			{Label: "Item 5", Action: ActionClearQueue},
 		}, nil)
@@ -442,7 +442,7 @@ func TestPaletteTruncationNoWrapping(t *testing.T) {
 	p2.Open([]PaletteItem{
 		{Label: "Short 1", Action: ActionGoHome},
 		{Label: "Short 2", Action: ActionGoLibrary},
-		{Label: "Short 3", Action: ActionGoSearch},
+		{Label: "Short 3", Action: ActionGoSeriesList},
 	}, func(query string) []PaletteItem {
 		return []PaletteItem{
 			{Label: "Search: " + longTitle, Action: ActionContentNavigate},
