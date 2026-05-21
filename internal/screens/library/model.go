@@ -466,6 +466,17 @@ func (m Model) selectedLibraryName() string {
 	return ""
 }
 
+// SelectedLibraryID returns the ID of the currently selected library, or empty string.
+func (m Model) SelectedLibraryID() string {
+	if m.libraryID != "" {
+		return m.libraryID
+	}
+	if len(m.libraries) > 0 && m.selectedLibrary < len(m.libraries) {
+		return m.libraries[m.selectedLibrary].ID
+	}
+	return ""
+}
+
 // updateListTitle updates the list title to reflect the selected library.
 func (m *Model) updateListTitle() {
 	if len(m.libraries) > 1 && m.selectedLibrary < len(m.libraries) {

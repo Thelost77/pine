@@ -941,8 +941,7 @@ func (m Model) contentSearchFunc() components.SearchFunc {
 		if m.searchCache == nil {
 			return nil
 		}
-		libID := m.home.SelectedLibraryID()
-		libMediaType := m.home.SelectedLibraryMediaType()
+		libID, libMediaType := m.currentLibraryForSearch()
 		if libID == "" {
 			return nil
 		}
@@ -967,6 +966,23 @@ func (m Model) contentSearchFunc() components.SearchFunc {
 			})
 		}
 		return items
+	}
+}
+
+// currentLibraryForSearch returns the library ID and media type that should be
+// searched based on the active screen. This ensures the palette searches the
+// library the user is currently browsing, not just the home screen's library.
+func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
+	switch m.screen {
+	case ScreenLibrary:
+		return m.library.SelectedLibraryID(), m.library.SelectedLibraryMediaType()
+	case ScreenSeriesList:
+		return m.seriesList.SelectedLibraryID(), "book"
+	case ScreenHome:
+		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
+	default:
+		// Fallback to home for detail/series screens where the user arrived from a library context
+		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
 	}
 }
 

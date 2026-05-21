@@ -232,6 +232,11 @@ func (i seriesListItem) FilterValue() string {
 	return i.series.Name
 }
 
+// SelectedLibraryID returns the ID of the library being browsed.
+func (m Model) SelectedLibraryID() string {
+	return m.libraryID
+}
+
 func (m Model) SelectedPaletteActions() []components.PaletteItem {
 	sel, ok := m.list.SelectedItem().(seriesListItem)
 	if !ok {
