@@ -66,6 +66,7 @@ func (m *Model) propagateSize() {
 	m.search.SetSize(m.width, sh)
 	m.seriesList.SetSize(m.width, sh)
 	m.series.SetSize(m.width, sh)
+	m.palette.SetSize(m.width, m.height)
 }
 
 // initScreen returns the Init command for a given screen.

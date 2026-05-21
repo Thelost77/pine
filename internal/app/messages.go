@@ -126,3 +126,7 @@ type SeriesContinueMsg struct {
 	Item abs.LibraryItem
 	Err  error
 }
+
+// PrewarmDoneMsg is sent after cache pre-warming completes. No action needed,
+// just used to keep the command chain alive.
+type PrewarmDoneMsg struct{}

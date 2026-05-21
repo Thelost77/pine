@@ -6,6 +6,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -676,4 +677,50 @@ func (m Model) headerHeight() int {
 		lines++ // progress bar line
 	}
 	return lines
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	item := m.Item()
+	if item.ID == "" {
+		return nil
+	}
+
+	targetItem, targetEpisode, targetOk := m.queueTarget()
+	if !targetOk && item.MediaType != "podcast" {
+		targetItem = item
+	}
+
+	var items []components.PaletteItem
+
+	if item.MediaType == "book" || targetOk {
+		entry := AddToQueueCmd{
+			Item:    targetItem,
+			Episode: targetEpisode,
+		}
+
+		items = []components.PaletteItem{
+			{Label: "Context Actions", IsHeader: true},
+			{Label: "Play", Action: components.ActionPlayDirect, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+			{Label: "Add Bookmark", Action: components.ActionAddBookmark, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+			{Label: "Add to Queue", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+			{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+			{Label: "Mark Finished", Action: components.ActionMarkFinished, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+		}
+	}
+
+	if m.hasSeries() {
+		if len(items) == 0 {
+			items = append(items, components.PaletteItem{Label: "Context Actions", IsHeader: true})
+		}
+		items = append(items,
+			components.PaletteItem{
+				Label:     "Go to Series",
+				Action:    components.ActionGoToSeries,
+				LibraryID: item.LibraryID,
+				ItemID:    item.Media.Metadata.Series.ID,
+				Payload:   item.ID,
+			},
+		)
+	}
+	return items
 }

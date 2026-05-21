@@ -7,6 +7,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -288,4 +289,17 @@ func (i seriesSkeletonItem) Description() string {
 
 func (i seriesSkeletonItem) FilterValue() string {
 	return ""
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	sel, ok := m.list.SelectedItem().(seriesBookItem)
+	if !ok {
+		return nil
+	}
+	return []components.PaletteItem{
+		{Label: "Context Actions", IsHeader: true},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: m.libraryID, ItemID: sel.item.ID, Data: sel.item},
+		{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: m.libraryID, ItemID: sel.item.ID, Data: sel.item},
+		{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: m.libraryID, ItemID: sel.item.ID, Data: sel.item},
+	}
 }

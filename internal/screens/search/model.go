@@ -7,6 +7,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -273,4 +274,22 @@ func searchPlaceholder(libraryMediaType string) string {
 		return "Search episodes…"
 	}
 	return "Search audiobooks…"
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	sel, ok := m.list.SelectedItem().(ui.ListItem)
+	if !ok {
+		return nil
+	}
+	items := []components.PaletteItem{
+		{Label: "Context Actions", IsHeader: true},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+	}
+	if sel.Item.MediaType != "podcast" {
+		items = append(items,
+			components.PaletteItem{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+			components.PaletteItem{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+		)
+	}
+	return items
 }

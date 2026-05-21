@@ -8,6 +8,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -599,4 +600,27 @@ func (m Model) Page() int {
 // TotalItems returns the total number of items available.
 func (m Model) TotalItems() int {
 	return m.totalItems
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	sel, ok := m.list.SelectedItem().(ui.ListItem)
+	if !ok {
+		return nil
+	}
+	items := []components.PaletteItem{
+		{Label: "Context Actions", IsHeader: true},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+	}
+	if sel.Item.MediaType != "podcast" {
+		items = append(items,
+			components.PaletteItem{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+			components.PaletteItem{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+		)
+	}
+	if m.SelectedLibraryMediaType() == "book" {
+		items = append(items,
+			components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries},
+		)
+	}
+	return items
 }

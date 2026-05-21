@@ -9,6 +9,7 @@ import (
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -692,8 +693,11 @@ func (m Model) selectedQueueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool
 	if !ok {
 		return abs.LibraryItem{}, nil, false
 	}
-	if item.MediaType == "podcast" && item.RecentEpisode != nil {
-		return item, cloneEpisode(item.RecentEpisode), true
+	if item.MediaType == "podcast" {
+		if item.RecentEpisode != nil {
+			return item, cloneEpisode(item.RecentEpisode), true
+		}
+		return abs.LibraryItem{}, nil, false
 	}
 	return item, nil, true
 }
@@ -754,4 +758,18 @@ func (m Model) Loading() bool {
 // Error returns the last error, if any.
 func (m Model) Error() error {
 	return m.err
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	targetItem, targetEpisode, targetOk := m.selectedQueueTarget()
+	if !targetOk {
+		return nil
+	}
+	items := []components.PaletteItem{
+		{Label: "Context Actions", IsHeader: true},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: targetItem},
+		{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: AddToQueueMsg{Item: targetItem, Episode: targetEpisode}},
+		{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: PlayNextMsg{Item: targetItem, Episode: targetEpisode}},
+	}
+	return items
 }

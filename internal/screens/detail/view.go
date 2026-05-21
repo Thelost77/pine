@@ -115,9 +115,35 @@ func (m Model) buildContent() string {
 		sections = append(sections, epLabel)
 		for i, ep := range m.episodes {
 			dur := ui.FormatDuration(ep.Duration)
-			line := fmt.Sprintf("  %d. %s  %s", i+1, ep.Title, m.styles.Muted.Render("("+dur+")"))
+			durStr := m.styles.Muted.Render("("+dur+")")
+			
+			title := ep.Title
+			if m.width > 0 {
+				prefix := fmt.Sprintf("  %d. ", i+1)
+				suffix := fmt.Sprintf("  (%s)", dur)
+				prefWidth := lipgloss.Width(prefix)
+				suffWidth := lipgloss.Width(suffix)
+				maxTitleWidth := m.width - prefWidth - suffWidth
+				if maxTitleWidth > 0 {
+					title = truncate(ep.Title, maxTitleWidth)
+				}
+			}
+			line := fmt.Sprintf("  %d. %s  %s", i+1, title, durStr)
+			
 			if m.focusEpisodes && i == m.selectedEpisode {
-				line = m.styles.Selected.Render(fmt.Sprintf("▶ %d. %s  (%s)", i+1, ep.Title, dur))
+				titleSel := ep.Title
+				if m.width > 0 {
+					prefix := fmt.Sprintf("▶ %d. ", i+1)
+					suffix := fmt.Sprintf("  (%s)", dur)
+					prefWidth := lipgloss.Width(prefix)
+					suffWidth := lipgloss.Width(suffix)
+					// m.styles.Selected adds 1 padding left, 1 padding right, so it consumes 2 extra cells of width.
+					maxTitleWidth := m.width - 2 - prefWidth - suffWidth
+					if maxTitleWidth > 0 {
+						titleSel = truncate(ep.Title, maxTitleWidth)
+					}
+				}
+				line = m.styles.Selected.Render(fmt.Sprintf("▶ %d. %s  (%s)", i+1, titleSel, dur))
 			}
 			sections = append(sections, line)
 		}
@@ -151,9 +177,30 @@ func (m Model) buildContent() string {
 					}
 					continue
 				}
-				line := fmt.Sprintf("  🔖 %s  %s", ts, bm.Title)
+				
+				title := bm.Title
+				if m.width > 0 {
+					prefix := fmt.Sprintf("  🔖 %s  ", ts)
+					prefWidth := lipgloss.Width(prefix)
+					maxTitleWidth := m.width - prefWidth
+					if maxTitleWidth > 0 {
+						title = truncate(bm.Title, maxTitleWidth)
+					}
+				}
+				line := fmt.Sprintf("  🔖 %s  %s", ts, title)
+				
 				if m.focusBookmarks && i == m.selectedBookmark {
-					line = m.styles.Selected.Render(fmt.Sprintf("🔖 %s  %s", ts, bm.Title))
+					titleSel := bm.Title
+					if m.width > 0 {
+						prefix := fmt.Sprintf("🔖 %s  ", ts)
+						prefWidth := lipgloss.Width(prefix)
+						// m.styles.Selected adds 1 padding left, 1 padding right, so it consumes 2 extra cells of width.
+						maxTitleWidth := m.width - 2 - prefWidth
+						if maxTitleWidth > 0 {
+							titleSel = truncate(bm.Title, maxTitleWidth)
+						}
+					}
+					line = m.styles.Selected.Render(fmt.Sprintf("🔖 %s  %s", ts, titleSel))
 				}
 				sections = append(sections, line)
 			}
@@ -259,4 +306,28 @@ func stripMarkdown(s string) string {
 	s = markdownBoldRe.ReplaceAllString(s, "$1")
 	s = markdownItalRe.ReplaceAllString(s, "$1$2")
 	return s
+}
+
+func truncate(s string, maxWidth int) string {
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	ellipsis := "..."
+	if maxWidth <= 3 {
+		return ellipsis[:max(0, maxWidth)]
+	}
+	
+	var sb strings.Builder
+	currentWidth := 0
+	target := maxWidth - 3
+	for _, r := range s {
+		w := lipgloss.Width(string(r))
+		if currentWidth+w > target {
+			break
+		}
+		sb.WriteRune(r)
+		currentWidth += w
+	}
+	sb.WriteString(ellipsis)
+	return sb.String()
 }

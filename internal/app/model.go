@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 const headerHeight = 2
 const errorBannerHeight = 1
 const playerFooterHeight = 1
+const hintsBarHeight = 1
 const syncInterval = 30 * time.Second
 
 // Model is the root application model that manages screen routing.
@@ -84,6 +86,8 @@ type Model struct {
 	program     *tea.Program
 	mprisState  *MprisState
 
+	palette components.Palette
+
 	lastPlayedTitle  string
 	lastPlayedItemID string
 }
@@ -98,6 +102,8 @@ func New(cfg config.Config, store *db.Store, client *abs.Client) Model {
 func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv player.Player) Model {
 	styles := ui.NewStyles(cfg.Theme)
 	searchCache := search.NewCache(client)
+	palette := components.NewPalette()
+	palette.SetStyles(styles)
 	initialScreen := ScreenLogin
 	if client != nil {
 		initialScreen = ScreenHome
@@ -122,6 +128,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		client:      client,
 		mpv:         mpv,
 		mprisState:  &MprisState{},
+		palette:     palette,
 	}
 }
 
@@ -328,7 +335,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenHome
 		m.propagateSize()
 		cmd := m.initScreen(ScreenHome)
-		return m, cmd
+		cmds := []tea.Cmd{cmd, m.prewarmCacheCmd()}
+		return m, tea.Batch(cmds...)
 
 	case home.NavigateDetailMsg:
 		logger.Info("navigate to detail", "itemID", msg.Item.ID, "mediaType", msg.Item.MediaType, "title", msg.Item.Media.Metadata.Title)
@@ -381,7 +389,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case home.PersonalizedMsg:
 		var cmd tea.Cmd
 		m.home, cmd = m.home.Update(msg)
-		return m, cmd
+		cmds := []tea.Cmd{}
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		cmds = append(cmds, m.prewarmCacheCmd())
+		if len(cmds) == 1 {
+			return m, cmds[0]
+		}
+		return m, tea.Batch(cmds...)
 
 	case search.NavigateDetailMsg:
 		m.detail = detail.New(m.styles, msg.Item)
@@ -602,6 +618,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PlaybackStoppedMsg:
 		return m, nil
 
+	case PrewarmDoneMsg:
+		return m, nil
+
 	case SleepTimerExpiredMsg:
 		if m.isPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
 			logger.Info("sleep timer expired, stopping playback")
@@ -659,6 +678,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.palette.Visible() {
+			cmd, handled := m.palette.Update(msg)
+			if !m.palette.Visible() {
+				if action, payload, libID, itemID, data := m.palette.SelectedAction(); action != components.ActionNone {
+					m.palette.ClearSelection()
+					return m.handlePaletteAction(action, payload, libID, itemID, data)
+				}
+				return m, nil
+			}
+			if handled {
+				return m, cmd
+			}
+			return m.updateScreen(msg)
+		}
 		if m.chapterOverlayVisible {
 			if key.Matches(msg, m.keys.Back) {
 				m.closeChapterOverlay()
@@ -693,6 +726,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.err.HasError() {
 			m.err.Dismiss()
 			m.propagateSize()
+			return m, nil
+		}
+		if key.Matches(msg, m.keys.GlobalPalette) {
+			m.openGlobalPalette()
 			return m, nil
 		}
 		if m.screen == ScreenSearch {
@@ -899,5 +936,455 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	cmd := m.login.Init()
 	m.propagateSize()
 	return m, cmd, true
+}
+
+func (m *Model) openGlobalPalette() {
+	playerItems, navItems := m.buildStaticPaletteItems()
+	contextItems := m.buildContextPaletteItems()
+
+	items := playerItems
+	if len(contextItems) > 0 {
+		items = append(items, contextItems...)
+	}
+	items = append(items, navItems...)
+	m.palette.Open(items, m.contentSearchFunc())
+}
+
+func (m Model) contentSearchFunc() components.SearchFunc {
+	return func(query string) []components.PaletteItem {
+		if m.searchCache == nil {
+			return nil
+		}
+		libID := m.home.SelectedLibraryID()
+		libMediaType := m.home.SelectedLibraryMediaType()
+		if libID == "" {
+			return nil
+		}
+		ctx := context.Background()
+		results, err := m.searchCache.Search(ctx, libID, libMediaType, query)
+		if err != nil || len(results) == 0 {
+			return nil
+		}
+		items := make([]components.PaletteItem, 0, len(results))
+		for _, res := range results {
+			label := res.Media.Metadata.Title
+			if res.MediaType == "podcast" && res.RecentEpisode != nil {
+				label = res.RecentEpisode.Title + " — " + res.Media.Metadata.Title
+			}
+			itemCopy := res
+			items = append(items, components.PaletteItem{
+				Label:     label,
+				Action:    components.ActionContentNavigate,
+				LibraryID: res.LibraryID,
+				ItemID:    res.ID,
+				Data:      itemCopy,
+			})
+		}
+		return items
+	}
+}
+
+
+func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) {
+	nav = []components.PaletteItem{
+		{Label: "Navigation", IsHeader: true},
+		{Label: "Go Home", Action: components.ActionGoHome},
+		{Label: "Go Library", Action: components.ActionGoLibrary},
+		{Label: "Go Search", Action: components.ActionGoSearch},
+		{Label: "Go Series List", Action: components.ActionGoSeriesList},
+	}
+
+	if !m.isPlaying() {
+		return nil, nav
+	}
+
+	player = []components.PaletteItem{
+		{Label: "Player", IsHeader: true},
+		{Label: "Play / Pause", Action: components.ActionTogglePlay},
+		{Label: "Seek Forward", Action: components.ActionSeekForward},
+		{Label: "Seek Backward", Action: components.ActionSeekBackward},
+		{Label: "Speed Up", Action: components.ActionSpeedUp},
+		{Label: "Speed Down", Action: components.ActionSpeedDown},
+	}
+	if len(m.chapters) > 0 {
+		player = append(player,
+			components.PaletteItem{Label: "Next Chapter", Action: components.ActionNextChapter},
+			components.PaletteItem{Label: "Previous Chapter", Action: components.ActionPrevChapter},
+		)
+	}
+
+	sleep := []components.PaletteItem{
+		{Label: "Sleep Timer", IsHeader: true},
+		{Label: "Sleep Timer: 15m", Action: components.ActionSleep15},
+		{Label: "Sleep Timer: 30m", Action: components.ActionSleep30},
+		{Label: "Sleep Timer: 45m", Action: components.ActionSleep45},
+		{Label: "Sleep Timer: 60m", Action: components.ActionSleep60},
+		{Label: "Sleep Timer: Off", Action: components.ActionSleepOff},
+	}
+	nav = append(nav, sleep...)
+
+	if len(m.queue) > 0 {
+		nav = append(nav,
+			components.PaletteItem{Label: "Queue", IsHeader: true},
+			components.PaletteItem{Label: "Clear Queue", Action: components.ActionClearQueue},
+		)
+	}
+
+	return player, nav
+}
+
+func (m Model) buildContextPaletteItems() []components.PaletteItem {
+	var items []components.PaletteItem
+	switch m.screen {
+	case ScreenHome:
+		items = getPaletteActions(&m.home)
+	case ScreenLibrary:
+		items = getPaletteActions(&m.library)
+	case ScreenDetail:
+		items = getPaletteActions(&m.detail)
+	case ScreenSearch:
+		items = getPaletteActions(&m.search)
+	case ScreenSeriesList:
+		items = getPaletteActions(&m.seriesList)
+	case ScreenSeries:
+		items = getPaletteActions(&m.series)
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	filtered := make([]components.PaletteItem, 0, len(items))
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			if !m.isPlaying() || m.itemID != item.ItemID {
+				continue
+			}
+		}
+		filtered = append(filtered, item)
+	}
+
+	if len(filtered) == 0 || (len(filtered) == 1 && filtered[0].IsHeader) {
+		return nil
+	}
+
+	return filtered
+}
+
+func getPaletteActions(provider PaletteContextProvider) []components.PaletteItem {
+	return provider.SelectedPaletteActions()
+}
+
+type PaletteContextProvider interface {
+	SelectedPaletteActions() []components.PaletteItem
+}
+
+func (m Model) handlePaletteAction(action components.PaletteAction, payload, libraryID, itemID string, data any) (Model, tea.Cmd) {
+	switch action {
+	case components.ActionGoHome:
+		return m.navigateWithCleanup(ScreenHome)
+	case components.ActionGoLibrary:
+		return m.navigateWithCleanup(ScreenLibrary)
+	case components.ActionGoSearch:
+		m.search = search.New(m.styles, m.searchCache, "", "")
+		return m.navigate(ScreenSearch)
+	case components.ActionGoSeriesList:
+		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
+		return m.navigate(ScreenSeriesList)
+	case components.ActionTogglePlay:
+		if m.isPlaying() {
+			m.player.Playing = !m.player.Playing
+			m.syncMprisState()
+			if m.mpv != nil {
+				return m, tea.Batch(m.mprisPlayPauseCmd(), player.TogglePauseCmd(m.mpv, m.player.Playing))
+			}
+			return m, m.mprisPlayPauseCmd()
+		}
+		return m, nil
+	case components.ActionSeekForward:
+		return m.handleSeek(float64(m.config.Player.SeekSeconds))
+	case components.ActionSeekBackward:
+		return m.handleSeek(-float64(m.config.Player.SeekSeconds))
+	case components.ActionSpeedUp:
+		m.player.Speed += 0.25
+		if m.player.Speed > 3.0 {
+			m.player.Speed = 3.0
+		}
+		if m.mpv != nil {
+			return m, player.SetSpeedCmd(m.mpv, m.player.Speed)
+		}
+		return m, nil
+	case components.ActionSpeedDown:
+		m.player.Speed -= 0.25
+		if m.player.Speed < 0.25 {
+			m.player.Speed = 0.25
+		}
+		if m.mpv != nil {
+			return m, player.SetSpeedCmd(m.mpv, m.player.Speed)
+		}
+		return m, nil
+	case components.ActionNextChapter:
+		if len(m.chapters) > 0 {
+			return m.seekToChapter(m.nextChapter())
+		}
+		return m, nil
+	case components.ActionPrevChapter:
+		if len(m.chapters) > 0 {
+			return m.seekToChapter(m.prevChapter())
+		}
+		return m, nil
+	case components.ActionSleep15:
+		m.sleepDuration = 15 * time.Minute
+		m.sleepGeneration++
+		m.sleepDeadline = time.Now().Add(m.sleepDuration)
+		m.player.SleepRemaining = formatSleepRemaining(m.sleepDuration)
+		return m, sleepTimerCmd(m.sleepDuration, m.sleepGeneration)
+	case components.ActionSleep30:
+		m.sleepDuration = 30 * time.Minute
+		m.sleepGeneration++
+		m.sleepDeadline = time.Now().Add(m.sleepDuration)
+		m.player.SleepRemaining = formatSleepRemaining(m.sleepDuration)
+		return m, sleepTimerCmd(m.sleepDuration, m.sleepGeneration)
+	case components.ActionSleep45:
+		m.sleepDuration = 45 * time.Minute
+		m.sleepGeneration++
+		m.sleepDeadline = time.Now().Add(m.sleepDuration)
+		m.player.SleepRemaining = formatSleepRemaining(m.sleepDuration)
+		return m, sleepTimerCmd(m.sleepDuration, m.sleepGeneration)
+	case components.ActionSleep60:
+		m.sleepDuration = 60 * time.Minute
+		m.sleepGeneration++
+		m.sleepDeadline = time.Now().Add(m.sleepDuration)
+		m.player.SleepRemaining = formatSleepRemaining(m.sleepDuration)
+		return m, sleepTimerCmd(m.sleepDuration, m.sleepGeneration)
+	case components.ActionSleepOff:
+		m.sleepDeadline = time.Time{}
+		m.sleepDuration = 0
+		m.player.SleepRemaining = ""
+		return m, nil
+	case components.ActionClearQueue:
+		m.queue = nil
+		return m, nil
+	case components.ActionOpenDetail:
+		if payload == "series" {
+			m.series = series.New(m.styles, m.client, libraryID, itemID, "")
+			return m.navigate(ScreenSeries)
+		}
+		if data != nil {
+			if item, ok := data.(abs.LibraryItem); ok {
+				m.detail = detail.New(m.styles, item)
+				m2, navCmd := m.navigate(ScreenDetail)
+				return m2, tea.Batch(m.detailLoadCmds(item, navCmd)...)
+			}
+		}
+		if itemID != "" && libraryID != "" {
+			m.detail = detail.New(m.styles, abs.LibraryItem{ID: itemID, LibraryID: libraryID, MediaType: "book"})
+			m2, navCmd := m.navigate(ScreenDetail)
+			return m2, tea.Batch(m.detailLoadCmds(abs.LibraryItem{ID: itemID, LibraryID: libraryID, MediaType: "book"}, navCmd)...)
+		}
+		return m, nil
+	case components.ActionQueueItem:
+		if data != nil {
+			if cmd, ok := data.(detail.AddToQueueCmd); ok {
+				if !m.isPlaying() {
+					if cmd.Item.MediaType == "podcast" && cmd.Episode != nil {
+						return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: cmd.Item, Episode: *cmd.Episode})
+					}
+					return m.handlePlayCmd(detail.PlayCmd{Item: cmd.Item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: cmd.Item, Episode: cmd.Episode}, false)
+				return m, nil
+			}
+			if msg, ok := data.(home.AddToQueueMsg); ok {
+				if !m.isPlaying() {
+					if msg.Item.MediaType == "podcast" && msg.Episode != nil {
+						return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: msg.Item, Episode: *msg.Episode})
+					}
+					return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: msg.Episode}, false)
+				return m, nil
+			}
+			if item, ok := data.(abs.LibraryItem); ok {
+				if !m.isPlaying() {
+					return m.handlePlayCmd(detail.PlayCmd{Item: item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: item}, false)
+				return m, nil
+			}
+		}
+		return m, nil
+	case components.ActionPlayNextItem:
+		if data != nil {
+			if cmd, ok := data.(detail.PlayNextCmd); ok {
+				if !m.isPlaying() {
+					if cmd.Item.MediaType == "podcast" && cmd.Episode != nil {
+						return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: cmd.Item, Episode: *cmd.Episode})
+					}
+					return m.handlePlayCmd(detail.PlayCmd{Item: cmd.Item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: cmd.Item, Episode: cmd.Episode}, true)
+				return m, nil
+			}
+			if cmd, ok := data.(detail.AddToQueueCmd); ok {
+				if !m.isPlaying() {
+					if cmd.Item.MediaType == "podcast" && cmd.Episode != nil {
+						return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: cmd.Item, Episode: *cmd.Episode})
+					}
+					return m.handlePlayCmd(detail.PlayCmd{Item: cmd.Item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: cmd.Item, Episode: cmd.Episode}, true)
+				return m, nil
+			}
+			if msg, ok := data.(home.PlayNextMsg); ok {
+				if !m.isPlaying() {
+					if msg.Item.MediaType == "podcast" && msg.Episode != nil {
+						return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: msg.Item, Episode: *msg.Episode})
+					}
+					return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: msg.Episode}, true)
+				return m, nil
+			}
+			if item, ok := data.(abs.LibraryItem); ok {
+				if !m.isPlaying() {
+					return m.handlePlayCmd(detail.PlayCmd{Item: item})
+				}
+				m.enqueueQueueEntry(QueueEntry{Item: item}, true)
+				return m, nil
+			}
+		}
+		return m, nil
+	case components.ActionPlayDirect:
+		if data != nil {
+			if cmd, ok := data.(detail.AddToQueueCmd); ok {
+				if cmd.Item.MediaType == "podcast" && cmd.Episode != nil {
+					return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
+						Item:    cmd.Item,
+						Episode: *cmd.Episode,
+					})
+				}
+				return m.handlePlayCmd(detail.PlayCmd{Item: cmd.Item})
+			}
+			if msg, ok := data.(home.PlayMsg); ok {
+				return m.handlePlayCmd(detail.PlayCmd{Item: msg.Item})
+			}
+			if msg, ok := data.(home.PlayEpisodeMsg); ok {
+				return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
+					Item:    msg.Item,
+					Episode: msg.Episode,
+				})
+			}
+			if item, ok := data.(abs.LibraryItem); ok {
+				if item.MediaType == "podcast" && item.RecentEpisode != nil {
+					return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
+						Item:    item,
+						Episode: *item.RecentEpisode,
+					})
+				}
+				return m.handlePlayCmd(detail.PlayCmd{Item: item})
+			}
+		}
+		return m, nil
+	case components.ActionContentNavigate:
+		if data != nil {
+			if item, ok := data.(abs.LibraryItem); ok {
+				m.detail = detail.New(m.styles, item)
+				m2, navCmd := m.navigate(ScreenDetail)
+				return m2, tea.Batch(m.detailLoadCmds(item, navCmd)...)
+			}
+		}
+		if itemID != "" {
+			item := abs.LibraryItem{ID: itemID, LibraryID: libraryID, MediaType: "book"}
+			m.detail = detail.New(m.styles, item)
+			m2, navCmd := m.navigate(ScreenDetail)
+			return m2, tea.Batch(m.detailLoadCmds(item, navCmd)...)
+		}
+		return m, nil
+	case components.ActionAddBookmark:
+		var targetID string
+		if cmd, ok := data.(detail.AddToQueueCmd); ok {
+			targetID = cmd.Item.ID
+		} else if item, ok := data.(abs.LibraryItem); ok {
+			targetID = item.ID
+		} else {
+			targetID = itemID
+		}
+		if targetID == "" {
+			return m, nil
+		}
+		if m.isPlaying() && m.itemID == targetID {
+			return m.handleAddBookmark(detail.AddBookmarkCmd{
+				Item: abs.LibraryItem{ID: m.itemID, LibraryID: m.playbackLibraryID},
+			})
+		}
+		cmd := m.err.SetError(fmt.Errorf("can only add bookmarks to the currently playing item"))
+		m.propagateSize()
+		return m, cmd
+	case components.ActionMarkFinished:
+		var targetItem abs.LibraryItem
+		var targetEpisode *abs.PodcastEpisode
+		hasTarget := false
+
+		if cmd, ok := data.(detail.AddToQueueCmd); ok {
+			targetItem = cmd.Item
+			targetEpisode = cmd.Episode
+			hasTarget = true
+		} else if item, ok := data.(abs.LibraryItem); ok {
+			targetItem = item
+			hasTarget = true
+		}
+
+		if hasTarget {
+			return m.handleMarkFinished(detail.MarkFinishedCmd{
+				Item:    targetItem,
+				Episode: targetEpisode,
+			})
+		}
+
+		if m.isPlaying() {
+			episodePtr := (*abs.PodcastEpisode)(nil)
+			if m.episodeID != "" {
+				episodePtr = &abs.PodcastEpisode{ID: m.episodeID}
+			}
+			return m.handleMarkFinished(detail.MarkFinishedCmd{
+				Item:    abs.LibraryItem{ID: m.itemID, LibraryID: m.playbackLibraryID},
+				Episode: episodePtr,
+			})
+		}
+		return m, nil
+	case components.ActionGoToSeries:
+		if libraryID != "" && itemID != "" {
+			m.series = series.New(m.styles, m.client, libraryID, itemID, payload)
+			return m.navigate(ScreenSeries)
+		}
+		if m.playbackSeriesID != "" && m.playbackLibraryID != "" {
+			m.series = series.New(m.styles, m.client, m.playbackLibraryID, m.playbackSeriesID, m.itemID)
+			return m.navigate(ScreenSeries)
+		}
+		return m, nil
+	case components.ActionBrowseSeries:
+		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
+		return m.navigate(ScreenSeriesList)
+	case components.ActionSwitchLibrary:
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) prewarmCacheCmd() tea.Cmd {
+	return func() tea.Msg {
+		cache := m.searchCache
+		if cache == nil {
+			return PrewarmDoneMsg{}
+		}
+		libID := m.home.SelectedLibraryID()
+		libMediaType := m.home.SelectedLibraryMediaType()
+		if libID == "" {
+			return PrewarmDoneMsg{}
+		}
+		_ = cache.Prepare(context.Background(), libID, libMediaType)
+		return PrewarmDoneMsg{}
+	}
 }
 

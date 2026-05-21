@@ -1717,3 +1717,52 @@ func TestPlayerLaunchErrShowsBanner(t *testing.T) {
 		t.Error("expected auto-dismiss cmd")
 	}
 }
+
+func TestBuildContextPaletteItemsFiltersAddBookmark(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.detail = detail.New(m.styles, abs.LibraryItem{
+		ID:        "item-001",
+		LibraryID: "lib-001",
+		MediaType: "book",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Caliban's War"}},
+	})
+
+	// When not playing, "Add Bookmark" should NOT be in context actions
+	items := m.buildContextPaletteItems()
+	hasAddBookmark := false
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			hasAddBookmark = true
+		}
+	}
+	if hasAddBookmark {
+		t.Fatal("expected 'Add Bookmark' to be filtered out when not playing")
+	}
+
+	// When playing a different item, "Add Bookmark" should NOT be in context actions
+	m.sessionID = "sess-123"
+	m.itemID = "item-002"
+	items = m.buildContextPaletteItems()
+	hasAddBookmark = false
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			hasAddBookmark = true
+		}
+	}
+	if hasAddBookmark {
+		t.Fatal("expected 'Add Bookmark' to be filtered out when playing a different item")
+	}
+
+	// When playing the same item, "Add Bookmark" SHOULD be in context actions
+	m.itemID = "item-001"
+	items = m.buildContextPaletteItems()
+	hasAddBookmark = false
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			hasAddBookmark = true
+		}
+	}
+	if !hasAddBookmark {
+		t.Fatal("expected 'Add Bookmark' to be present when playing the same item")
+	}
+}
