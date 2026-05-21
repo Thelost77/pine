@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
@@ -66,6 +67,7 @@ type Model struct {
 	propertyUnavailableCount int
 	lastMprisEmit         time.Time
 	seekPending           bool
+	lastEvict             time.Time
 
 	// Series auto-continue
 	playbackLibraryID string
@@ -79,7 +81,8 @@ type Model struct {
 	styles ui.Styles
 	config config.Config
 	db     *db.Store
-	client      *abs.Client
+	client      *cache.Client
+	cacheStore  *cache.Store
 	mpv         player.Player
 	mprisBridge *mpris.Bridge
 	program     *tea.Program
@@ -93,14 +96,14 @@ type Model struct {
 
 // New creates a new root model. If client is non-nil (authenticated),
 // the initial screen is Home; otherwise it starts at Login.
-func New(cfg config.Config, store *db.Store, client *abs.Client) Model {
-	return NewWithPlayer(cfg, store, client, player.NewMpv())
+func New(cfg config.Config, store *db.Store, client *cache.Client, cacheStore *cache.Store) Model {
+	return NewWithPlayer(cfg, store, client, cacheStore, player.NewMpv())
 }
 
 // NewWithPlayer creates a new root model with a specific player implementation.
-func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv player.Player) Model {
+func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cacheStore *cache.Store, mpv player.Player) Model {
 	styles := ui.NewStyles(cfg.Theme)
-	searchCache := search.NewCache(client)
+	searchCache := search.NewCache(client, cacheStore)
 	palette := components.NewPalette()
 	palette.SetStyles(styles)
 	initialScreen := ScreenLogin
@@ -124,6 +127,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		config:      cfg,
 		db:          store,
 		client:      client,
+		cacheStore:  cacheStore,
 		mpv:         mpv,
 		mprisState:  &MprisState{},
 		palette:     palette,
@@ -285,7 +289,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if components.IsUnauthorized(msg.Err) {
 			logger.Warn("401 unauthorized, redirecting to login")
 		m.client = nil
-		m.searchCache = search.NewCache(nil)
+		m.searchCache = search.NewCache(nil, nil)
 		m.screen = ScreenLogin
 			m.backStack = nil
 			m.login = login.New(m.styles)
@@ -308,7 +312,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case login.LoginSuccessMsg:
 		logger.Info("login success", "server", msg.ServerURL, "user", msg.Username)
-		m.client = abs.NewClient(msg.ServerURL, msg.Token)
+		absClient := abs.NewClient(msg.ServerURL, msg.Token)
+		m.client = cache.NewClient(absClient, m.cacheStore)
 		if m.db != nil {
 			accountID := fmt.Sprintf("%s@%s", msg.ServerURL, msg.Username)
 			if err := m.db.SaveAccount(db.Account{
@@ -323,7 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.home = home.New(m.styles, m.client)
 		m.library = library.New(m.styles, m.client, "", nil)
-		m.searchCache = search.NewCache(m.client)
+		m.searchCache = search.NewCache(m.client, m.cacheStore)
 		m.seriesList = serieslist.New(m.styles, m.client, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
 		m.login, _ = m.login.Update(msg)
@@ -548,7 +553,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePositionMsg(msg)
 
 	case SyncTickMsg:
-		return m.handleSyncTick()
+		m, cmd := m.handleSyncTick()
+		if m.cacheStore != nil && time.Since(m.lastEvict) > 5*time.Minute {
+			_ = m.cacheStore.EvictExpired()
+			m.lastEvict = time.Now()
+		}
+		return m, cmd
 
 	case player.PlayerLaunchErrMsg:
 		logger.Error("player launch failed", "err", msg.Err)
@@ -905,7 +915,7 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	}
 	logger.Warn("401 unauthorized, redirecting to login")
 	m.client = nil
-	m.searchCache = search.NewCache(nil)
+	m.searchCache = search.NewCache(nil, nil)
 	m.screen = ScreenLogin
 	m.backStack = nil
 	m.login = login.New(m.styles)

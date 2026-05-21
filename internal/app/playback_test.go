@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
@@ -41,6 +42,18 @@ func (l *apiLog) get() []apiRequest {
 	cp := make([]apiRequest, len(l.requests))
 	copy(cp, l.requests)
 	return cp
+}
+
+func (l *apiLog) count(method, pathPrefix string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	c := 0
+	for _, r := range l.requests {
+		if r.Method == method && strings.HasPrefix(r.Path, pathPrefix) {
+			c++
+		}
+	}
+	return c
 }
 
 // newMockABSServer creates an httptest.Server that handles playback API calls
@@ -104,7 +117,7 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
 	cfg := config.Default()
-	m := NewWithPlayer(cfg, nil, client, mp)
+	m := NewWithPlayer(cfg, nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 
@@ -221,7 +234,7 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	}
 
 	// Another tick: advance to 57.0
-	result, cmd = m.Update(player.PositionMsg{
+	result, _ = m.Update(player.PositionMsg{
 		Position:   57.0,
 		Duration:   3600.0,
 		Paused:     false,
@@ -293,7 +306,7 @@ func TestPlayEpisodeCmdUsesSessionDurationWhenEpisodeDurationMissing(t *testing.
 	mp := &mockPlayer{position: 0, duration: 1800}
 	client := abs.NewClient(srv.URL, "tok")
 	cfg := config.Default()
-	m := NewWithPlayer(cfg, nil, client, mp)
+	m := NewWithPlayer(cfg, nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 
@@ -364,7 +377,7 @@ func TestPlayCmdPrefersLongerMediaMetadataChapters(t *testing.T) {
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
 	cfg := config.Default()
-	m := NewWithPlayer(cfg, nil, client, mp)
+	m := NewWithPlayer(cfg, nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 
@@ -402,7 +415,7 @@ func TestPlaybackSeekBackwardThenForward(t *testing.T) {
 
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 
@@ -445,7 +458,7 @@ func TestPlaybackNavigateWhilePlayingKeepsPlayback(t *testing.T) {
 
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 
@@ -483,7 +496,7 @@ func TestPlaybackSyncTickNoOpWhenNotPlaying(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "" // not playing
 
 	_, cmd := m.Update(SyncTickMsg{})
@@ -506,7 +519,7 @@ func TestPlaybackPositionErrorTriggersCleanup(t *testing.T) {
 
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-abc"
 	m.itemID = "item-001"
 	m.player.Playing = true
@@ -564,7 +577,7 @@ func TestPlaybackPositionErrorAtTrackEndRestartsNextTrack(t *testing.T) {
 
 	mp := &mockPlayer{position: 1799, duration: 1800}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-mt"
 	m.itemID = "item-multitrack"
 	m.player.Playing = true
@@ -650,7 +663,7 @@ func TestPlaybackPositionErrorNearTrackEndWithinTwoSecondsRestartsNextTrack(t *t
 	defer srv.Close()
 
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, &mockPlayer{})
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, &mockPlayer{})
 	m.sessionID = "sess-mt-realish"
 	m.itemID = "item-multitrack"
 	m.player.Playing = true
@@ -707,7 +720,7 @@ func TestPlaybackPositionErrorAtFinalTrackEndStopsPlayback(t *testing.T) {
 
 	mp := &mockPlayer{position: 1799, duration: 1800}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-mt"
 	m.itemID = "item-multitrack"
 	m.player.Playing = true
@@ -775,7 +788,7 @@ func TestPlaybackCompletionStartsNextQueuedItem(t *testing.T) {
 	nextDuration := 5400.0
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -842,7 +855,7 @@ func TestManualStopPreservesQueue(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -882,7 +895,7 @@ func TestMarkFinishedUsesEpisodeDurationForPodcasts(t *testing.T) {
 	defer srv.Close()
 
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, &mockPlayer{})
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, &mockPlayer{})
 
 	totalDuration := 7200.0
 	episodeDuration := 1800.0
@@ -951,7 +964,7 @@ func TestPlaybackErrorDoesNotConsumeQueue(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -984,7 +997,7 @@ func TestPlaybackMultipleSyncCycles(t *testing.T) {
 
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 	m.sessionID = "sess-abc"
@@ -1031,7 +1044,7 @@ func TestPlaybackMultipleSyncCycles(t *testing.T) {
 // TestPlaybackPlayCmdNoClientIsNoOp verifies PlayCmd with nil client returns nil cmd.
 func TestPlaybackPlayCmdNoClientIsNoOp(t *testing.T) {
 	mp := &mockPlayer{}
-	m := NewWithPlayer(config.Default(), nil, nil, mp)
+	m := NewWithPlayer(config.Default(), nil, nil, nil, mp)
 	m.screen = ScreenDetail
 
 	dur := 3600.0
@@ -1157,7 +1170,7 @@ func TestPlaybackCompletionSeriesAutoContinue(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -1239,7 +1252,7 @@ func TestPlaybackCompletionSeriesLastBookStops(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -1309,7 +1322,7 @@ func TestPlaybackCompletionQueueTakesPriorityOverSeries(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -1384,7 +1397,7 @@ func TestSeriesContinueAPIErrorShowsBanner(t *testing.T) {
 
 	mp := &mockPlayer{}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-current"
 	m.itemID = "item-current"
 	m.player.Playing = true
@@ -1413,7 +1426,7 @@ func TestSeriesContinueAPIErrorShowsBanner(t *testing.T) {
 
 func TestEpisodePlaybackClearsSeriesContext(t *testing.T) {
 	mp := &mockPlayer{}
-	m := NewWithPlayer(config.Default(), nil, nil, mp)
+	m := NewWithPlayer(config.Default(), nil, nil, nil, mp)
 	m.playbackSeriesID = "series-prev"
 	m.playbackLibraryID = "lib-prev"
 
@@ -1475,7 +1488,7 @@ func TestSessionRestoreSetsSeriesContext(t *testing.T) {
 	defer srv.Close()
 
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, &mockPlayer{})
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, &mockPlayer{})
 
 	result, _ := m.Update(RestoreSessionMsg{
 		Item: &abs.LibraryItem{

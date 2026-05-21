@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/screens/detail"
 )
@@ -36,7 +37,7 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
 	m.player.Position = 120
 	m.detail.SetBookmarks([]abs.Bookmark{
@@ -77,7 +78,7 @@ func TestHandleAddBookmarkReturnsPlaybackErrorOnFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
 	m.player.Position = 120
 
@@ -111,7 +112,7 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
 	m.episodeID = "ep-001"
 	m.player.Title = "Episode 2199"
@@ -138,7 +139,7 @@ func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *tes
 	}))
 	defer srv.Close()
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.detail.SetBookmarks([]abs.Bookmark{
 		{LibraryItemID: "item-001", Title: "Only bookmark", Time: 300.5, CreatedAt: 1700000000000},
 	})
@@ -178,7 +179,7 @@ func TestHandleUpdateBookmarkUpdatesTitle(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.detail.SetBookmarks([]abs.Bookmark{
 		{LibraryItemID: "item-001", Title: "Old title", Time: 300.5, CreatedAt: 1700000000000},
 	})
@@ -251,7 +252,7 @@ func TestHandleSeekToBookmarkStartsPlaybackWhenStopped(t *testing.T) {
 	dur := 3600.0
 	item.Media.Duration = &dur
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
 	_, cmd := m.handleSeekToBookmark(detail.SeekToBookmarkCmd{Item: item, Time: 2209})
 	if cmd == nil {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -62,7 +63,7 @@ type Model struct {
 	width       int
 	height      int
 	styles      ui.Styles
-	client      *abs.Client
+	client      *cache.Client
 	libraryID   string
 	libraryName string
 	series      []abs.Series
@@ -73,7 +74,7 @@ type Model struct {
 }
 
 // New creates a series browser model for a specific library.
-func New(styles ui.Styles, client *abs.Client, libraryID, libraryName string) Model {
+func New(styles ui.Styles, client *cache.Client, libraryID, libraryName string) Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(styles.Accent.GetForeground()).

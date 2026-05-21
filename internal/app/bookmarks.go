@@ -35,11 +35,15 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 	}
 	logger.Info("creating bookmark", "itemID", itemID, "time", currentTime, "title", title)
 	existing := m.detail.Bookmarks()
+	cacheStore := m.cacheStore
 
 	return m, func() tea.Msg {
 		err := client.CreateBookmark(context.Background(), itemID, currentTime, title)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
+		}
+		if cacheStore != nil {
+			_ = cacheStore.Delete("bookmarks:" + itemID)
 		}
 		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: timeNowMillis()}
 		updated := append(append([]abs.Bookmark{}, existing...), newBm)
@@ -69,11 +73,15 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 	itemID := msg.ItemID
 	bmTime := msg.Bookmark.Time
 	existing := m.detail.Bookmarks()
+	cacheStore := m.cacheStore
 
 	return m, func() tea.Msg {
 		err := client.DeleteBookmark(context.Background(), itemID, bmTime)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
+		}
+		if cacheStore != nil {
+			_ = cacheStore.Delete("bookmarks:" + itemID)
 		}
 		updated := make([]abs.Bookmark, 0, len(existing))
 		for _, bm := range existing {
@@ -96,11 +104,15 @@ func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cm
 	bmTime := msg.Bookmark.Time
 	title := msg.Title
 	existing := m.detail.Bookmarks()
+	cacheStore := m.cacheStore
 
 	return m, func() tea.Msg {
 		err := client.UpdateBookmark(context.Background(), itemID, bmTime, title)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
+		}
+		if cacheStore != nil {
+			_ = cacheStore.Delete("bookmarks:" + itemID)
 		}
 		updated := make([]abs.Bookmark, len(existing))
 		copy(updated, existing)

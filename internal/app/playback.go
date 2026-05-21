@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
@@ -327,6 +328,8 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	title := m.player.Title
 	mpvPlayer := m.mpv
 	targetPos := bookPos
+	cacheStore := m.cacheStore
+	libraryID := m.playbackLibraryID
 
 	// Bump generation so old position ticks get discarded.
 	m.playGeneration++
@@ -337,6 +340,12 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		if client != nil && sessionID != "" {
 			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
+			if cacheStore != nil && itemID != "" {
+				_ = cacheStore.Delete("progress:" + itemID)
+				if libraryID != "" {
+					_ = cacheStore.Delete("personalized:" + libraryID)
+				}
+			}
 		}
 		if mpvPlayer != nil {
 			_ = mpvPlayer.Quit()
@@ -544,7 +553,7 @@ func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cm
 	return m, tea.Batch(stopCmd, nextCmd)
 }
 
-func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemID, title string, duration, bookPos float64) (PlaySessionMsg, error) {
+func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, itemID, title string, duration, bookPos float64) (PlaySessionMsg, error) {
 	if len(session.AudioTracks) == 0 {
 		return PlaySessionMsg{}, fmt.Errorf("no audio tracks")
 	}
@@ -656,6 +665,9 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	client := m.client
 	item := msg.Item
 	episode := msg.Episode
+	cacheStore := m.cacheStore
+	itemID := item.ID
+	libraryID := item.LibraryID
 	return m, func() tea.Msg {
 		var err error
 		if msg.Undo {
@@ -667,6 +679,12 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 			if err != nil {
 				logger.Warn("failed to unmark finished", "err", err)
 				return PlaybackErrorMsg{Err: err}
+			}
+			if cacheStore != nil && itemID != "" {
+				_ = cacheStore.Delete("progress:" + itemID)
+				if libraryID != "" {
+					_ = cacheStore.Delete("personalized:" + libraryID)
+				}
 			}
 			return detail.MarkFinishedMsg{Progress: &abs.UserMediaProgress{
 				IsFinished: false,
@@ -684,6 +702,12 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 		if err != nil {
 			logger.Warn("failed to mark as finished", "err", err)
 			return PlaybackErrorMsg{Err: err}
+		}
+		if cacheStore != nil && itemID != "" {
+			_ = cacheStore.Delete("progress:" + itemID)
+			if libraryID != "" {
+				_ = cacheStore.Delete("personalized:" + libraryID)
+			}
 		}
 		progress := &abs.UserMediaProgress{
 			CurrentTime: duration,
@@ -706,6 +730,8 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	duration := m.player.Duration
 	store := m.db
 	mpvPlayer := m.mpv
+	cacheStore := m.cacheStore
+	libraryID := m.playbackLibraryID
 
 	// Cache last played item for MPRIS metadata after stop
 	m.lastPlayedTitle = m.player.Title
@@ -719,6 +745,15 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	var progress float64
 	if duration > 0 {
 		progress = currentTime / duration
+	}
+
+	invalidateCache := func() {
+		if cacheStore != nil && itemID != "" {
+			_ = cacheStore.Delete("progress:" + itemID)
+			if libraryID != "" {
+				_ = cacheStore.Delete("personalized:" + libraryID)
+			}
+		}
 	}
 
 	cmds := []tea.Cmd{
@@ -736,6 +771,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 					logger.Debug("progress updated on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress)
 				}
 			}
+			invalidateCache()
 			return nil
 		},
 		func() tea.Msg {
@@ -746,6 +782,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 					logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 				}
 			}
+			invalidateCache()
 			return nil
 		},
 		func() tea.Msg {
@@ -807,11 +844,20 @@ func (m Model) Cleanup() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	libraryID := m.playbackLibraryID
+	itemID := m.itemID
+
 	if m.client != nil && m.sessionID != "" {
 		if err := m.client.CloseSession(ctx, m.sessionID, currentTime, timeListened); err != nil {
 			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
 		} else {
 			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened)
+		}
+		if m.cacheStore != nil && itemID != "" {
+			_ = m.cacheStore.Delete("progress:" + itemID)
+			if libraryID != "" {
+				_ = m.cacheStore.Delete("personalized:" + libraryID)
+			}
 		}
 	}
 
@@ -826,6 +872,12 @@ func (m Model) Cleanup() {
 			logger.Warn("cleanup: failed to update progress", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress, "err", err)
 		} else {
 			logger.Debug("cleanup: progress updated", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress)
+		}
+		if m.cacheStore != nil {
+			_ = m.cacheStore.Delete("progress:" + itemID)
+			if libraryID != "" {
+				_ = m.cacheStore.Delete("personalized:" + libraryID)
+			}
 		}
 	}
 
@@ -875,7 +927,7 @@ func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd
 
 // restoreSessionCmd fetches the last saved session from the DB and resolves
 // the full LibraryItem from ABS so playback can resume.
-func restoreSessionCmd(client *abs.Client, store *db.Store) tea.Cmd {
+func restoreSessionCmd(client *cache.Client, store *db.Store) tea.Cmd {
 	return func() tea.Msg {
 		session, err := store.GetLastSession()
 		if err != nil {
@@ -946,7 +998,7 @@ func (m *Model) setSeriesContext(item abs.LibraryItem) {
 	}
 }
 
-func seriesContinueCmd(client *abs.Client, libraryID, seriesID, currentItemID string) tea.Cmd {
+func seriesContinueCmd(client *cache.Client, libraryID, seriesID, currentItemID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		contents, err := client.GetSeriesContents(ctx, libraryID, seriesID)

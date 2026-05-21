@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
@@ -251,7 +253,7 @@ func TestE2E_DetailToPlayback(t *testing.T) {
 	mp.mu.Lock()
 	mp.position = 52.0
 	mp.mu.Unlock()
-	res, cmd := m.Update(player.PositionMsg{Position: 52.0, Duration: 3600.0, Paused: false, Generation: 1})
+	res, _ := m.Update(player.PositionMsg{Position: 52.0, Duration: 3600.0, Paused: false, Generation: 1})
 	m = res.(Model)
 
 	if m.player.Position != 52.0 {
@@ -314,7 +316,7 @@ func TestE2E_ChapterOverlayOpenCloseAndSeek(t *testing.T) {
 
 	m, cmd := e2ePressKey(m, 'p')
 	m, cmd = feedCmd(m, cmd)
-	m, cmd = feedCmd(m, cmd)
+	m, _ = feedCmd(m, cmd)
 
 	if !m.isPlaying() {
 		t.Fatal("expected playback to be active after play flow")
@@ -946,12 +948,11 @@ func TestE2E_SessionPersistence(t *testing.T) {
 	m = e2eSetSize(m, 120, 40)
 
 	// Simulate login success — should save account to DB
-	res, _ := m.Update(login.LoginSuccessMsg{
+	_, _ = m.Update(login.LoginSuccessMsg{
 		Token:     "jwt-token-e2e",
 		ServerURL: srv.URL,
 		Username:  "alice",
 	})
-	m = res.(Model)
 
 	// Verify account saved
 	accounts, err := store.ListAccounts()
@@ -1056,7 +1057,7 @@ func TestE2E_FullJourney(t *testing.T) {
 	mp.mu.Lock()
 	mp.position = 60.0
 	mp.mu.Unlock()
-	res, cmd := m.Update(player.PositionMsg{Position: 60.0, Duration: 3600.0, Paused: false, Generation: 1})
+	res, _ := m.Update(player.PositionMsg{Position: 60.0, Duration: 3600.0, Paused: false, Generation: 1})
 	m = res.(Model)
 
 	if m.timeListened == 0 {
@@ -1222,7 +1223,7 @@ func TestE2E_PodcastEpisodePlayback(t *testing.T) {
 
 	// Step 2: Feed the resulting PlaySessionMsg
 	if cmd != nil {
-		m, cmd = feedCmd(m, cmd)
+		m, _ = feedCmd(m, cmd)
 	}
 
 	// Verify session state
@@ -2080,5 +2081,66 @@ func TestE2E_SessionRestorePodcastNoTracksSkipsSilently(t *testing.T) {
 		if req.Method == http.MethodPost && req.Path == "/api/items/pod-001/play" {
 			t.Fatalf("unexpected fallback book playback call: %s %s", req.Method, req.Path)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// E2E: Persistent cache survives app restart
+// ---------------------------------------------------------------------------
+
+func TestE2E_CacheSurvivesRestart(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{}
+
+	// Set up a real DB and cache store
+	store, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer store.Close()
+
+	cfg := config.Default()
+	client := abs.NewClient(srv.URL, "jwt-token-e2e")
+	cacheStore := cache.NewStore(store)
+	cachedClient := cache.NewClient(client, cacheStore)
+
+	// First app instance: cold start, loads from network
+	m1 := NewWithPlayer(cfg, store, cachedClient, cacheStore, mp)
+	m1 = e2eSetSize(m1, 120, 40)
+
+	m1 = feedCmdChain(m1, m1.Init(), 5)
+
+	if m1.home.Loading() {
+		t.Fatal("home should not be loading after first init")
+	}
+	if len(m1.home.Items()) == 0 {
+		t.Fatal("home should have items after first init")
+	}
+
+	personalizedCallsBefore := log.count("GET", "/api/libraries/lib-001/personalized")
+
+	// Second app instance: same DB, simulating app restart
+	m2 := NewWithPlayer(cfg, store, cachedClient, cacheStore, mp)
+	m2 = e2eSetSize(m2, 120, 40)
+
+	m2 = feedCmdChain(m2, m2.Init(), 5)
+
+	if m2.home.Loading() {
+		t.Fatal("home should not be loading after second init (cache should serve data)")
+	}
+	if m2.home.Error() != nil {
+		t.Fatalf("home should not have error after second init: %v", m2.home.Error())
+	}
+	if len(m2.home.Items()) == 0 {
+		t.Fatal("home should have items after second init")
+	}
+
+	personalizedCallsAfter := log.count("GET", "/api/libraries/lib-001/personalized")
+	if personalizedCallsAfter != personalizedCallsBefore {
+		t.Fatalf("expected cache hit on restart, but API was called again: before=%d after=%d", personalizedCallsBefore, personalizedCallsAfter)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	tea "github.com/charmbracelet/bubbletea"
@@ -510,14 +511,14 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 // newE2EModel creates an unauthenticated model pointed at the mock server.
 func newE2EModel(srv *httptest.Server, mp *mockPlayer) Model {
 	cfg := config.Default()
-	return NewWithPlayer(cfg, nil, nil, mp)
+	return NewWithPlayer(cfg, nil, nil, nil, mp)
 }
 
 // newE2EModelAuthenticated creates an authenticated model pointed at the mock server.
 func newE2EModelAuthenticated(srv *httptest.Server, mp *mockPlayer) Model {
 	cfg := config.Default()
 	client := abs.NewClient(srv.URL, "jwt-token-e2e")
-	return NewWithPlayer(cfg, nil, client, mp)
+	return NewWithPlayer(cfg, nil, cache.NewClient(client, nil), nil, mp)
 }
 
 // newE2EModelWithDB creates an authenticated model with a real database.
@@ -531,7 +532,7 @@ func newE2EModelWithDB(t *testing.T, srv *httptest.Server, mp *mockPlayer) (Mode
 
 	cfg := config.Default()
 	client := abs.NewClient(srv.URL, "jwt-token-e2e")
-	return NewWithPlayer(cfg, store, client, mp), store
+	return NewWithPlayer(cfg, store, cache.NewClient(client, nil), nil, mp), store
 }
 
 // newE2EModelUnauthWithDB creates an unauthenticated model with a real database.
@@ -544,7 +545,7 @@ func newE2EModelUnauthWithDB(t *testing.T, srv *httptest.Server, mp *mockPlayer)
 	t.Cleanup(func() { store.Close() })
 
 	cfg := config.Default()
-	return NewWithPlayer(cfg, store, nil, mp), store
+	return NewWithPlayer(cfg, store, nil, nil, mp), store
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/app"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
@@ -34,16 +35,21 @@ func main() {
 	}
 	defer store.Close()
 
-	var client *abs.Client
+	var absClient *abs.Client
 	if acct, err := store.GetDefaultAccount(); err == nil && acct.Token != "" {
 		serverURL := acct.ServerURL
 		if serverURL == "" {
 			serverURL = cfg.Server.Address
 		}
-		client = abs.NewClient(serverURL, acct.Token)
+		absClient = abs.NewClient(serverURL, acct.Token)
+	}
+	cacheStore := cache.NewStore(store)
+	var cachedClient *cache.Client
+	if absClient != nil {
+		cachedClient = cache.NewClient(absClient, cacheStore)
 	}
 
-	model := app.New(cfg, store, client)
+	model := app.New(cfg, store, cachedClient, cacheStore)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)
 	logger.Info("starting TUI")

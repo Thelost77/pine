@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newTestModel() Model {
-	return New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", nil)
+	return New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", nil)
 }
 
 func newTestModelNoClient() Model {
@@ -177,7 +178,7 @@ func TestEnterEmitsNavigateDetailMsg(t *testing.T) {
 
 func TestSKeyEmitsNavigateSeriesListMsg(t *testing.T) {
 	libs := []abs.Library{{ID: "lib-001", Name: "Books", MediaType: "book"}}
-	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if cmd == nil {
@@ -583,12 +584,12 @@ func TestNoPrefetchWhenBelowThreshold(t *testing.T) {
 	}
 }
 
-func TestTabSwitchUsesCachedLibraryItems(t *testing.T) {
+func TestTabSwitchPreservesStaleItemsAndFetches(t *testing.T) {
 	libs := []abs.Library{
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
 	m.SetSize(80, 24)
 
 	firstItems := makeItems(2)
@@ -607,13 +608,13 @@ func TestTabSwitchUsesCachedLibraryItems(t *testing.T) {
 
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if cmd == nil {
-		t.Fatal("expected fetch command on first switch to uncached library")
+		t.Fatal("expected fetch command on first switch")
 	}
 	if m.libraryID != "lib-002" {
 		t.Fatalf("libraryID = %q, want lib-002", m.libraryID)
 	}
 	if !m.Loading() {
-		t.Fatal("expected loading=true while fetching uncached library")
+		t.Fatal("expected loading=true while fetching")
 	}
 	if len(m.Items()) != len(firstItems) {
 		t.Fatalf("expected stale items to remain visible while loading, got %d items", len(m.Items()))
@@ -635,7 +636,7 @@ func TestTabSwitchUsesCachedLibraryItems(t *testing.T) {
 		t.Fatalf("expected libraryListItem, got %T", rows[0])
 	}
 	if row.kind != rowKindSkeleton {
-		t.Fatal("expected skeleton rows after delayed reveal on uncached switch")
+		t.Fatal("expected skeleton rows after delayed reveal")
 	}
 	if _, ok := m.selectedItem(); ok {
 		t.Fatal("expected stale or skeleton rows to be non-selectable while loading")
@@ -648,27 +649,32 @@ func TestTabSwitchUsesCachedLibraryItems(t *testing.T) {
 		LibraryID: "lib-002",
 	})
 
+	// Switching back always triggers a fetch since the screen has no manual cache.
 	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if cmd != nil {
-		t.Fatal("expected no fetch command when switching to cached library")
+	if cmd == nil {
+		t.Fatal("expected fetch command on second switch")
 	}
 	if m.libraryID != "lib-001" {
 		t.Fatalf("libraryID = %q, want lib-001", m.libraryID)
 	}
-	if len(m.Items()) != len(firstItems) {
-		t.Fatalf("items length = %d, want %d", len(m.Items()), len(firstItems))
+	if !m.Loading() {
+		t.Fatal("expected loading=true after switching back")
 	}
-	if m.Items()[0].ID != firstItems[0].ID {
-		t.Fatalf("first cached item ID = %q, want %q", m.Items()[0].ID, firstItems[0].ID)
+	// Stale lib-002 items remain visible briefly until new data arrives.
+	if len(m.Items()) != len(secondItems) {
+		t.Fatalf("items length = %d, want %d", len(m.Items()), len(secondItems))
+	}
+	if m.Items()[0].ID != secondItems[0].ID {
+		t.Fatalf("first stale item ID = %q, want %q", m.Items()[0].ID, secondItems[0].ID)
 	}
 }
 
-func TestConfigureUsesCachedLibraryItems(t *testing.T) {
+func TestConfigureFetchesWhenLibraryChanges(t *testing.T) {
 	libs := []abs.Library{
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
 	firstItems := makeItems(2)
 	secondItems := makeItems(2)
 	secondItems[0].ID = "pod-1"
@@ -682,7 +688,7 @@ func TestConfigureUsesCachedLibraryItems(t *testing.T) {
 	})
 	m.Configure("lib-002", libs)
 	if !m.Loading() {
-		t.Fatal("expected loading=true for uncached configured library")
+		t.Fatal("expected loading=true when configuring different library")
 	}
 
 	m, _ = m.Update(LibraryItemsMsg{
@@ -692,24 +698,27 @@ func TestConfigureUsesCachedLibraryItems(t *testing.T) {
 		LibraryID: "lib-002",
 	})
 
+	// Re-configuring a previously-viewed library triggers a fresh fetch since
+	// the screen no longer maintains an in-memory cache.
 	m.Configure("lib-001", libs)
-	if m.Loading() {
-		t.Fatal("expected loading=false when configuring cached library")
+	if !m.Loading() {
+		t.Fatal("expected loading=true when re-configuring a different library")
 	}
-	if len(m.Items()) != len(firstItems) {
-		t.Fatalf("items length = %d, want %d", len(m.Items()), len(firstItems))
+	// Stale lib-002 items remain visible briefly until new data arrives.
+	if len(m.Items()) != len(secondItems) {
+		t.Fatalf("items length = %d, want %d", len(m.Items()), len(secondItems))
 	}
-	if m.Items()[0].ID != firstItems[0].ID {
-		t.Fatalf("first cached item ID = %q, want %q", m.Items()[0].ID, firstItems[0].ID)
+	if m.Items()[0].ID != secondItems[0].ID {
+		t.Fatalf("first stale item ID = %q, want %q", m.Items()[0].ID, secondItems[0].ID)
 	}
 }
 
-func TestConfigureUsesCachedEmptyLibraryResults(t *testing.T) {
+func TestConfigureFetchesWhenSwitchingToPreviouslyEmptyLibrary(t *testing.T) {
 	libs := []abs.Library{
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
 
 	firstItems := makeItems(2)
 	m, _ = m.Update(LibraryItemsMsg{
@@ -727,10 +736,11 @@ func TestConfigureUsesCachedEmptyLibraryResults(t *testing.T) {
 		LibraryID: "lib-002",
 	})
 
-	m.Configure("lib-001", libs)
+	// Without manual cache, switching back to a previously-empty library
+	// re-enters the loading state and re-fetches.
 	m.Configure("lib-002", libs)
-	if m.Loading() {
-		t.Fatal("expected loading=false when configuring cached empty library")
+	if !m.Loading() {
+		t.Fatal("expected loading=true when re-configuring previously-empty library")
 	}
 	if len(m.Items()) != 0 {
 		t.Fatalf("items length = %d, want 0", len(m.Items()))

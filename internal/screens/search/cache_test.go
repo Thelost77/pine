@@ -4,10 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/db"
 )
 
 func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
@@ -46,7 +49,7 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cache := NewCache(abs.NewClient(srv.URL, "tok"))
+	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
 	first, err := cache.Search(context.Background(), "lib-pod", "podcast", "Jas")
 	if err != nil {
@@ -103,7 +106,7 @@ func TestCacheKeepsSnapshotsPerLibraryID(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cache := NewCache(abs.NewClient(srv.URL, "tok"))
+	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
 	if _, err := cache.Search(context.Background(), "lib-a", "book", "alp"); err != nil {
 		t.Fatalf("search lib-a: %v", err)
@@ -147,7 +150,7 @@ func TestCacheRebuildsStaleSnapshot(t *testing.T) {
 	defer srv.Close()
 
 	now := time.Unix(1000, 0)
-	cache := NewCache(abs.NewClient(srv.URL, "tok"))
+	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	cache.ttl = time.Minute
 	cache.now = func() time.Time { return now }
 
@@ -194,7 +197,7 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cache := NewCache(abs.NewClient(srv.URL, "tok"))
+	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
 	results, err := cache.Search(context.Background(), "lib-pod", "podcast", "100")
 	if err != nil {
@@ -231,7 +234,7 @@ func TestCacheBookSearchUsesFuzzyFallback(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cache := NewCache(abs.NewClient(srv.URL, "tok"))
+	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
 	results, err := cache.Search(context.Background(), "lib-a", "book", "tgg")
 	if err != nil {
@@ -250,5 +253,65 @@ func TestNormalizeSearchText(t *testing.T) {
 	want := "100m advice that ll piss off every business guru ft dhh 9xoaqikabzq"
 	if got != want {
 		t.Fatalf("normalizeSearchText() = %q, want %q", got, want)
+	}
+}
+
+func TestCachePersistsSnapshotToDiskAndRestoresOnRestart(t *testing.T) {
+	var listCalls int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/libraries/lib-a/series" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			return
+		}
+		if r.URL.Path != "/api/libraries/lib-a/items" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		listCalls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"results":[{"id":"book-001","libraryId":"lib-a","mediaType":"book","media":{"metadata":{"title":"Alpha","authorName":"Ann","duration":3600}}}],
+			"total":1,
+			"limit":100,
+			"page":0
+		}`))
+	}))
+	defer srv.Close()
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	dbStore, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer dbStore.Close()
+
+	cacheStore := cache.NewStore(dbStore)
+	client := cache.NewClient(abs.NewClient(srv.URL, "tok"), nil)
+
+	// Build snapshot with first cache instance
+	firstCache := NewCache(client, cacheStore)
+	results1, err := firstCache.Search(context.Background(), "lib-a", "book", "alp")
+	if err != nil {
+		t.Fatalf("first search: %v", err)
+	}
+	if len(results1) != 1 || results1[0].Media.Metadata.Title != "Alpha" {
+		t.Fatalf("unexpected first results: %#v", results1)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls after first search = %d, want 1", listCalls)
+	}
+
+	// Simulate restart: create new cache instance with same store
+	secondCache := NewCache(client, cacheStore)
+	results2, err := secondCache.Search(context.Background(), "lib-a", "book", "alp")
+	if err != nil {
+		t.Fatalf("second search after restart: %v", err)
+	}
+	if len(results2) != 1 || results2[0].Media.Metadata.Title != "Alpha" {
+		t.Fatalf("unexpected second results: %#v", results2)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls after restart = %d, want 1 (should have loaded from disk)", listCalls)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -64,7 +65,7 @@ type Model struct {
 	width         int
 	height        int
 	styles        ui.Styles
-	client        *abs.Client
+	client        *cache.Client
 	libraryID     string
 	seriesID      string
 	currentItemID string
@@ -74,7 +75,7 @@ type Model struct {
 }
 
 // New creates a series screen model.
-func New(styles ui.Styles, client *abs.Client, libraryID, seriesID, currentItemID string) Model {
+func New(styles ui.Styles, client *cache.Client, libraryID, seriesID, currentItemID string) Model {
 	delegate := newDelegate(styles, false)
 
 	l := list.New(nil, delegate, 0, 0)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -113,7 +114,6 @@ type Model struct {
 	contentLibrary  string
 	page            int
 	totalItems      int
-	cache           map[string]libraryCacheEntry
 	loading         bool
 	loadingVisible  bool
 	loadingGen      uint64
@@ -122,20 +122,14 @@ type Model struct {
 	width           int
 	height          int
 	styles          ui.Styles
-	client          *abs.Client
+	client          *cache.Client
 	libraryID       string
 	libraries       []abs.Library
 	selectedLibrary int
 }
 
-type libraryCacheEntry struct {
-	items      []abs.LibraryItem
-	page       int
-	totalItems int
-}
-
 // New creates a new library screen model.
-func New(styles ui.Styles, client *abs.Client, libraryID string, libraries []abs.Library) Model {
+func New(styles ui.Styles, client *cache.Client, libraryID string, libraries []abs.Library) Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(styles.Accent.GetForeground()).
@@ -177,7 +171,6 @@ func New(styles ui.Styles, client *abs.Client, libraryID string, libraries []abs
 		client:          client,
 		libraryID:       libraryID,
 		libraries:       libraries,
-		cache:           make(map[string]libraryCacheEntry),
 		selectedLibrary: selectedIdx,
 	}
 }
@@ -202,7 +195,9 @@ func (m *Model) Configure(libraryID string, libraries []abs.Library) {
 	m.err = nil
 	m.updateListTitle()
 
-	if m.applyCachedLibrary(m.libraryID) {
+	if m.contentLibrary == m.libraryID && len(m.items) > 0 {
+		m.loading = false
+		m.loadingVisible = false
 		return
 	}
 
@@ -223,11 +218,6 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command that fetches the first page of library items.
 func (m Model) Init() tea.Cmd {
-	if m.libraryID != "" {
-		if _, ok := m.cache[m.libraryID]; ok {
-			return nil
-		}
-	}
 	if m.contentLibrary != "" && m.contentLibrary == m.libraryID {
 		return nil
 	}
@@ -257,7 +247,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.items = append(m.items, msg.Items...)
 		}
-		m.storeCurrentLibraryCache()
 		m.refreshListItems()
 		return m, nil
 
@@ -300,14 +289,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
-				m.storeCurrentLibraryCache()
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.libraryID = m.libraries[m.selectedLibrary].ID
 				m.updateListTitle()
 				m.err = nil
-				if m.applyCachedLibrary(m.libraryID) {
-					return m, nil
-				}
 				m.page = 0
 				m.totalItems = 0
 				m.loading = true
@@ -456,32 +441,6 @@ func (m Model) selectedItem() (libraryListItem, bool) {
 		return libraryListItem{}, false
 	}
 	return sel, true
-}
-
-func (m *Model) storeCurrentLibraryCache() {
-	if m.libraryID == "" || m.contentLibrary != m.libraryID {
-		return
-	}
-	m.cache[m.libraryID] = libraryCacheEntry{
-		items:      append([]abs.LibraryItem(nil), m.items...),
-		page:       m.page,
-		totalItems: m.totalItems,
-	}
-}
-
-func (m *Model) applyCachedLibrary(libraryID string) bool {
-	entry, ok := m.cache[libraryID]
-	if !ok {
-		return false
-	}
-	m.items = append([]abs.LibraryItem(nil), entry.items...)
-	m.page = entry.page
-	m.totalItems = entry.totalItems
-	m.loading = false
-	m.loadingVisible = false
-	m.contentLibrary = libraryID
-	m.refreshListItems()
-	return true
 }
 
 // Items returns the current library items.
