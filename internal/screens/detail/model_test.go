@@ -1001,3 +1001,47 @@ func TestFormatTimestamp(t *testing.T) {
 		}
 	}
 }
+
+func TestView_TruncatesLongEpisodeAndBookmarkTitles(t *testing.T) {
+	styles := ui.DefaultStyles()
+	desc := "Podcast description"
+	item := abs.LibraryItem{
+		ID:        "pod-trunc-001",
+		MediaType: "podcast",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title:       "Podcast Help",
+				Description: &desc,
+			},
+			Episodes: []abs.PodcastEpisode{{
+				ID:       "ep-001",
+				Index:    intPtr(1),
+				Title:    "This Is An Extremely Long Episode Title That Should Definitely Be Truncated",
+				Duration: 1800,
+			}},
+		},
+	}
+
+	m := New(styles, item)
+	m, _ = m.Update(BookmarksUpdatedMsg{Bookmarks: []abs.Bookmark{
+		{LibraryItemID: "pod-trunc-001", Title: "This Is An Extremely Long Bookmark Title That Should Also Definitely Be Truncated", Time: 120.0},
+	}})
+	
+	// Let's set a small width (say 40 characters)
+	m.SetSize(40, 24)
+
+	v := m.View()
+
+	// Verify that the full titles are NOT present in the view
+	if strings.Contains(v, "This Is An Extremely Long Episode Title That Should Definitely Be Truncated") {
+		t.Error("expected long episode title to be truncated, but it was printed in full")
+	}
+	if strings.Contains(v, "This Is An Extremely Long Bookmark Title That Should Also Definitely Be Truncated") {
+		t.Error("expected long bookmark title to be truncated, but it was printed in full")
+	}
+
+	// Verify that they contain the ellipsis ...
+	if !strings.Contains(v, "...") {
+		t.Error("expected truncated content to contain ellipsis '...'")
+	}
+}

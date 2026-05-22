@@ -10,7 +10,6 @@ const (
 	ScreenHome
 	ScreenLibrary
 	ScreenDetail
-	ScreenSearch
 	ScreenSeriesList
 	ScreenSeries
 )
@@ -26,8 +25,6 @@ func (s Screen) String() string {
 		return "Library"
 	case ScreenDetail:
 		return "Detail"
-	case ScreenSearch:
-		return "Search"
 	case ScreenSeriesList:
 		return "Series"
 	case ScreenSeries:
@@ -126,3 +123,7 @@ type SeriesContinueMsg struct {
 	Item abs.LibraryItem
 	Err  error
 }
+
+// PrewarmDoneMsg is sent after cache pre-warming completes. No action needed,
+// just used to keep the command chain alive.
+type PrewarmDoneMsg struct{}

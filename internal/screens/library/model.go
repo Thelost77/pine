@@ -8,6 +8,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -54,12 +55,6 @@ type NavigateDetailMsg struct {
 	Item abs.LibraryItem
 }
 
-// NavigateSearchMsg requests navigation to the search screen for the current library.
-type NavigateSearchMsg struct {
-	LibraryID        string
-	LibraryMediaType string
-}
-
 // NavigateSeriesListMsg requests navigation to the current library's series browser.
 type NavigateSeriesListMsg struct {
 	LibraryID   string
@@ -73,7 +68,6 @@ type KeyMap struct {
 	NextLib  key.Binding
 	PageUp   key.Binding
 	PageDown key.Binding
-	Search   key.Binding
 	Series   key.Binding
 	Select   key.Binding
 }
@@ -100,10 +94,6 @@ func DefaultKeyMap() KeyMap {
 		PageDown: key.NewBinding(
 			key.WithKeys("L"),
 			key.WithHelp("L", "page down"),
-		),
-		Search: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "search"),
 		),
 		Series: key.NewBinding(
 			key.WithKeys("s"),
@@ -293,12 +283,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Back):
 			return m, func() tea.Msg { return GoBackMsg{} }
-		case key.Matches(msg, m.keys.Search):
-			libID := m.libraryID
-			libMediaType := m.SelectedLibraryMediaType()
-			return m, func() tea.Msg {
-				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
-			}
 		case key.Matches(msg, m.keys.Series):
 			if m.SelectedLibraryMediaType() == "book" {
 				libID := m.libraryID
@@ -599,4 +583,27 @@ func (m Model) Page() int {
 // TotalItems returns the total number of items available.
 func (m Model) TotalItems() int {
 	return m.totalItems
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	sel, ok := m.list.SelectedItem().(ui.ListItem)
+	if !ok {
+		return nil
+	}
+	items := []components.PaletteItem{
+		{Label: "Context Actions", IsHeader: true},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+	}
+	if sel.Item.MediaType != "podcast" {
+		items = append(items,
+			components.PaletteItem{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+			components.PaletteItem{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
+		)
+	}
+	if m.SelectedLibraryMediaType() == "book" {
+		items = append(items,
+			components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries},
+		)
+	}
+	return items
 }

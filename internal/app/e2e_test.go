@@ -13,7 +13,6 @@ import (
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
-	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -188,80 +187,6 @@ func TestE2E_LibraryBrowseAndSelect(t *testing.T) {
 
 	// After NavigateDetailMsg, root model navigates to Detail
 	assertScreen(t, m, ScreenDetail)
-}
-
-// ---------------------------------------------------------------------------
-// E2E: Home → Search → select result
-// ---------------------------------------------------------------------------
-
-func TestE2E_HomeToSearchToDetail(t *testing.T) {
-	log := &apiLog{}
-	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
-	srv := newFullMockABSServer(log, state)
-	defer srv.Close()
-
-	mp := &mockPlayer{}
-	m := newE2EModelAuthenticated(srv, mp)
-	m = e2eSetSize(m, 120, 40)
-
-	// Press '/' to go to search — home returns cmd wrapping NavigateSearchMsg
-	m, cmd := e2ePressKey(m, '/')
-	m, cmd = feedCmd(m, cmd)
-
-	assertScreen(t, m, ScreenSearch)
-	assertBackStack(t, m, []Screen{ScreenHome})
-
-	// Resolve any init cmds (like textinput.Blink)
-	m = feedCmdChain(m, cmd, 3)
-
-	// Type a search query — this triggers debounce internally
-	m = e2eTypeString(m, "gatsby")
-
-	// The debounceTickMsg is unexported from the search package, so we can't
-	// trigger it directly. Instead, simulate the search result arriving by
-	// feeding SearchResultsMsg through the root model (which dispatches to search).
-	searchItems := []abs.LibraryItem{testLibraryItem("item-001", "The Great Gatsby")}
-	res, _ := m.Update(search.SearchResultsMsg{Items: searchItems, Query: "gatsby"})
-	m = res.(Model)
-
-	if len(m.search.Items()) == 0 {
-		t.Error("search should have results for 'gatsby'")
-	}
-
-	// Press enter to select the first result
-	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
-	m, cmd = feedCmd(m, cmd)
-
-	assertScreen(t, m, ScreenDetail)
-	assertBackStack(t, m, []Screen{ScreenHome, ScreenSearch})
-}
-
-// ---------------------------------------------------------------------------
-// E2E: Search → Esc returns to previous screen
-// ---------------------------------------------------------------------------
-
-func TestE2E_SearchBack(t *testing.T) {
-	log := &apiLog{}
-	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
-	srv := newFullMockABSServer(log, state)
-	defer srv.Close()
-
-	mp := &mockPlayer{}
-	m := newE2EModelAuthenticated(srv, mp)
-	m = e2eSetSize(m, 120, 40)
-
-	// Navigate to search
-	m, cmd := e2ePressKey(m, '/')
-	m, cmd = feedCmd(m, cmd)
-	m = feedCmdChain(m, cmd, 3)
-	assertScreen(t, m, ScreenSearch)
-
-	// Press Esc — search screen emits search.BackMsg → root pops back
-	m, cmd = e2ePressSpecial(m, tea.KeyEscape)
-	m, cmd = feedCmd(m, cmd)
-
-	assertScreen(t, m, ScreenHome)
-	assertBackStack(t, m, []Screen{})
 }
 
 // ---------------------------------------------------------------------------

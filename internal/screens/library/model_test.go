@@ -175,27 +175,6 @@ func TestEnterEmitsNavigateDetailMsg(t *testing.T) {
 	}
 }
 
-func TestSlashEmitsNavigateSearchMsg(t *testing.T) {
-	libs := []abs.Library{{ID: "lib-001", Name: "Books", MediaType: "book"}}
-	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	if cmd == nil {
-		t.Fatal("slash should produce a command")
-	}
-	msg := cmd()
-	searchMsg, ok := msg.(NavigateSearchMsg)
-	if !ok {
-		t.Fatalf("expected NavigateSearchMsg, got %T", msg)
-	}
-	if searchMsg.LibraryID != "lib-001" {
-		t.Fatalf("library ID = %q, want %q", searchMsg.LibraryID, "lib-001")
-	}
-	if searchMsg.LibraryMediaType != "book" {
-		t.Fatalf("library media type = %q, want %q", searchMsg.LibraryMediaType, "book")
-	}
-}
-
 func TestSKeyEmitsNavigateSeriesListMsg(t *testing.T) {
 	libs := []abs.Library{{ID: "lib-001", Name: "Books", MediaType: "book"}}
 	m := New(ui.DefaultStyles(), abs.NewClient("http://test", "tok"), "lib-001", libs)

@@ -9,6 +9,7 @@ import (
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -74,7 +75,6 @@ type KeyMap struct {
 	Enter      key.Binding
 	Back       key.Binding
 	Library    key.Binding
-	Search     key.Binding
 	NextLib    key.Binding
 	PageUp     key.Binding
 	PageDown   key.Binding
@@ -101,10 +101,6 @@ func DefaultKeyMap() KeyMap {
 		Library: key.NewBinding(
 			key.WithKeys("o"),
 			key.WithHelp("o", "open library"),
-		),
-		Search: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "search"),
 		),
 		NextLib: key.NewBinding(
 			key.WithKeys("tab"),
@@ -278,12 +274,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return NavigateLibraryMsg{LibraryID: libID, Libraries: libs}
 			}
-		case key.Matches(msg, m.keys.Search):
-			libID := m.SelectedLibraryID()
-			libMediaType := m.SelectedLibraryMediaType()
-			return m, func() tea.Msg {
-				return NavigateSearchMsg{LibraryID: libID, LibraryMediaType: libMediaType}
-			}
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
 				// Cache current library's items
@@ -430,12 +420,6 @@ type PlayNextMsg struct {
 type NavigateLibraryMsg struct {
 	LibraryID string
 	Libraries []abs.Library
-}
-
-// NavigateSearchMsg requests navigation to the search screen.
-type NavigateSearchMsg struct {
-	LibraryID        string
-	LibraryMediaType string
 }
 
 // GoBackMsg requests navigating back from the home screen.
@@ -692,8 +676,11 @@ func (m Model) selectedQueueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool
 	if !ok {
 		return abs.LibraryItem{}, nil, false
 	}
-	if item.MediaType == "podcast" && item.RecentEpisode != nil {
-		return item, cloneEpisode(item.RecentEpisode), true
+	if item.MediaType == "podcast" {
+		if item.RecentEpisode != nil {
+			return item, cloneEpisode(item.RecentEpisode), true
+		}
+		return abs.LibraryItem{}, nil, false
 	}
 	return item, nil, true
 }
@@ -754,4 +741,18 @@ func (m Model) Loading() bool {
 // Error returns the last error, if any.
 func (m Model) Error() error {
 	return m.err
+}
+
+func (m Model) SelectedPaletteActions() []components.PaletteItem {
+	targetItem, targetEpisode, targetOk := m.selectedQueueTarget()
+	if !targetOk {
+		return nil
+	}
+	items := []components.PaletteItem{
+		{Label: "Context Actions", IsHeader: true},
+		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: targetItem},
+		{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: AddToQueueMsg{Item: targetItem, Episode: targetEpisode}},
+		{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: PlayNextMsg{Item: targetItem, Episode: targetEpisode}},
+	}
+	return items
 }

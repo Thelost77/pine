@@ -12,7 +12,6 @@ import (
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
-	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
@@ -99,7 +98,6 @@ func TestScreenString(t *testing.T) {
 		{ScreenHome, "Home"},
 		{ScreenLibrary, "Library"},
 		{ScreenDetail, "Detail"},
-		{ScreenSearch, "Search"},
 		{ScreenSeriesList, "Series"},
 		{ScreenSeries, "Series"},
 		{Screen(99), "Unknown"},
@@ -249,27 +247,6 @@ func TestQOnLoginDoesNotQuit(t *testing.T) {
 	}
 }
 
-func TestQOnSearchDoesNotQuit(t *testing.T) {
-	m := newPlaybackTestModel()
-	m.screen = ScreenSearch
-	m.search = search.New(m.styles, m.searchCache, "lib-book", "book")
-
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	m = result.(Model)
-
-	if got := m.search.Query(); got != "q" {
-		t.Fatalf("search query = %q, want %q", got, "q")
-	}
-	if cmd == nil {
-		t.Fatal("expected typing command from search screen")
-	}
-	if msg := cmd(); msg != nil {
-		if _, ok := msg.(tea.QuitMsg); ok {
-			t.Fatal("q on search screen should not quit")
-		}
-	}
-}
-
 func TestWindowSizeMsg(t *testing.T) {
 	m := newTestModel()
 
@@ -341,7 +318,7 @@ func TestBackStackIsCopy(t *testing.T) {
 	rm := result.(Model)
 
 	stack := rm.BackStack()
-	stack[0] = ScreenSearch // mutate the copy
+	stack[0] = ScreenLibrary // mutate the copy
 
 	original := rm.BackStack()
 	if original[0] != ScreenLogin {
@@ -383,13 +360,13 @@ func TestEscFromHomeRootIsNoOp(t *testing.T) {
 func TestMultipleBackNavigation(t *testing.T) {
 	m := newTestModel()
 
-	// Login → Home → Library → Search
-	for _, s := range []Screen{ScreenHome, ScreenLibrary, ScreenSearch} {
+	// Login → Home → Library → SeriesList
+	for _, s := range []Screen{ScreenHome, ScreenLibrary, ScreenSeriesList} {
 		result, _ := m.Update(NavigateMsg{Screen: s})
 		m = result.(Model)
 	}
 
-	// Back: Search → Library → Home → Login
+	// Back: SeriesList → Library → Home → Login
 	expected := []Screen{ScreenLibrary, ScreenHome, ScreenLogin}
 	for _, want := range expected {
 		result, _ := m.Update(BackMsg{})
@@ -655,97 +632,6 @@ func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
 	}
 	if m.chapterOverlayIndex != 1 {
 		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
-	}
-}
-
-func TestSearchScreenTypingCDoesNotOpenChapterOverlay(t *testing.T) {
-	m := newPlaybackTestModel()
-	m.screen = ScreenSearch
-	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
-	m.sessionID = "sess-123"
-	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
-
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-	m = result.(Model)
-
-	if m.chapterOverlayVisible {
-		t.Fatal("overlay should stay closed while typing in search")
-	}
-	if got := m.search.Query(); got != "c" {
-		t.Fatalf("search query = %q, want %q", got, "c")
-	}
-}
-
-func TestSearchScreenSpaceKeyDoesNotControlPlayback(t *testing.T) {
-	m := newPlaybackTestModel()
-	m.screen = ScreenSearch
-	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
-	m.sessionID = "sess-123"
-	m.player.Title = "Episode"
-	m.player.Playing = true
-
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = result.(Model)
-
-	if !m.player.Playing {
-		t.Fatal("player should not pause while typing in search")
-	}
-	if cmd != nil {
-		t.Fatal("space-only query should not schedule a search")
-	}
-	if got := m.search.Query(); got != "" {
-		t.Fatalf("search query = %q, want empty", got)
-	}
-}
-
-func TestSearchScreenNextInQueueKeyUpdatesQuery(t *testing.T) {
-	m := newPlaybackTestModel()
-	m.screen = ScreenSearch
-	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
-	m.sessionID = "sess-current"
-	m.itemID = "item-current"
-	m.player.Playing = true
-	m.queue = []QueueEntry{{
-		Item: abs.LibraryItem{
-			ID: "queued-book",
-			Media: abs.Media{
-				Metadata: abs.MediaMetadata{Title: "Queued Book"},
-			},
-		},
-	}}
-
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'>'}})
-	m = result.(Model)
-
-	if cmd == nil {
-		t.Fatal("expected typing command from search screen")
-	}
-	if len(m.Queue()) != 1 {
-		t.Fatalf("queue = %#v, want unchanged queue", m.Queue())
-	}
-	if got := m.search.Query(); got != ">" {
-		t.Fatalf("search query = %q, want %q", got, ">")
-	}
-}
-
-func TestSearchScreenSleepTimerKeyUpdatesQuery(t *testing.T) {
-	m := newPlaybackTestModel()
-	m.screen = ScreenSearch
-	m.search = search.New(m.styles, m.searchCache, "lib-pod", "podcast")
-	m.sessionID = "sess-123"
-	m.player.Playing = true
-
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	m = result.(Model)
-
-	if m.sleepDuration != 0 {
-		t.Fatalf("sleep duration = %v, want 0", m.sleepDuration)
-	}
-	if cmd == nil {
-		t.Fatal("expected typing command from search screen")
-	}
-	if got := m.search.Query(); got != "s" {
-		t.Fatalf("search query = %q, want %q", got, "s")
 	}
 }
 
@@ -1715,5 +1601,54 @@ func TestPlayerLaunchErrShowsBanner(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected auto-dismiss cmd")
+	}
+}
+
+func TestBuildContextPaletteItemsFiltersAddBookmark(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.detail = detail.New(m.styles, abs.LibraryItem{
+		ID:        "item-001",
+		LibraryID: "lib-001",
+		MediaType: "book",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Caliban's War"}},
+	})
+
+	// When not playing, "Add Bookmark" should NOT be in context actions
+	items := m.buildContextPaletteItems()
+	hasAddBookmark := false
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			hasAddBookmark = true
+		}
+	}
+	if hasAddBookmark {
+		t.Fatal("expected 'Add Bookmark' to be filtered out when not playing")
+	}
+
+	// When playing a different item, "Add Bookmark" should NOT be in context actions
+	m.sessionID = "sess-123"
+	m.itemID = "item-002"
+	items = m.buildContextPaletteItems()
+	hasAddBookmark = false
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			hasAddBookmark = true
+		}
+	}
+	if hasAddBookmark {
+		t.Fatal("expected 'Add Bookmark' to be filtered out when playing a different item")
+	}
+
+	// When playing the same item, "Add Bookmark" SHOULD be in context actions
+	m.itemID = "item-001"
+	items = m.buildContextPaletteItems()
+	hasAddBookmark = false
+	for _, item := range items {
+		if item.Action == components.ActionAddBookmark {
+			hasAddBookmark = true
+		}
+	}
+	if !hasAddBookmark {
+		t.Fatal("expected 'Add Bookmark' to be present when playing the same item")
 	}
 }

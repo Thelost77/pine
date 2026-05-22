@@ -106,16 +106,6 @@ func TestViewHintsAdvertiseQueueActionsAndCountOnDetail(t *testing.T) {
 	}
 }
 
-func TestViewHintsAdvertiseSearchOnLibrary(t *testing.T) {
-	m := newTestModelAuthenticated()
-	m.screen = ScreenLibrary
-
-	hints := m.viewHints()
-	if !containsString(hints, "/ search") {
-		t.Fatalf("library hints should advertise search\n%s", hints)
-	}
-}
-
 func TestViewHintsKeepSeriesVisibleDuringPlayback(t *testing.T) {
 	m := newTestModelAuthenticated()
 	m.screen = ScreenLibrary

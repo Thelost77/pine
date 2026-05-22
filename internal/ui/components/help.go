@@ -52,7 +52,6 @@ func defaultGroups() []HelpGroup {
 			Title: "Home",
 			Bindings: []HelpBinding{
 				{Key: "o", Desc: "open library"},
-				{Key: "/", Desc: "search"},
 				{Key: "tab", Desc: "switch library"},
 			},
 		},
@@ -60,7 +59,6 @@ func defaultGroups() []HelpGroup {
 			Title: "Library",
 			Bindings: []HelpBinding{
 				{Key: "s", Desc: "browse series (books)"},
-				{Key: "/", Desc: "search"},
 				{Key: "tab", Desc: "switch library"},
 			},
 		},

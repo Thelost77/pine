@@ -56,6 +56,9 @@ type snapshotEntry struct {
 	episodeTitle    string
 	episodeDuration float64
 
+	seriesID   string
+	seriesName string
+
 	primarySearchText   string
 	secondarySearchText string
 	combinedSearchText  string
@@ -157,7 +160,28 @@ func (c *Cache) buildSnapshot(ctx context.Context, libraryID, libraryMediaType s
 	case "podcast":
 		return c.buildPodcastSnapshot(ctx, libraryID)
 	default:
-		return c.buildBookSnapshot(ctx, libraryID)
+		var wg sync.WaitGroup
+		var bookSnap, seriesSnap *librarySnapshot
+		var bookErr, seriesErr error
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			bookSnap, bookErr = c.buildBookSnapshot(ctx, libraryID)
+		}()
+		go func() {
+			defer wg.Done()
+			seriesSnap, seriesErr = c.buildSeriesSnapshot(ctx, libraryID)
+		}()
+		wg.Wait()
+
+		if bookErr != nil {
+			return nil, bookErr
+		}
+		if seriesErr == nil && seriesSnap != nil {
+			bookSnap.entries = append(bookSnap.entries, seriesSnap.entries...)
+		}
+		return bookSnap, nil
 	}
 }
 
@@ -205,6 +229,48 @@ func (c *Cache) buildBookSnapshot(ctx context.Context, libraryID string) (*libra
 	return &librarySnapshot{
 		libraryID: libraryID,
 		mediaType: "book",
+		entries:   entries,
+	}, nil
+}
+
+func (c *Cache) buildSeriesSnapshot(ctx context.Context, libraryID string) (*librarySnapshot, error) {
+	entries := make([]snapshotEntry, 0)
+	page := 0
+
+	for {
+		resp, err := c.client.GetLibrarySeries(ctx, libraryID, page, snapshotPageLimit)
+		if err != nil {
+			return nil, fmt.Errorf("list library series: %w", err)
+		}
+
+		for _, series := range resp.Results {
+			entries = append(entries, snapshotEntry{
+				seriesID:            series.ID,
+				libraryID:           libraryID,
+				mediaType:           "series",
+				seriesName:          series.Name,
+				primarySearchText:   normalizeSearchText(series.Name),
+				secondarySearchText: "",
+				combinedSearchText:  normalizeSearchText(series.Name),
+				fuzzySearchText:     compactNormalizedText(normalizeSearchText(series.Name)),
+				primaryTokens:       tokenizeSearchText(normalizeSearchText(series.Name)),
+				combinedTokens:      tokenizeSearchText(normalizeSearchText(series.Name)),
+			})
+		}
+
+		if len(resp.Results) == 0 || len(resp.Results) < snapshotPageLimit {
+			break
+		}
+		loaded := (page + 1) * snapshotPageLimit
+		if resp.Total > 0 && loaded >= resp.Total {
+			break
+		}
+		page++
+	}
+
+	return &librarySnapshot{
+		libraryID: libraryID,
+		mediaType: "series",
 		entries:   entries,
 	}, nil
 }
@@ -325,6 +391,8 @@ func (s *librarySnapshot) filter(normalizedQuery string) []abs.LibraryItem {
 		switch candidate.entry.mediaType {
 		case "podcast":
 			results = append(results, candidate.entry.podcastResult())
+		case "series":
+			results = append(results, candidate.entry.seriesResult())
 		default:
 			results = append(results, candidate.entry.bookResult())
 		}
@@ -459,6 +527,19 @@ func (e snapshotEntry) podcastResult() abs.LibraryItem {
 				Title: e.podcastTitle,
 			},
 			Episodes: []abs.PodcastEpisode{episode},
+		},
+	}
+}
+
+func (e snapshotEntry) seriesResult() abs.LibraryItem {
+	return abs.LibraryItem{
+		ID:        e.seriesID,
+		LibraryID: e.libraryID,
+		MediaType: "series",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{
+				Title: e.seriesName,
+			},
 		},
 	}
 }

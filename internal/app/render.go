@@ -34,15 +34,90 @@ func (m Model) View() string {
 
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	if m.width > 0 {
+	if m.width > 0 && m.height > 0 {
 		content = lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content)
+		content = strings.Join(normalizeOverlayCanvas(content, m.width, m.height), "\n")
 	}
 
-	if !m.chapterOverlayVisible {
+	if m.width > 0 && m.height > 0 {
+		content = m.restoreFooter(content, hints, footer)
+	}
+
+	if m.chapterOverlayVisible {
+		return m.overlayChapterModal(content)
+	}
+
+	if m.palette.Visible() {
+		content = m.overlayPaletteModal(content)
+	}
+
+	return content
+}
+
+func (m Model) overlayPaletteModal(content string) string {
+	overlay := m.palette.View()
+	if overlay == "" {
+		return content
+	}
+	if m.width <= 0 || m.height <= 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
+	}
+
+	baseLines := normalizeOverlayCanvas(content, m.width, m.height)
+	overlayLines := strings.Split(overlay, "\n")
+	overlayWidth := lipgloss.Width(overlay)
+	overlayHeight := len(overlayLines)
+	if overlayWidth <= 0 || overlayHeight == 0 {
 		return content
 	}
 
-	return m.overlayChapterModal(content)
+	x := max(0, (m.width-overlayWidth)/2)
+	bottomReserve := 2
+	availHeight := m.height - bottomReserve
+	if availHeight < overlayHeight {
+		availHeight = overlayHeight
+	}
+	y := max(0, (availHeight-overlayHeight)/2)
+	for i, line := range overlayLines {
+		if y+i >= len(baseLines) {
+			break
+		}
+		lineWidth := lipgloss.Width(line)
+		left := ansi.Truncate(baseLines[y+i], x, "")
+		rightWidth := max(0, m.width-(x+lineWidth))
+		right := ansi.TruncateLeft(baseLines[y+i], rightWidth, "")
+		baseLines[y+i] = left + line + right
+	}
+
+	return strings.Join(baseLines, "\n")
+}
+
+func (m Model) restoreFooter(content, hints, footer string) string {
+	lines := strings.Split(content, "\n")
+
+	hintLine := ""
+	if hints != "" {
+		hintLine = lipgloss.NewStyle().Width(m.width).Render(hints)
+	}
+	footerLine := ""
+	if footer != "" {
+		footerLine = lipgloss.NewStyle().Width(m.width).Render(footer)
+	}
+
+	idx := len(lines) - 1
+	if footerLine != "" {
+		if idx >= 0 {
+			lines[idx] = footerLine
+		}
+		idx--
+	}
+	if hintLine != "" {
+		if idx >= 0 {
+			lines[idx] = hintLine
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // viewHeader renders the application header bar.
@@ -63,8 +138,6 @@ func (m Model) viewScreen() string {
 		return m.library.View()
 	case ScreenDetail:
 		return m.detail.View()
-	case ScreenSearch:
-		return m.search.View()
 	case ScreenSeriesList:
 		return m.seriesList.View()
 	case ScreenSeries:
@@ -90,7 +163,6 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("a", "queue"))
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("o", "library"))
-		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("tab", "switch lib"))
 	case ScreenLibrary:
 		parts = append(parts, key("→/enter", "open"))
@@ -98,7 +170,6 @@ func (m Model) viewHints() string {
 		if m.library.SelectedLibraryMediaType() == "book" {
 			parts = append(parts, key("s", "series"))
 		}
-		parts = append(parts, key("/", "search"))
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenDetail:
 		parts = append(parts, key("enter/p", "play"))
@@ -107,9 +178,6 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("tab", "focus"))
 		parts = append(parts, key("←/esc", "back"))
-	case ScreenSearch:
-		parts = append(parts, key("enter", "open"))
-		parts = append(parts, key("esc", "back"))
 	case ScreenSeriesList:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("←/esc", "back"))

@@ -63,9 +63,9 @@ func (m *Model) propagateSize() {
 	m.home.SetSize(m.width, sh)
 	m.library.SetSize(m.width, sh)
 	m.detail.SetSize(m.width, sh)
-	m.search.SetSize(m.width, sh)
 	m.seriesList.SetSize(m.width, sh)
 	m.series.SetSize(m.width, sh)
+	m.palette.SetSize(m.width, m.height)
 }
 
 // initScreen returns the Init command for a given screen.
@@ -79,8 +79,6 @@ func (m Model) initScreen(s Screen) tea.Cmd {
 		return m.library.Init()
 	case ScreenDetail:
 		return m.detail.Init()
-	case ScreenSearch:
-		return m.search.Init()
 	case ScreenSeriesList:
 		return m.seriesList.Init()
 	case ScreenSeries:
@@ -102,8 +100,6 @@ func (m Model) updateScreen(msg tea.Msg) (Model, tea.Cmd) {
 		m.library, cmd = m.library.Update(msg)
 	case ScreenDetail:
 		m.detail, cmd = m.detail.Update(msg)
-	case ScreenSearch:
-		m.search, cmd = m.search.Update(msg)
 	case ScreenSeriesList:
 		m.seriesList, cmd = m.seriesList.Update(msg)
 	case ScreenSeries:

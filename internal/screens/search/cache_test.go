@@ -94,6 +94,9 @@ func TestCacheKeepsSnapshotsPerLibraryID(t *testing.T) {
 				"limit":100,
 				"page":0
 			}`))
+		case "/api/libraries/lib-a/series", "/api/libraries/lib-b/series":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -124,6 +127,11 @@ func TestCacheRebuildsStaleSnapshot(t *testing.T) {
 	var listCalls int
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/libraries/lib-a/series" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			return
+		}
 		if r.URL.Path != "/api/libraries/lib-a/items" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -202,6 +210,11 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 
 func TestCacheBookSearchUsesFuzzyFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/libraries/lib-a/series" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			return
+		}
 		if r.URL.Path != "/api/libraries/lib-a/items" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
