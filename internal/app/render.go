@@ -39,16 +39,16 @@ func (m Model) View() string {
 		content = strings.Join(normalizeOverlayCanvas(content, m.width, m.height), "\n")
 	}
 
-	if m.width > 0 && m.height > 0 {
-		content = m.restoreFooter(content, hints, footer)
-	}
-
 	if m.chapterOverlayVisible {
-		return m.overlayChapterModal(content)
+		content = m.overlayChapterModal(content)
 	}
 
 	if m.palette.Visible() {
 		content = m.overlayPaletteModal(content)
+	}
+
+	if m.width > 0 && m.height > 0 {
+		content = m.restoreFooter(content, hints, footer)
 	}
 
 	return content
