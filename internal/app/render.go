@@ -138,6 +138,8 @@ func (m Model) viewScreen() string {
 		return m.library.View()
 	case ScreenDetail:
 		return m.detail.View()
+	case ScreenMetadataEdit:
+		return m.metadataEdit.View()
 	case ScreenSeriesList:
 		return m.seriesList.View()
 	case ScreenSeries:
@@ -174,10 +176,17 @@ func (m Model) viewHints() string {
 	case ScreenDetail:
 		parts = append(parts, key("enter/p", "play"))
 		parts = append(parts, key("b", "bookmark"))
+		if _, _, ok := m.detail.MetadataEditTarget(); ok {
+			parts = append(parts, key("m", "metadata"))
+		}
 		parts = append(parts, key("a", "queue"))
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("tab", "focus"))
 		parts = append(parts, key("←/esc", "back"))
+	case ScreenMetadataEdit:
+		parts = append(parts, key("tab", "field"))
+		parts = append(parts, key("enter", "save"))
+		parts = append(parts, key("←/esc", "cancel"))
 	case ScreenSeriesList:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("←/esc", "back"))

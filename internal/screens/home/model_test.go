@@ -101,6 +101,46 @@ func sampleRecentlyAddedItems() []abs.LibraryItem {
 	}
 }
 
+func TestReplaceItemPreservesPodcastRecentEpisode(t *testing.T) {
+	m := newTestModel()
+	oldAuthor := "Old Host"
+	newAuthor := "New Host"
+	m.recentlyAdded = []abs.LibraryItem{{
+		ID:        "pod-1",
+		MediaType: "podcast",
+		AddedAt:   123,
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title:      "Old Podcast",
+			AuthorName: &oldAuthor,
+		}},
+		RecentEpisode: &abs.PodcastEpisode{ID: "ep-1", Title: "Episode 1", Duration: 120},
+	}}
+	updated := abs.LibraryItem{
+		ID:        "pod-1",
+		MediaType: "podcast",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title:      "New Podcast",
+			AuthorName: &newAuthor,
+		}, Episodes: []abs.PodcastEpisode{{ID: "ep-1", Title: "New Episode", Duration: 180}}},
+	}
+
+	m.ReplaceItem(updated)
+
+	got := m.recentlyAdded[0]
+	if got.Media.Metadata.Title != "New Podcast" {
+		t.Fatalf("title = %q, want New Podcast", got.Media.Metadata.Title)
+	}
+	if got.Media.Metadata.DisplayAuthor() != "New Host" {
+		t.Fatalf("author = %q, want New Host", got.Media.Metadata.DisplayAuthor())
+	}
+	if got.RecentEpisode == nil || got.RecentEpisode.ID != "ep-1" || got.RecentEpisode.Title != "New Episode" {
+		t.Fatalf("RecentEpisode = %#v, want updated matching episode", got.RecentEpisode)
+	}
+	if got.AddedAt != 123 {
+		t.Fatalf("AddedAt = %d, want preserved recent episode timestamp", got.AddedAt)
+	}
+}
+
 func TestNew(t *testing.T) {
 	m := newTestModel()
 	if !m.Loading() {

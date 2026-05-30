@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"slices"
+	"strings"
 )
 
 // LoginResponse is returned by POST /login.
@@ -91,19 +92,23 @@ type PodcastEpisode struct {
 
 // MediaMetadata holds descriptive information about a media item.
 type MediaMetadata struct {
-	Title       string          `json:"title"`
-	AuthorName  *string         `json:"authorName,omitempty"`
-	Description *string         `json:"description,omitempty"`
-	Duration    *float64        `json:"duration,omitempty"` // seconds
-	Chapters    []Chapter       `json:"chapters,omitempty"`
-	Series      *SeriesSequence `json:"series,omitempty"`
+	Title       string           `json:"title"`
+	AuthorName  *string          `json:"authorName,omitempty"`
+	Authors     []Author         `json:"authors,omitempty"`
+	Description *string          `json:"description,omitempty"`
+	Duration    *float64         `json:"duration,omitempty"` // seconds
+	Chapters    []Chapter        `json:"chapters,omitempty"`
+	Series      *SeriesSequence  `json:"series,omitempty"`
+	SeriesList  []SeriesSequence `json:"-"`
 }
 
 // UnmarshalJSON handles ABS returning series metadata as either an object or an array.
 func (m *MediaMetadata) UnmarshalJSON(data []byte) error {
 	type mediaMetadataAlias struct {
 		Title       string          `json:"title"`
+		Author      *string         `json:"author,omitempty"`
 		AuthorName  *string         `json:"authorName,omitempty"`
+		Authors     []Author        `json:"authors,omitempty"`
 		Description *string         `json:"description,omitempty"`
 		Duration    *float64        `json:"duration,omitempty"`
 		Chapters    []Chapter       `json:"chapters,omitempty"`
@@ -115,23 +120,31 @@ func (m *MediaMetadata) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	authorName := aux.AuthorName
+	if authorName == nil {
+		authorName = aux.Author
+	}
+
 	*m = MediaMetadata{
 		Title:       aux.Title,
-		AuthorName:  aux.AuthorName,
+		AuthorName:  authorName,
+		Authors:     aux.Authors,
 		Description: aux.Description,
 		Duration:    aux.Duration,
 		Chapters:    aux.Chapters,
 	}
 
-	if len(aux.Series) == 0 || string(aux.Series) == "null" {
+	seriesJSON := strings.TrimSpace(string(aux.Series))
+	if seriesJSON == "" || seriesJSON == "null" {
 		return nil
 	}
 
-	if aux.Series[0] == '[' {
+	if seriesJSON[0] == '[' {
 		var seriesList []SeriesSequence
 		if err := json.Unmarshal(aux.Series, &seriesList); err != nil {
 			return err
 		}
+		m.SeriesList = seriesList
 		if len(seriesList) > 0 {
 			series := seriesList[0]
 			m.Series = &series
@@ -144,12 +157,77 @@ func (m *MediaMetadata) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	m.Series = &series
+	m.SeriesList = []SeriesSequence{series}
 	return nil
+}
+
+// DisplayAuthor returns the best author string for UI display and search.
+func (m MediaMetadata) DisplayAuthor() string {
+	names := make([]string, 0, len(m.Authors))
+	for _, author := range m.Authors {
+		name := strings.TrimSpace(author.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) > 0 {
+		return strings.Join(names, ", ")
+	}
+	if m.AuthorName != nil {
+		name := strings.TrimSpace(*m.AuthorName)
+		if name != "" {
+			return name
+		}
+	}
+	return "Unknown author"
+}
+
+// PrimarySeries returns the first ABS series entry used by pine's current single-series behavior.
+func (m MediaMetadata) PrimarySeries() *SeriesSequence {
+	if len(m.SeriesList) > 0 {
+		return &m.SeriesList[0]
+	}
+	return m.Series
+}
+
+// HasMultipleAuthors reports whether ABS returned more than one non-empty author.
+func (m MediaMetadata) HasMultipleAuthors() bool {
+	count := 0
+	for _, author := range m.Authors {
+		if strings.TrimSpace(author.Name) != "" {
+			count++
+		}
+	}
+	return count > 1
+}
+
+// HasMultipleSeries reports whether ABS returned more than one series entry.
+func (m MediaMetadata) HasMultipleSeries() bool {
+	return len(m.SeriesList) > 1
+}
+
+// SeriesByID returns the series entry with the given ABS series ID.
+func (m MediaMetadata) SeriesByID(id string) *SeriesSequence {
+	for i := range m.SeriesList {
+		if m.SeriesList[i].ID == id {
+			return &m.SeriesList[i]
+		}
+	}
+	if m.Series != nil && m.Series.ID == id {
+		return m.Series
+	}
+	return nil
+}
+
+// Author is an Audiobookshelf author reference attached to book metadata.
+type Author struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
 }
 
 // SeriesSequence is the minimal series context attached to a library item.
 type SeriesSequence struct {
-	ID       string `json:"id"`
+	ID       string `json:"id,omitempty"`
 	Name     string `json:"name"`
 	Sequence string `json:"sequence,omitempty"`
 }

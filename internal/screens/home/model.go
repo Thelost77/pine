@@ -435,6 +435,60 @@ func (m Model) RecentlyAdded() []abs.LibraryItem {
 	return m.recentlyAdded
 }
 
+// ReplaceItem updates matching visible and cached items with fresh metadata.
+func (m *Model) ReplaceItem(updated abs.LibraryItem) {
+	changed := replaceItemsByID(m.items, updated)
+	changed = replaceItemsByID(m.recentlyAdded, updated) || changed
+	for libID, items := range m.itemCache {
+		if replaceItemsByID(items, updated) {
+			m.itemCache[libID] = items
+			changed = true
+		}
+	}
+	for libID, items := range m.recentCache {
+		if replaceItemsByID(items, updated) {
+			m.recentCache[libID] = items
+			changed = true
+		}
+	}
+	if changed {
+		m.refreshListRows()
+	}
+}
+
+// InvalidateLibrary removes cached home rows for a library.
+func (m *Model) InvalidateLibrary(libraryID string) {
+	delete(m.itemCache, libraryID)
+	delete(m.recentCache, libraryID)
+}
+
+func replaceItemsByID(items []abs.LibraryItem, updated abs.LibraryItem) bool {
+	changed := false
+	for i := range items {
+		if items[i].ID == updated.ID {
+			items[i] = mergedUpdatedItem(items[i], updated)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func mergedUpdatedItem(existing, updated abs.LibraryItem) abs.LibraryItem {
+	replacement := updated
+	if existing.RecentEpisode != nil {
+		replacement.RecentEpisode = existing.RecentEpisode
+		for _, episode := range updated.Media.Episodes {
+			if episode.ID == existing.RecentEpisode.ID {
+				ep := episode
+				replacement.RecentEpisode = &ep
+				break
+			}
+		}
+		replacement.AddedAt = existing.AddedAt
+	}
+	return replacement
+}
+
 // Libraries returns the available libraries.
 func (m Model) Libraries() []abs.Library {
 	return m.libraries
@@ -641,8 +695,8 @@ func itemDescription(item abs.LibraryItem) string {
 	contextLabel := "Unknown author"
 	if item.MediaType == "podcast" && item.RecentEpisode != nil {
 		contextLabel = item.Media.Metadata.Title
-	} else if item.Media.Metadata.AuthorName != nil {
-		contextLabel = *item.Media.Metadata.AuthorName
+	} else {
+		contextLabel = item.Media.Metadata.DisplayAuthor()
 	}
 
 	progress := ""

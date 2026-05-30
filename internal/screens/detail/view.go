@@ -27,12 +27,7 @@ func (m Model) renderHeader() string {
 	title := m.styles.Title.PaddingBottom(0).Render(meta.Title)
 	sections = append(sections, title)
 
-	// Author
-	author := "Unknown author"
-	if meta.AuthorName != nil {
-		author = *meta.AuthorName
-	}
-	sections = append(sections, m.styles.Subtitle.Render(author))
+	sections = append(sections, m.styles.Subtitle.Render(meta.DisplayAuthor()))
 
 	if m.item.Media.HasDuration() {
 		dur := m.styles.Muted.Render("Duration: " + ui.FormatDuration(m.item.Media.TotalDuration()))
@@ -115,8 +110,8 @@ func (m Model) buildContent() string {
 		sections = append(sections, epLabel)
 		for i, ep := range m.episodes {
 			dur := ui.FormatDuration(ep.Duration)
-			durStr := m.styles.Muted.Render("("+dur+")")
-			
+			durStr := m.styles.Muted.Render("(" + dur + ")")
+
 			title := ep.Title
 			if m.width > 0 {
 				prefix := fmt.Sprintf("  %d. ", i+1)
@@ -129,7 +124,7 @@ func (m Model) buildContent() string {
 				}
 			}
 			line := fmt.Sprintf("  %d. %s  %s", i+1, title, durStr)
-			
+
 			if m.focusEpisodes && i == m.selectedEpisode {
 				titleSel := ep.Title
 				if m.width > 0 {
@@ -177,7 +172,7 @@ func (m Model) buildContent() string {
 					}
 					continue
 				}
-				
+
 				title := bm.Title
 				if m.width > 0 {
 					prefix := fmt.Sprintf("  🔖 %s  ", ts)
@@ -188,7 +183,7 @@ func (m Model) buildContent() string {
 					}
 				}
 				line := fmt.Sprintf("  🔖 %s  %s", ts, title)
-				
+
 				if m.focusBookmarks && i == m.selectedBookmark {
 					titleSel := bm.Title
 					if m.width > 0 {
@@ -225,9 +220,9 @@ func (m Model) helpText() string {
 	if m.item.MediaType == "podcast" && len(m.episodes) > 0 {
 		if m.focusEpisodes {
 			if hasBookmarkFocus {
-				return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab next section • esc/← back"
+				return "enter play episode • m metadata" + queueHints + " • space/p pause • j/k navigate • tab next section • esc/← back"
 			}
-			return "enter play episode" + queueHints + " • space/p pause • j/k navigate • tab unfocus • esc/← back"
+			return "enter play episode • m metadata" + queueHints + " • space/p pause • j/k navigate • tab unfocus • esc/← back"
 		}
 		if m.focusBookmarks && hasBookmarkFocus {
 			return "enter seek • e edit • d delete • j/k navigate • tab unfocus • esc/← back"
@@ -247,18 +242,18 @@ func (m Model) helpText() string {
 		return "enter seek • e edit • d delete • j/k navigate • tab unfocus • b bookmark" + queueHints + " • esc/← back"
 	}
 	if m.focusSeries && m.hasSeries() {
-		return "enter open series • tab next section • b bookmark" + queueHints + " • esc/← back"
+		return "enter open series • tab next section • b bookmark • m metadata" + queueHints + " • esc/← back"
 	}
 	if hasBookmarkFocus {
 		if m.hasSeries() {
-			return "space/p play • b bookmark" + queueHints + " • tab focus series/bookmarks • j/k scroll • esc/← back"
+			return "space/p play • b bookmark • m metadata" + queueHints + " • tab focus series/bookmarks • j/k scroll • esc/← back"
 		}
-		return "space/p play • b bookmark" + queueHints + " • tab focus bookmarks • j/k scroll • esc/← back"
+		return "space/p play • b bookmark • m metadata" + queueHints + " • tab focus bookmarks • j/k scroll • esc/← back"
 	}
 	if m.hasSeries() {
-		return "space/p play • b bookmark • f mark finished" + queueHints + " • tab focus series • j/k scroll • esc/← back"
+		return "space/p play • b bookmark • f mark finished • m metadata" + queueHints + " • tab focus series • j/k scroll • esc/← back"
 	}
-	return "space/p play • b bookmark • f mark finished" + queueHints + " • j/k scroll • esc/← back"
+	return "space/p play • b bookmark • f mark finished • m metadata" + queueHints + " • j/k scroll • esc/← back"
 }
 
 // wordWrap wraps text to the given width, breaking on spaces.
@@ -316,7 +311,7 @@ func truncate(s string, maxWidth int) string {
 	if maxWidth <= 3 {
 		return ellipsis[:max(0, maxWidth)]
 	}
-	
+
 	var sb strings.Builder
 	currentWidth := 0
 	target := maxWidth - 3

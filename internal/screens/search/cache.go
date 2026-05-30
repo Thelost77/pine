@@ -24,15 +24,17 @@ type Cache struct {
 	ttl    time.Duration
 	now    func() time.Time
 
-	mu        sync.Mutex
-	snapshots map[string]*librarySnapshot
-	builds    map[string]*snapshotBuild
+	mu          sync.Mutex
+	snapshots   map[string]*librarySnapshot
+	builds      map[string]*snapshotBuild
+	generations map[string]uint64
 }
 
 type snapshotBuild struct {
-	done     chan struct{}
-	snapshot *librarySnapshot
-	err      error
+	done       chan struct{}
+	generation uint64
+	snapshot   *librarySnapshot
+	err        error
 }
 
 type librarySnapshot struct {
@@ -70,12 +72,24 @@ type snapshotEntry struct {
 // NewCache creates a new in-memory search cache.
 func NewCache(client *abs.Client) *Cache {
 	return &Cache{
-		client:    client,
-		ttl:       defaultCacheTTL,
-		now:       time.Now,
-		snapshots: make(map[string]*librarySnapshot),
-		builds:    make(map[string]*snapshotBuild),
+		client:      client,
+		ttl:         defaultCacheTTL,
+		now:         time.Now,
+		snapshots:   make(map[string]*librarySnapshot),
+		builds:      make(map[string]*snapshotBuild),
+		generations: make(map[string]uint64),
 	}
+}
+
+// Invalidate removes the cached search snapshot for a library.
+func (c *Cache) Invalidate(libraryID string) {
+	if c == nil || libraryID == "" {
+		return
+	}
+	c.mu.Lock()
+	delete(c.snapshots, libraryID)
+	c.generations[libraryID]++
+	c.mu.Unlock()
 }
 
 // Prepare ensures the library snapshot exists before the user starts searching.
@@ -114,45 +128,58 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 		return &librarySnapshot{libraryID: "", mediaType: resolvedMediaType}, nil
 	}
 
-	now := c.now()
+	for {
+		now := c.now()
 
-	c.mu.Lock()
-	if snapshot, ok := c.snapshots[resolvedID]; ok && snapshot.mediaType == resolvedMediaType && now.Sub(snapshot.builtAt) < c.ttl {
-		snapshot.lastAccessedAt = now
-		c.mu.Unlock()
-		return snapshot, nil
-	}
-	if build, ok := c.builds[resolvedID]; ok {
-		c.mu.Unlock()
-		select {
-		case <-build.done:
-			return build.snapshot, build.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		c.mu.Lock()
+		generation := c.generations[resolvedID]
+		if snapshot, ok := c.snapshots[resolvedID]; ok && snapshot.mediaType == resolvedMediaType && now.Sub(snapshot.builtAt) < c.ttl {
+			snapshot.lastAccessedAt = now
+			c.mu.Unlock()
+			return snapshot, nil
 		}
+		if build, ok := c.builds[resolvedID]; ok {
+			c.mu.Unlock()
+			select {
+			case <-build.done:
+				c.mu.Lock()
+				stale := build.generation != c.generations[resolvedID]
+				c.mu.Unlock()
+				if stale && build.err == nil {
+					continue
+				}
+				return build.snapshot, build.err
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		build := &snapshotBuild{done: make(chan struct{}), generation: generation}
+		c.builds[resolvedID] = build
+		c.mu.Unlock()
+
+		snapshot, err := c.buildSnapshot(ctx, resolvedID, resolvedMediaType)
+		if err == nil {
+			snapshot.builtAt = now
+			snapshot.lastAccessedAt = now
+		}
+
+		c.mu.Lock()
+		delete(c.builds, resolvedID)
+		stale := build.generation != c.generations[resolvedID]
+		if err == nil && !stale {
+			c.snapshots[resolvedID] = snapshot
+		}
+		build.snapshot = snapshot
+		build.err = err
+		close(build.done)
+		c.mu.Unlock()
+
+		if stale && err == nil {
+			continue
+		}
+		return snapshot, err
 	}
-
-	build := &snapshotBuild{done: make(chan struct{})}
-	c.builds[resolvedID] = build
-	c.mu.Unlock()
-
-	snapshot, err := c.buildSnapshot(ctx, resolvedID, resolvedMediaType)
-	if err == nil {
-		snapshot.builtAt = now
-		snapshot.lastAccessedAt = now
-	}
-
-	c.mu.Lock()
-	delete(c.builds, resolvedID)
-	if err == nil {
-		c.snapshots[resolvedID] = snapshot
-	}
-	build.snapshot = snapshot
-	build.err = err
-	close(build.done)
-	c.mu.Unlock()
-
-	return snapshot, err
 }
 
 func (c *Cache) buildSnapshot(ctx context.Context, libraryID, libraryMediaType string) (*librarySnapshot, error) {
@@ -196,9 +223,9 @@ func (c *Cache) buildBookSnapshot(ctx context.Context, libraryID string) (*libra
 		}
 
 		for _, item := range resp.Results {
-			author := ""
-			if item.Media.Metadata.AuthorName != nil {
-				author = *item.Media.Metadata.AuthorName
+			author := item.Media.Metadata.DisplayAuthor()
+			if author == "Unknown author" {
+				author = ""
 			}
 			entries = append(entries, snapshotEntry{
 				itemID:              item.ID,

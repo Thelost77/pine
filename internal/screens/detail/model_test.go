@@ -983,6 +983,38 @@ func TestSetEpisodes_PreservesRecentEpisodeSelection(t *testing.T) {
 	}
 }
 
+func TestMetadataEditTargetPodcastUsesSelectedEpisode(t *testing.T) {
+	m := New(ui.DefaultStyles(), abs.LibraryItem{
+		ID:        "pod-001",
+		MediaType: "podcast",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Podcast Show"},
+			Episodes: []abs.PodcastEpisode{
+				{ID: "ep-1", Title: "Episode One", Duration: 1800},
+				{ID: "ep-2", Title: "Episode Two", Duration: 2400},
+			},
+		},
+	})
+	m.selectedEpisode = 1
+
+	item, episode, ok := m.MetadataEditTarget()
+	if !ok {
+		t.Fatal("MetadataEditTarget ok = false, want true")
+	}
+	if item.ID != "pod-001" {
+		t.Fatalf("item ID = %q, want pod-001", item.ID)
+	}
+	if episode == nil || episode.ID != "ep-2" {
+		t.Fatalf("episode = %#v, want ep-2", episode)
+	}
+
+	m.focusEpisodes = false
+	_, _, ok = m.MetadataEditTarget()
+	if ok {
+		t.Fatal("MetadataEditTarget ok = true without episode focus, want false")
+	}
+}
+
 func TestFormatTimestamp(t *testing.T) {
 	tests := []struct {
 		seconds  float64
@@ -1026,7 +1058,7 @@ func TestView_TruncatesLongEpisodeAndBookmarkTitles(t *testing.T) {
 	m, _ = m.Update(BookmarksUpdatedMsg{Bookmarks: []abs.Bookmark{
 		{LibraryItemID: "pod-trunc-001", Title: "This Is An Extremely Long Bookmark Title That Should Also Definitely Be Truncated", Time: 120.0},
 	}})
-	
+
 	// Let's set a small width (say 40 characters)
 	m.SetSize(40, 24)
 

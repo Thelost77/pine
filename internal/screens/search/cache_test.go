@@ -164,6 +164,67 @@ func TestCacheRebuildsStaleSnapshot(t *testing.T) {
 	}
 }
 
+func TestCacheInvalidationDiscardsInFlightBuild(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	listCalls := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/libraries/lib-1/items":
+			listCalls++
+			call := listCalls
+			if call == 1 {
+				close(entered)
+				<-release
+			}
+			w.Header().Set("Content-Type", "application/json")
+			title := "Old Title"
+			if call > 1 {
+				title = "New Title"
+			}
+			_, _ = w.Write([]byte(`{
+				"results":[{"id":"book-1","libraryId":"lib-1","mediaType":"book","media":{"metadata":{"title":"` + title + `","authorName":"Author"}}}],
+				"total":1,
+				"limit":100,
+				"page":0
+			}`))
+		case "/api/libraries/lib-1/series":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	cache := NewCache(abs.NewClient(srv.URL, "tok"))
+	type result struct {
+		items []abs.LibraryItem
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		items, err := cache.Search(context.Background(), "lib-1", "book", "new")
+		done <- result{items: items, err: err}
+	}()
+
+	<-entered
+	cache.Invalidate("lib-1")
+	close(release)
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("Search() error = %v", res.err)
+	}
+	if len(res.items) != 1 || res.items[0].Media.Metadata.Title != "New Title" {
+		t.Fatalf("items = %#v, want New Title result", res.items)
+	}
+	if listCalls != 2 {
+		t.Fatalf("listCalls = %d, want stale build plus fresh rebuild", listCalls)
+	}
+}
+
 func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

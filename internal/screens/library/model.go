@@ -489,6 +489,67 @@ func (m Model) Items() []abs.LibraryItem {
 	return m.items
 }
 
+// SelectedLibraryID returns the ID of the currently selected library, or empty string.
+func (m Model) SelectedLibraryID() string {
+	if m.libraryID != "" {
+		return m.libraryID
+	}
+	if len(m.libraries) == 0 {
+		return ""
+	}
+	idx := m.selectedLibrary
+	if idx >= len(m.libraries) {
+		idx = 0
+	}
+	return m.libraries[idx].ID
+}
+
+// ReplaceItem updates matching visible and cached items with fresh metadata.
+func (m *Model) ReplaceItem(updated abs.LibraryItem) {
+	changed := replaceItemsByID(m.items, updated)
+	for libID, entry := range m.cache {
+		if replaceItemsByID(entry.items, updated) {
+			m.cache[libID] = entry
+			changed = true
+		}
+	}
+	if changed {
+		m.refreshListItems()
+	}
+}
+
+// InvalidateLibrary removes cached library pages for a library.
+func (m *Model) InvalidateLibrary(libraryID string) {
+	delete(m.cache, libraryID)
+}
+
+func replaceItemsByID(items []abs.LibraryItem, updated abs.LibraryItem) bool {
+	changed := false
+	for i := range items {
+		if items[i].ID == updated.ID {
+			items[i] = mergedUpdatedItem(items[i], updated)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func mergedUpdatedItem(existing, updated abs.LibraryItem) abs.LibraryItem {
+	replacement := updated
+	if existing.RecentEpisode != nil {
+		replacement.RecentEpisode = existing.RecentEpisode
+		for _, episode := range updated.Media.Episodes {
+			if episode.ID == existing.RecentEpisode.ID {
+				ep := episode
+				replacement.RecentEpisode = &ep
+				break
+			}
+		}
+		replacement.AddedAt = existing.AddedAt
+	}
+	return replacement
+}
+
 // SelectedLibraryMediaType returns the media type of the current library, or empty string.
 func (m Model) SelectedLibraryMediaType() string {
 	if len(m.libraries) > 0 && m.selectedLibrary < len(m.libraries) {
@@ -550,8 +611,8 @@ func (i libraryListItem) Description() string {
 	context := "Unknown author"
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
 		context = i.Item.Media.Metadata.Title
-	} else if i.Item.Media.Metadata.AuthorName != nil {
-		context = *i.Item.Media.Metadata.AuthorName
+	} else {
+		context = i.Item.Media.Metadata.DisplayAuthor()
 	}
 
 	duration := ""

@@ -1,7 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
+	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
@@ -116,6 +120,361 @@ func TestNewStartsAtLogin(t *testing.T) {
 	}
 	if len(m.BackStack()) != 0 {
 		t.Errorf("New() back stack should be empty, got %v", m.BackStack())
+	}
+}
+
+func TestEditMetadataCmdNavigatesToMetadataScreen(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     detail.EditMetadataCmd
+		wantNav bool
+	}{
+		{
+			name: "book",
+			cmd: detail.EditMetadataCmd{Item: abs.LibraryItem{
+				ID:        "item-1",
+				LibraryID: "lib-1",
+				MediaType: "book",
+				Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Old Title"}},
+			}},
+			wantNav: true,
+		},
+		{
+			name: "podcast episode",
+			cmd: detail.EditMetadataCmd{Item: abs.LibraryItem{
+				ID:        "pod-1",
+				LibraryID: "lib-1",
+				MediaType: "podcast",
+				Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast"}},
+			}, Episode: &abs.PodcastEpisode{ID: "ep-1", Title: "Episode"}},
+			wantNav: true,
+		},
+		{
+			name: "podcast show without episode",
+			cmd: detail.EditMetadataCmd{Item: abs.LibraryItem{
+				ID:        "pod-1",
+				LibraryID: "lib-1",
+				MediaType: "podcast",
+				Media:     abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast"}},
+			}},
+			wantNav: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModelAuthenticated()
+			result, cmd := m.Update(tt.cmd)
+			m = result.(Model)
+			if tt.wantNav {
+				if m.ActiveScreen() != ScreenMetadataEdit {
+					t.Fatalf("ActiveScreen() = %v, want ScreenMetadataEdit", m.ActiveScreen())
+				}
+				if cmd == nil {
+					t.Fatal("cmd = nil, want metadata editor init command")
+				}
+				return
+			}
+			if m.ActiveScreen() == ScreenMetadataEdit {
+				t.Fatal("ActiveScreen() = ScreenMetadataEdit, want no podcast show editor")
+			}
+		})
+	}
+}
+
+func TestMetadataSavedUpdatesDetailQueueAndPlayer(t *testing.T) {
+	m := newTestModelAuthenticated()
+	oldAuthor := "Old Author"
+	newAuthor := "New Author"
+	oldItem := abs.LibraryItem{
+		ID:        "item-1",
+		LibraryID: "lib-1",
+		MediaType: "book",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title:      "Old Title",
+			AuthorName: &oldAuthor,
+		}},
+	}
+	updated := oldItem
+	updated.Media.Metadata.Title = "New Title"
+	updated.Media.Metadata.AuthorName = &newAuthor
+	m.screen = ScreenDetail
+	m.detail = detail.New(m.styles, oldItem)
+	m.queue = []QueueEntry{{Item: oldItem}}
+	m.itemID = oldItem.ID
+	m.player.Title = oldItem.Media.Metadata.Title
+	m.currentAuthors = []string{oldAuthor}
+
+	result, cmd := m.Update(metadataedit.SavedMsg{ItemID: updated.ID, Item: &updated})
+	m = result.(Model)
+	if cmd != nil {
+		t.Fatalf("cmd = %v, want nil", cmd)
+	}
+	if got := m.detail.Item().Media.Metadata.Title; got != "New Title" {
+		t.Fatalf("detail title = %q, want New Title", got)
+	}
+	if got := m.queue[0].Item.Media.Metadata.Title; got != "New Title" {
+		t.Fatalf("queued title = %q, want New Title", got)
+	}
+	if got := m.player.Title; got != "New Title" {
+		t.Fatalf("player title = %q, want New Title", got)
+	}
+	if len(m.mprisState.Authors) != 1 || m.mprisState.Authors[0] != newAuthor {
+		t.Fatalf("mpris authors = %#v, want %q", m.mprisState.Authors, newAuthor)
+	}
+}
+
+func TestEpisodeMetadataSavedUpdatesDetailQueueAndPlayer(t *testing.T) {
+	m := newTestModelAuthenticated()
+	author := "Old Host"
+	oldItem := abs.LibraryItem{
+		ID:        "pod-1",
+		LibraryID: "lib-1",
+		MediaType: "podcast",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title:      "Old Podcast",
+			AuthorName: &author,
+		}, Episodes: []abs.PodcastEpisode{
+			{ID: "ep-1", Title: "Old Episode", Description: "Old Description", Duration: 120},
+		}},
+	}
+	updated := oldItem
+	updated.Media.Episodes[0].Title = "New Episode"
+	updated.Media.Episodes[0].Description = "New Description"
+	m.screen = ScreenDetail
+	m.detail = detail.New(m.styles, oldItem)
+	m.queue = []QueueEntry{{Item: oldItem, Episode: &abs.PodcastEpisode{ID: "ep-1", Title: "Old Episode"}}}
+	m.itemID = oldItem.ID
+	m.episodeID = "ep-1"
+	m.player.Title = "Old Episode"
+
+	result, cmd := m.Update(metadataedit.SavedEpisodeMsg{ItemID: updated.ID, EpisodeID: "ep-1", Item: &updated})
+	m = result.(Model)
+	if cmd != nil {
+		t.Fatalf("cmd = %v, want nil", cmd)
+	}
+	if got := m.detail.Episodes()[0].Title; got != "New Episode" {
+		t.Fatalf("detail episode title = %q, want New Episode", got)
+	}
+	if got := m.queue[0].Episode.Title; got != "New Episode" {
+		t.Fatalf("queued episode title = %q, want New Episode", got)
+	}
+	if got := m.player.Title; got != "New Episode" {
+		t.Fatalf("player title = %q, want New Episode", got)
+	}
+}
+
+func TestStaleMetadataSaveDoesNotCloseNewEditor(t *testing.T) {
+	m := newTestModelAuthenticated()
+	itemA := abs.LibraryItem{ID: "book-a", LibraryID: "lib-1", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Book A"}}}
+	itemB := abs.LibraryItem{ID: "book-b", LibraryID: "lib-1", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Book B"}}}
+
+	result, _ := m.Update(detail.EditMetadataCmd{Item: itemA})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'!'}})
+	m = result.(Model)
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+	if cmd == nil {
+		t.Fatal("cmd = nil, want SaveCmd")
+	}
+	msg := cmd()
+	save, ok := msg.(metadataedit.SaveCmd)
+	if !ok {
+		t.Fatalf("cmd returned %T, want metadataedit.SaveCmd", msg)
+	}
+
+	result, _ = m.Update(metadataedit.BackMsg{})
+	m = result.(Model)
+	result, _ = m.Update(detail.EditMetadataCmd{Item: itemB})
+	m = result.(Model)
+	if m.ActiveScreen() != ScreenMetadataEdit {
+		t.Fatalf("ActiveScreen() = %v, want ScreenMetadataEdit", m.ActiveScreen())
+	}
+
+	updatedA := itemA
+	updatedA.Media.Metadata.Title = "Saved Book A"
+	result, cmd = m.Update(metadataedit.SavedMsg{ItemID: itemA.ID, Generation: save.Generation, Item: &updatedA})
+	m = result.(Model)
+	if cmd != nil {
+		t.Fatalf("cmd = %v, want nil for stale save without MPRIS bridge", cmd)
+	}
+	if m.ActiveScreen() != ScreenMetadataEdit {
+		t.Fatalf("ActiveScreen() = %v, want new editor to remain open", m.ActiveScreen())
+	}
+}
+
+func TestEpisodeMetadataSaveUpdatesDetail(t *testing.T) {
+	oldAuthor := "Old Host"
+	oldItem := abs.LibraryItem{
+		ID:        "pod-1",
+		LibraryID: "lib-1",
+		MediaType: "podcast",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title:      "Old Podcast",
+			AuthorName: &oldAuthor,
+		}, Episodes: []abs.PodcastEpisode{
+			{ID: "ep-1", Title: "Old Episode", Description: "Old Description", Season: "1", Episode: "1", EpisodeType: "full", Duration: 120},
+		}},
+	}
+	updatedJSON := `{"id":"pod-1","libraryId":"lib-1","mediaType":"podcast","media":{"metadata":{"title":"Old Podcast","author":"Old Host"},"episodes":[{"id":"ep-1","title":"New Episode","description":"New Description","season":"2","episode":"3","episodeType":"bonus","duration":120}]}}`
+
+	var patchBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/podcasts/pod-1/episode/ep-1":
+			if err := json.NewDecoder(r.Body).Decode(&patchBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			_, _ = w.Write([]byte(updatedJSON))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/items/pod-1":
+			_, _ = w.Write([]byte(updatedJSON))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m.screen = ScreenMetadataEdit
+	m.backStack = []Screen{ScreenDetail}
+	m.detail = detail.New(m.styles, oldItem)
+	m.metadataEdit = metadataedit.NewEpisode(m.styles, oldItem, oldItem.Media.Episodes[0])
+	newTitle := "New Episode"
+	newDescription := "New Description"
+	newSeason := "2"
+	newEpisode := "3"
+	newEpisodeType := "bonus"
+
+	result, cmd := m.Update(metadataedit.SaveEpisodeCmd{ItemID: oldItem.ID, EpisodeID: "ep-1", Request: abs.UpdatePodcastEpisodeRequest{
+		Title:       &newTitle,
+		Description: &newDescription,
+		Season:      &newSeason,
+		Episode:     &newEpisode,
+		EpisodeType: &newEpisodeType,
+	}})
+	m = result.(Model)
+	if cmd == nil {
+		t.Fatal("cmd = nil, want save command")
+	}
+	msg := cmd()
+	saved, ok := msg.(metadataedit.SavedEpisodeMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want metadataedit.SavedEpisodeMsg", msg)
+	}
+	if saved.Err != nil {
+		t.Fatalf("SavedEpisodeMsg.Err = %v", saved.Err)
+	}
+
+	result, _ = m.Update(saved)
+	m = result.(Model)
+	if m.ActiveScreen() != ScreenDetail {
+		t.Fatalf("ActiveScreen() = %v, want ScreenDetail", m.ActiveScreen())
+	}
+	if got := m.detail.Episodes()[0].Title; got != "New Episode" {
+		t.Fatalf("detail episode title = %q, want New Episode", got)
+	}
+	if got := m.detail.Episodes()[0].Description; got != "New Description" {
+		t.Fatalf("detail episode description = %q, want New Description", got)
+	}
+	if got := patchBody["title"]; got != "New Episode" {
+		t.Fatalf("title = %#v, want New Episode", got)
+	}
+	if got := patchBody["episodeType"]; got != "bonus" {
+		t.Fatalf("episodeType = %#v, want bonus", got)
+	}
+}
+
+func TestMetadataSavedFromEditorReturnsToDetail(t *testing.T) {
+	m := newTestModelAuthenticated()
+	item := abs.LibraryItem{
+		ID:        "item-1",
+		LibraryID: "lib-1",
+		MediaType: "book",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title: "New Title",
+		}},
+	}
+	m.screen = ScreenMetadataEdit
+	m.backStack = []Screen{ScreenDetail}
+	m.detail = detail.New(m.styles, abs.LibraryItem{ID: item.ID, LibraryID: item.LibraryID, MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Old Title"}}})
+	m.metadataEdit = metadataedit.New(m.styles, m.detail.Item())
+
+	result, _ := m.Update(metadataedit.SavedMsg{ItemID: item.ID, Item: &item})
+	m = result.(Model)
+	if m.ActiveScreen() != ScreenDetail {
+		t.Fatalf("ActiveScreen() = %v, want ScreenDetail", m.ActiveScreen())
+	}
+	if got := m.detail.Item().Media.Metadata.Title; got != "New Title" {
+		t.Fatalf("detail title = %q, want New Title", got)
+	}
+}
+
+func TestMetadataEditorCapturesPlaybackShortcutKeys(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenMetadataEdit
+	m.metadataEdit = metadataedit.New(m.styles, abs.LibraryItem{
+		ID:        "item-1",
+		MediaType: "book",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title: "Old Title",
+		}},
+	})
+	m.sessionID = "session-1"
+	m.sleepDuration = 0
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	m = result.(Model)
+	if cmd == nil {
+		t.Fatal("cmd = nil, want text input command")
+	}
+	if m.sleepDuration != 0 {
+		t.Fatalf("sleepDuration = %v, want unchanged", m.sleepDuration)
+	}
+	if m.ActiveScreen() != ScreenMetadataEdit {
+		t.Fatalf("ActiveScreen() = %v, want ScreenMetadataEdit", m.ActiveScreen())
+	}
+}
+
+func TestContentSearchContextUsesActiveLibraryScreen(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.home = home.New(m.styles, m.client)
+	m.home, _ = m.home.Update(home.PersonalizedMsg{
+		Libraries: []abs.Library{
+			{ID: "lib-podcasts", Name: "Podcasts", MediaType: "podcast"},
+			{ID: "lib-books", Name: "Audiobooks", MediaType: "book"},
+		},
+		LibraryID: "lib-podcasts",
+	})
+	m.library = library.New(m.styles, m.client, "lib-books", []abs.Library{
+		{ID: "lib-podcasts", Name: "Podcasts", MediaType: "podcast"},
+		{ID: "lib-books", Name: "Audiobooks", MediaType: "book"},
+	})
+	m.screen = ScreenLibrary
+
+	libID, mediaType := m.contentSearchContext()
+	if libID != "lib-books" {
+		t.Fatalf("libID = %q, want lib-books", libID)
+	}
+	if mediaType != "book" {
+		t.Fatalf("mediaType = %q, want book", mediaType)
+	}
+}
+
+func TestContentSearchContextUsesDetailItemLibrary(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.detail = detail.New(m.styles, abs.LibraryItem{
+		ID:        "item-1",
+		LibraryID: "lib-books",
+		MediaType: "book",
+	})
+	m.screen = ScreenDetail
+
+	libID, mediaType := m.contentSearchContext()
+	if libID != "lib-books" {
+		t.Fatalf("libID = %q, want lib-books", libID)
+	}
+	if mediaType != "book" {
+		t.Fatalf("mediaType = %q, want book", mediaType)
 	}
 }
 

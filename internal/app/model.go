@@ -15,6 +15,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
+	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/screens/series"
 	"github.com/Thelost77/pine/internal/screens/serieslist"
@@ -37,48 +38,49 @@ type Model struct {
 	screen    Screen
 	backStack []Screen
 
-	login       login.Model
-	home        home.Model
-	library     library.Model
-	detail      detail.Model
-	seriesList  serieslist.Model
-	searchCache *search.Cache
-	series      series.Model
-	player      player.Model
+	login        login.Model
+	home         home.Model
+	library      library.Model
+	detail       detail.Model
+	metadataEdit metadataedit.Model
+	seriesList   serieslist.Model
+	searchCache  *search.Cache
+	series       series.Model
+	player       player.Model
 
 	// Playback session state
-	sessionID             string
-	itemID                string
-	episodeID             string
-	timeListened          float64
-	lastSyncPos           float64
-	playGeneration        uint64
-	chapters              []abs.Chapter
-	chapterOverlayVisible bool
-	chapterOverlayIndex   int
-	trackStartOffset      float64
-	trackDuration         float64
-	sleepDeadline         time.Time
-	sleepDuration         time.Duration
-	sleepGeneration       uint64
-	queue                 []QueueEntry
-	restorePaused         bool
+	sessionID                string
+	itemID                   string
+	episodeID                string
+	timeListened             float64
+	lastSyncPos              float64
+	playGeneration           uint64
+	chapters                 []abs.Chapter
+	chapterOverlayVisible    bool
+	chapterOverlayIndex      int
+	trackStartOffset         float64
+	trackDuration            float64
+	sleepDeadline            time.Time
+	sleepDuration            time.Duration
+	sleepGeneration          uint64
+	queue                    []QueueEntry
+	restorePaused            bool
 	propertyUnavailableCount int
-	lastMprisEmit         time.Time
-	seekPending           bool
+	lastMprisEmit            time.Time
+	seekPending              bool
 
 	// Series auto-continue
 	playbackLibraryID string
 	playbackSeriesID  string
 
-	keys   KeyMap
-	err    components.ErrorBanner
-	help   components.HelpOverlay
-	width  int
-	height int
-	styles ui.Styles
-	config config.Config
-	db     *db.Store
+	keys        KeyMap
+	err         components.ErrorBanner
+	help        components.HelpOverlay
+	width       int
+	height      int
+	styles      ui.Styles
+	config      config.Config
+	db          *db.Store
 	client      *abs.Client
 	mpv         player.Player
 	mprisBridge *mpris.Bridge
@@ -87,8 +89,10 @@ type Model struct {
 
 	palette components.Palette
 
-	lastPlayedTitle  string
-	lastPlayedItemID string
+	lastPlayedTitle   string
+	lastPlayedItemID  string
+	lastPlayedAuthors []string
+	currentAuthors    []string
 }
 
 // New creates a new root model. If client is non-nil (authenticated),
@@ -108,25 +112,26 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *abs.Client, mpv p
 		initialScreen = ScreenHome
 	}
 	return Model{
-		screen:      initialScreen,
-		backStack:   nil,
-		login:       login.New(styles),
-		home:        home.New(styles, client),
-		library:     library.New(styles, client, "", nil),
-		searchCache: searchCache,
-		seriesList:  serieslist.New(styles, client, "", ""),
-		series:      series.New(styles, client, "", "", ""),
-		player:      player.NewModel(mpv, cfg, styles),
-		keys:        DefaultKeyMap(cfg.Keybinds),
-		err:         components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
-		help:        components.NewHelpOverlay(styles),
-		styles:      styles,
-		config:      cfg,
-		db:          store,
-		client:      client,
-		mpv:         mpv,
-		mprisState:  &MprisState{},
-		palette:     palette,
+		screen:       initialScreen,
+		backStack:    nil,
+		login:        login.New(styles),
+		home:         home.New(styles, client),
+		library:      library.New(styles, client, "", nil),
+		searchCache:  searchCache,
+		metadataEdit: metadataedit.New(styles, abs.LibraryItem{MediaType: "book"}),
+		seriesList:   serieslist.New(styles, client, "", ""),
+		series:       series.New(styles, client, "", "", ""),
+		player:       player.NewModel(mpv, cfg, styles),
+		keys:         DefaultKeyMap(cfg.Keybinds),
+		err:          components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
+		help:         components.NewHelpOverlay(styles),
+		styles:       styles,
+		config:       cfg,
+		db:           store,
+		client:       client,
+		mpv:          mpv,
+		mprisState:   &MprisState{},
+		palette:      palette,
 	}
 }
 
@@ -249,6 +254,10 @@ func (m *Model) syncMprisState() {
 	if m.player.Title == "" {
 		m.mprisState.Title = m.lastPlayedTitle
 	}
+	m.mprisState.Authors = m.currentAuthors
+	if m.player.Title == "" {
+		m.mprisState.Authors = m.lastPlayedAuthors
+	}
 	m.mprisState.Position = m.player.Position
 	m.mprisState.Duration = m.player.Duration
 	m.mprisState.Volume = m.player.Volume
@@ -284,9 +293,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Error("app error", "err", msg.Err, "screen", m.screen)
 		if components.IsUnauthorized(msg.Err) {
 			logger.Warn("401 unauthorized, redirecting to login")
-		m.client = nil
-		m.searchCache = search.NewCache(nil)
-		m.screen = ScreenLogin
+			m.client = nil
+			m.searchCache = search.NewCache(nil)
+			m.screen = ScreenLogin
 			m.backStack = nil
 			m.login = login.New(m.styles)
 			return m, m.login.Init()
@@ -324,6 +333,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.home = home.New(m.styles, m.client)
 		m.library = library.New(m.styles, m.client, "", nil)
 		m.searchCache = search.NewCache(m.client)
+		m.metadataEdit = metadataedit.New(m.styles, abs.LibraryItem{MediaType: "book"})
 		m.seriesList = serieslist.New(m.styles, m.client, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
 		m.login, _ = m.login.Update(msg)
@@ -476,6 +486,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.enqueueQueueEntry(QueueEntry{Item: msg.Item, Episode: cloneEpisodePtr(msg.Episode)}, true)
 		return m, nil
+
+	case detail.EditMetadataCmd:
+		return m.openMetadataEditor(msg)
+
+	case metadataedit.BackMsg:
+		return m.back()
+
+	case metadataedit.SaveCmd:
+		return m.handleMetadataSave(msg)
+
+	case metadataedit.SaveEpisodeCmd:
+		return m.handleEpisodeMetadataSave(msg)
+
+	case metadataedit.SavedMsg:
+		return m.handleMetadataSaved(msg)
+
+	case metadataedit.SavedEpisodeMsg:
+		return m.handleEpisodeMetadataSaved(msg)
 
 	case detail.NavigateSeriesMsg:
 		m.series = series.New(m.styles, m.client, msg.LibraryID, msg.SeriesID, msg.CurrentItemID)
@@ -670,6 +698,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if handled {
 				return m, cmd
 			}
+			return m.updateScreen(msg)
+		}
+		if m.screen == ScreenMetadataEdit {
 			return m.updateScreen(msg)
 		}
 		if m.chapterOverlayVisible {
@@ -890,6 +921,7 @@ func (m *Model) clearPlaybackSessionState() {
 	m.player.SleepRemaining = ""
 	m.player.Playing = false
 	m.player.Title = ""
+	m.currentAuthors = nil
 	m.player.Position = 0
 	m.player.Duration = 0
 	m.playbackSeriesID = ""
@@ -931,8 +963,7 @@ func (m Model) contentSearchFunc() components.SearchFunc {
 		if m.searchCache == nil {
 			return nil
 		}
-		libID := m.home.SelectedLibraryID()
-		libMediaType := m.home.SelectedLibraryMediaType()
+		libID, libMediaType := m.contentSearchContext()
 		if libID == "" {
 			return nil
 		}
@@ -960,6 +991,20 @@ func (m Model) contentSearchFunc() components.SearchFunc {
 	}
 }
 
+func (m Model) contentSearchContext() (string, string) {
+	switch m.screen {
+	case ScreenLibrary:
+		if libID := m.library.SelectedLibraryID(); libID != "" {
+			return libID, m.library.SelectedLibraryMediaType()
+		}
+	case ScreenDetail:
+		item := m.detail.Item()
+		if item.LibraryID != "" {
+			return item.LibraryID, item.MediaType
+		}
+	}
+	return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
+}
 
 func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) {
 	nav = []components.PaletteItem{
@@ -1331,6 +1376,23 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 			})
 		}
 		return m, nil
+	case components.ActionEditMetadata:
+		if data != nil {
+			if cmd, ok := data.(detail.EditMetadataCmd); ok {
+				return m.openMetadataEditor(cmd)
+			}
+			if item, ok := data.(abs.LibraryItem); ok && item.MediaType == "book" {
+				m.metadataEdit = metadataedit.New(m.styles, item)
+				return m.navigate(ScreenMetadataEdit)
+			}
+		}
+		if m.screen == ScreenDetail {
+			item, episode, ok := m.detail.MetadataEditTarget()
+			if ok {
+				return m.openMetadataEditor(detail.EditMetadataCmd{Item: item, Episode: episode})
+			}
+		}
+		return m, nil
 	case components.ActionGoToSeries:
 		if libraryID != "" && itemID != "" {
 			m.series = series.New(m.styles, m.client, libraryID, itemID, payload)
@@ -1365,4 +1427,3 @@ func (m Model) prewarmCacheCmd() tea.Cmd {
 		return PrewarmDoneMsg{}
 	}
 }
-

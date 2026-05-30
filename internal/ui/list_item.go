@@ -19,8 +19,8 @@ func (i ListItem) Description() string {
 	author := "Unknown author"
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
 		author = i.Item.Media.Metadata.Title
-	} else if i.Item.Media.Metadata.AuthorName != nil {
-		author = *i.Item.Media.Metadata.AuthorName
+	} else {
+		author = i.Item.Media.Metadata.DisplayAuthor()
 	}
 	duration := ""
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil && i.Item.RecentEpisode.Duration > 0 {

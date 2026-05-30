@@ -51,6 +51,7 @@ const (
 	ActionOpenDetail
 	ActionContentNavigate
 	ActionPlayDirect
+	ActionEditMetadata
 )
 
 type PaletteItem struct {
@@ -70,11 +71,11 @@ func (i PaletteItem) FilterValue() string { return i.Label }
 type SearchFunc func(query string) []PaletteItem
 
 type Palette struct {
-	visible    bool
-	input      textinput.Model
-	list       list.Model
-	delegate   paletteDelegate
-	styles     ui.Styles
+	visible     bool
+	input       textinput.Model
+	list        list.Model
+	delegate    paletteDelegate
+	styles      ui.Styles
 	focusSearch bool
 
 	staticItems []PaletteItem

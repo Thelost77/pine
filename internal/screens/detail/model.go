@@ -41,6 +41,12 @@ type PlayNextCmd struct {
 	Episode *abs.PodcastEpisode
 }
 
+// EditMetadataCmd requests opening the metadata editor for the current item.
+type EditMetadataCmd struct {
+	Item    abs.LibraryItem
+	Episode *abs.PodcastEpisode
+}
+
 // NavigateSeriesMsg requests opening the current book's series list.
 type NavigateSeriesMsg struct {
 	LibraryID     string
@@ -107,6 +113,7 @@ type KeyMap struct {
 	MarkFinished key.Binding
 	AddToQueue   key.Binding
 	PlayNext     key.Binding
+	Metadata     key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings for the detail screen.
@@ -159,6 +166,10 @@ func DefaultKeyMap() KeyMap {
 		PlayNext: key.NewBinding(
 			key.WithKeys("A"),
 			key.WithHelp("A", "play next"),
+		),
+		Metadata: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "metadata"),
 		),
 	}
 }
@@ -213,7 +224,24 @@ func (m *Model) refreshContent() {
 
 // SetItem updates the displayed item and refreshes the viewport content.
 func (m *Model) SetItem(item abs.LibraryItem) {
+	selectedEpisodeID := ""
+	if len(m.episodes) > 0 && m.selectedEpisode < len(m.episodes) {
+		selectedEpisodeID = m.episodes[m.selectedEpisode].ID
+	}
 	m.item = item
+	if item.MediaType == "podcast" {
+		m.SetEpisodes(item.Media.Episodes)
+		if selectedEpisodeID != "" {
+			for i, episode := range m.episodes {
+				if episode.ID == selectedEpisodeID {
+					m.selectedEpisode = i
+					break
+				}
+			}
+		}
+		m.refreshContent()
+		return
+	}
 	if !m.hasSeries() {
 		m.focusSeries = false
 	}
@@ -434,6 +462,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return PlayNextCmd{Item: item, Episode: episode}
 			}
+		case key.Matches(msg, m.keys.Metadata):
+			item, episode, ok := m.MetadataEditTarget()
+			if !ok {
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return EditMetadataCmd{Item: item, Episode: episode}
+			}
 		case key.Matches(msg, m.keys.MarkFinished):
 			item := m.item
 			var episode *abs.PodcastEpisode
@@ -601,6 +637,18 @@ func (m Model) queueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {
 	return m.item, nil, true
 }
 
+// MetadataEditTarget returns the book or selected podcast episode editable by the metadata editor.
+func (m Model) MetadataEditTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {
+	if m.item.MediaType == "book" {
+		return m.item, nil, true
+	}
+	if m.item.MediaType == "podcast" && m.focusEpisodes && len(m.episodes) > 0 && m.selectedEpisode < len(m.episodes) {
+		episode := m.episodes[m.selectedEpisode]
+		return m.item, &episode, true
+	}
+	return abs.LibraryItem{}, nil, false
+}
+
 func (m Model) bookmarkEditWidth() int {
 	width := m.width - 20
 	if width < 12 {
@@ -705,6 +753,9 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 			{Label: "Add to Queue", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Mark Finished", Action: components.ActionMarkFinished, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+		}
+		if editItem, editEpisode, ok := m.MetadataEditTarget(); ok {
+			items = append(items, components.PaletteItem{Label: "Edit Metadata", Action: components.ActionEditMetadata, LibraryID: editItem.LibraryID, ItemID: editItem.ID, Data: EditMetadataCmd{Item: editItem, Episode: editEpisode}})
 		}
 	}
 

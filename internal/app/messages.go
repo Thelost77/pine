@@ -10,6 +10,7 @@ const (
 	ScreenHome
 	ScreenLibrary
 	ScreenDetail
+	ScreenMetadataEdit
 	ScreenSeriesList
 	ScreenSeries
 )
@@ -25,6 +26,8 @@ func (s Screen) String() string {
 		return "Library"
 	case ScreenDetail:
 		return "Detail"
+	case ScreenMetadataEdit:
+		return "Metadata"
 	case ScreenSeriesList:
 		return "Series"
 	case ScreenSeries:
@@ -58,6 +61,7 @@ type PlaySessionData struct {
 	CurrentTime      float64
 	Duration         float64
 	Title            string
+	Authors          []string
 	Chapters         []abs.Chapter
 	TrackStartOffset float64
 	TrackDuration    float64

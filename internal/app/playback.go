@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	trackEndRolloverSlack        = 2.0
+	trackEndRolloverSlack         = 2.0
 	maxPropertyUnavailableRetries = 4
 )
 
@@ -69,6 +69,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 			session,
 			item.ID,
 			item.Media.Metadata.Title,
+			mprisAuthors(item),
 			item.Media.TotalDuration(),
 			session.CurrentTime,
 		)
@@ -138,6 +139,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				CurrentTime:      session.CurrentTime,
 				Duration:         resolveEpisodeDuration(episode, session),
 				Title:            episode.Title,
+				Authors:          mprisAuthors(item),
 				Chapters:         playSessionChapters(session),
 				TrackStartOffset: session.AudioTracks[0].StartOffset,
 				TrackDuration:    session.AudioTracks[0].Duration,
@@ -164,6 +166,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.trackStartOffset = msg.Session.TrackStartOffset
 	m.trackDuration = msg.Session.TrackDuration
 	m.timeListened = 0
+	m.currentAuthors = msg.Session.Authors
 
 	bookPos := msg.Session.CurrentTime + m.trackStartOffset
 	m.lastSyncPos = bookPos
@@ -325,6 +328,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	timeListened := m.timeListened
 	duration := m.player.Duration
 	title := m.player.Title
+	authors := m.currentAuthors
 	mpvPlayer := m.mpv
 	targetPos := bookPos
 
@@ -347,7 +351,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		playMsg, err := buildBookPlaySessionMsg(client, session, itemID, title, duration, targetPos)
+		playMsg, err := buildBookPlaySessionMsg(client, session, itemID, title, authors, duration, targetPos)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
@@ -368,6 +372,7 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 			session,
 			item.ID,
 			item.Media.Metadata.Title,
+			mprisAuthors(item),
 			item.Media.TotalDuration(),
 			bookPos,
 		)
@@ -420,6 +425,7 @@ func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 			session,
 			item.ID,
 			item.Media.Metadata.Title,
+			mprisAuthors(item),
 			item.Media.TotalDuration(),
 			session.CurrentTime,
 		)
@@ -483,6 +489,7 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 					CurrentTime:      session.CurrentTime,
 					Duration:         resolveEpisodeDuration(episode, session),
 					Title:            episode.Title,
+					Authors:          mprisAuthors(item),
 					Chapters:         playSessionChapters(session),
 					TrackStartOffset: session.AudioTracks[0].StartOffset,
 					TrackDuration:    session.AudioTracks[0].Duration,
@@ -544,7 +551,7 @@ func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cm
 	return m, tea.Batch(stopCmd, nextCmd)
 }
 
-func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemID, title string, duration, bookPos float64) (PlaySessionMsg, error) {
+func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemID, title string, authors []string, duration, bookPos float64) (PlaySessionMsg, error) {
 	if len(session.AudioTracks) == 0 {
 		return PlaySessionMsg{}, fmt.Errorf("no audio tracks")
 	}
@@ -569,6 +576,7 @@ func buildBookPlaySessionMsg(client *abs.Client, session *abs.PlaySession, itemI
 			CurrentTime:      seekTime,
 			Duration:         duration,
 			Title:            title,
+			Authors:          authors,
 			Chapters:         playSessionChapters(session),
 			TrackStartOffset: track.StartOffset,
 			TrackDuration:    track.Duration,
@@ -710,6 +718,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	// Cache last played item for MPRIS metadata after stop
 	m.lastPlayedTitle = m.player.Title
 	m.lastPlayedItemID = m.itemID
+	m.lastPlayedAuthors = m.currentAuthors
 
 	// Clear session state
 	m.clearPlaybackSessionState()
