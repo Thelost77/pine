@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -816,7 +817,7 @@ func TestFetchPersonalizedPodcastLibraryUsesRecentEpisodes(t *testing.T) {
 
 	client := abs.NewClient(srv.URL, "tok")
 	styles := ui.DefaultStyles()
-	m := New(styles, client)
+	m := New(styles, cache.NewClient(client, nil))
 	m.SetSize(80, 24)
 	m.libraries = []abs.Library{{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"}}
 	m.selectedLibrary = 0

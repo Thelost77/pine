@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"encoding/gob"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,8 +11,99 @@ import (
 	"unicode"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/sahilm/fuzzy"
 )
+
+func init() {
+	gob.Register(PersistedSnapshot{})
+	gob.Register(PersistedEntry{})
+}
+
+// PersistedSnapshot is a gob-serializable representation of a librarySnapshot
+// for disk cache persistence.
+type PersistedSnapshot struct {
+	LibraryID      string
+	MediaType      string
+	BuiltAt        time.Time
+	LastAccessedAt time.Time
+	Entries        []PersistedEntry
+}
+
+// PersistedEntry is a gob-serializable representation of snapshotEntry.
+type PersistedEntry struct {
+	ItemID    string
+	LibraryID string
+	MediaType string
+	Title     string
+	Author    string
+	Duration  float64
+
+	PodcastTitle    string
+	EpisodeID       string
+	EpisodeTitle    string
+	EpisodeDuration float64
+
+	SeriesID   string
+	SeriesName string
+
+	PrimarySearchText   string
+	SecondarySearchText string
+	CombinedSearchText  string
+	FuzzySearchText     string
+	PrimaryTokens       []string
+	CombinedTokens      []string
+}
+
+func (e snapshotEntry) toPersisted() PersistedEntry {
+	return PersistedEntry{
+		ItemID:              e.itemID,
+		LibraryID:           e.libraryID,
+		MediaType:           e.mediaType,
+		Title:               e.title,
+		Author:              e.author,
+		Duration:            e.duration,
+		PodcastTitle:        e.podcastTitle,
+		EpisodeID:           e.episodeID,
+		EpisodeTitle:        e.episodeTitle,
+		EpisodeDuration:     e.episodeDuration,
+		SeriesID:            e.seriesID,
+		SeriesName:          e.seriesName,
+		PrimarySearchText:   e.primarySearchText,
+		SecondarySearchText: e.secondarySearchText,
+		CombinedSearchText:  e.combinedSearchText,
+		FuzzySearchText:     e.fuzzySearchText,
+		PrimaryTokens:       e.primaryTokens,
+		CombinedTokens:      e.combinedTokens,
+	}
+}
+
+func toSnapshotEntries(entries []PersistedEntry) []snapshotEntry {
+	result := make([]snapshotEntry, len(entries))
+	for i, e := range entries {
+		result[i] = snapshotEntry{
+			itemID:              e.ItemID,
+			libraryID:           e.LibraryID,
+			mediaType:           e.MediaType,
+			title:               e.Title,
+			author:              e.Author,
+			duration:            e.Duration,
+			podcastTitle:        e.PodcastTitle,
+			episodeID:           e.EpisodeID,
+			episodeTitle:        e.EpisodeTitle,
+			episodeDuration:     e.EpisodeDuration,
+			seriesID:            e.SeriesID,
+			seriesName:          e.SeriesName,
+			primarySearchText:   e.PrimarySearchText,
+			secondarySearchText: e.SecondarySearchText,
+			combinedSearchText:  e.CombinedSearchText,
+			fuzzySearchText:     e.FuzzySearchText,
+			primaryTokens:       e.PrimaryTokens,
+			combinedTokens:      e.CombinedTokens,
+		}
+	}
+	return result
+}
 
 const (
 	defaultCacheTTL   = 15 * time.Minute
@@ -20,7 +112,8 @@ const (
 
 // Cache keeps lightweight per-library search snapshots in memory.
 type Cache struct {
-	client *abs.Client
+	client *cache.Client
+	store  *cache.Store
 	ttl    time.Duration
 	now    func() time.Time
 
@@ -70,14 +163,14 @@ type snapshotEntry struct {
 }
 
 // NewCache creates a new in-memory search cache.
-func NewCache(client *abs.Client) *Cache {
+func NewCache(client *cache.Client, store *cache.Store) *Cache {
 	return &Cache{
-		client:      client,
-		ttl:         defaultCacheTTL,
-		now:         time.Now,
-		snapshots:   make(map[string]*librarySnapshot),
-		builds:      make(map[string]*snapshotBuild),
-		generations: make(map[string]uint64),
+		client:    client,
+		store:     store,
+		ttl:       defaultCacheTTL,
+		now:       time.Now,
+		snapshots: make(map[string]*librarySnapshot),
+		builds:    make(map[string]*snapshotBuild),
 	}
 }
 
@@ -88,7 +181,6 @@ func (c *Cache) Invalidate(libraryID string) {
 	}
 	c.mu.Lock()
 	delete(c.snapshots, libraryID)
-	c.generations[libraryID]++
 	c.mu.Unlock()
 }
 
@@ -132,29 +224,43 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 		now := c.now()
 
 		c.mu.Lock()
-		generation := c.generations[resolvedID]
 		if snapshot, ok := c.snapshots[resolvedID]; ok && snapshot.mediaType == resolvedMediaType && now.Sub(snapshot.builtAt) < c.ttl {
 			snapshot.lastAccessedAt = now
 			c.mu.Unlock()
 			return snapshot, nil
 		}
+		c.mu.Unlock()
+
+		// Try to restore from disk cache
+		if c.store != nil {
+			var persisted PersistedSnapshot
+			if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit && persisted.MediaType == resolvedMediaType {
+				snapshot := &librarySnapshot{
+					libraryID:      persisted.LibraryID,
+					mediaType:      persisted.MediaType,
+					builtAt:        persisted.BuiltAt,
+					lastAccessedAt: persisted.LastAccessedAt,
+					entries:        toSnapshotEntries(persisted.Entries),
+				}
+				c.mu.Lock()
+				c.snapshots[resolvedID] = snapshot
+				c.mu.Unlock()
+				return snapshot, nil
+			}
+		}
+
+		c.mu.Lock()
 		if build, ok := c.builds[resolvedID]; ok {
 			c.mu.Unlock()
 			select {
 			case <-build.done:
-				c.mu.Lock()
-				stale := build.generation != c.generations[resolvedID]
-				c.mu.Unlock()
-				if stale && build.err == nil {
-					continue
-				}
 				return build.snapshot, build.err
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
 		}
 
-		build := &snapshotBuild{done: make(chan struct{}), generation: generation}
+		build := &snapshotBuild{done: make(chan struct{})}
 		c.builds[resolvedID] = build
 		c.mu.Unlock()
 
@@ -162,12 +268,25 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 		if err == nil {
 			snapshot.builtAt = now
 			snapshot.lastAccessedAt = now
+			// Persist to disk cache
+			if c.store != nil {
+				persistedEntries := make([]PersistedEntry, len(snapshot.entries))
+				for i, e := range snapshot.entries {
+					persistedEntries[i] = e.toPersisted()
+				}
+				_ = c.store.Put("search-snapshot:"+resolvedID, PersistedSnapshot{
+					LibraryID:      snapshot.libraryID,
+					MediaType:      snapshot.mediaType,
+					BuiltAt:        now,
+					LastAccessedAt: now,
+					Entries:        persistedEntries,
+				}, c.ttl)
+			}
 		}
 
 		c.mu.Lock()
 		delete(c.builds, resolvedID)
-		stale := build.generation != c.generations[resolvedID]
-		if err == nil && !stale {
+		if err == nil {
 			c.snapshots[resolvedID] = snapshot
 		}
 		build.snapshot = snapshot
@@ -175,9 +294,6 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 		close(build.done)
 		c.mu.Unlock()
 
-		if stale && err == nil {
-			continue
-		}
 		return snapshot, err
 	}
 }

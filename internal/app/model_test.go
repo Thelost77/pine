@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
@@ -85,12 +86,13 @@ func (p *mockPlayer) Quit() error {
 
 // newTestModel creates a model with no stored credentials (login screen).
 func newTestModel() Model {
-	return New(config.Default(), nil, nil)
+	return New(config.Default(), nil, nil, nil)
 }
 
 // newTestModelAuthenticated creates a model with a client (home screen).
 func newTestModelAuthenticated() Model {
-	return New(config.Default(), nil, abs.NewClient("http://test", "tok"))
+	client := abs.NewClient("http://test", "tok")
+	return New(config.Default(), nil, cache.NewClient(client, nil), nil)
 }
 
 func TestScreenString(t *testing.T) {
@@ -334,7 +336,7 @@ func TestEpisodeMetadataSaveUpdatesDetail(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := New(config.Default(), nil, abs.NewClient(srv.URL, "tok"))
+	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.screen = ScreenMetadataEdit
 	m.backStack = []Screen{ScreenDetail}
 	m.detail = detail.New(m.styles, oldItem)
@@ -451,7 +453,7 @@ func TestContentSearchContextUsesActiveLibraryScreen(t *testing.T) {
 	})
 	m.screen = ScreenLibrary
 
-	libID, mediaType := m.contentSearchContext()
+	libID, mediaType := m.currentLibraryForSearch()
 	if libID != "lib-books" {
 		t.Fatalf("libID = %q, want lib-books", libID)
 	}
@@ -469,7 +471,7 @@ func TestContentSearchContextUsesDetailItemLibrary(t *testing.T) {
 	})
 	m.screen = ScreenDetail
 
-	libID, mediaType := m.contentSearchContext()
+	libID, mediaType := m.currentLibraryForSearch()
 	if libID != "lib-books" {
 		t.Fatalf("libID = %q, want lib-books", libID)
 	}
@@ -752,7 +754,7 @@ func newPlaybackTestModel() Model {
 	mp := &mockPlayer{position: 0, duration: 3600}
 	cfg := config.Default()
 	client := abs.NewClient("http://test", "tok")
-	m := NewWithPlayer(cfg, nil, client, mp)
+	m := NewWithPlayer(cfg, nil, cache.NewClient(client, nil), nil, mp)
 	m.screen = ScreenDetail
 	m.backStack = []Screen{ScreenHome}
 	return m
@@ -1637,7 +1639,7 @@ func TestCleanupWhenPlaying(t *testing.T) {
 
 	mp := &mockPlayer{position: 0, duration: 3600}
 	client := abs.NewClient(srv.URL, "tok")
-	m := NewWithPlayer(config.Default(), nil, client, mp)
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
 	m.sessionID = "sess-abc"
 	m.itemID = "item-001"
 	m.player.Playing = true
@@ -1671,7 +1673,7 @@ func TestCleanupWhenPlaying(t *testing.T) {
 
 func TestCleanupWhenNotPlaying(t *testing.T) {
 	mp := &mockPlayer{}
-	m := NewWithPlayer(config.Default(), nil, nil, mp)
+	m := NewWithPlayer(config.Default(), nil, nil, nil, mp)
 	m.sessionID = "" // not playing
 
 	// Should still quit mpv (safety net for orphaned processes),

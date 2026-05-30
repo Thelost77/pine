@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
@@ -139,15 +140,15 @@ type Model struct {
 	width           int
 	height          int
 	styles          ui.Styles
-	client          *abs.Client
+	client          *cache.Client
 	libraries       []abs.Library
 	selectedLibrary int
-	itemCache       map[string][]abs.LibraryItem // libraryID → items
-	recentCache     map[string][]abs.LibraryItem // libraryID → recently added
+	itemCache       map[string][]abs.LibraryItem
+	recentCache     map[string][]abs.LibraryItem
 }
 
 // New creates a new home screen model.
-func New(styles ui.Styles, client *abs.Client) Model {
+func New(styles ui.Styles, client *cache.Client) Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(styles.Accent.GetForeground()).
@@ -215,8 +216,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.items = items
 			m.recentlyAdded = recent
 			m.contentLibrary = libID
-			m.itemCache[libID] = m.items
-			m.recentCache[libID] = m.recentlyAdded
 			m.refreshListRows()
 			m.updateListTitle()
 			return m, nil
@@ -276,33 +275,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.NextLib):
 			if len(m.libraries) > 1 {
-				// Cache current library's items
-				if libID := m.contentLibrary; libID != "" {
-					m.itemCache[libID] = m.items
-					m.recentCache[libID] = m.recentlyAdded
-				}
 				m.selectedLibrary = (m.selectedLibrary + 1) % len(m.libraries)
 				m.loading = true
 				m.loadingVisible = false
 				m.loadingGen++
 				m.err = nil
 				m.updateListTitle()
-				// Use cached items if available, fetch in background either way
-				newLibID := m.SelectedLibraryID()
-				if cached, ok := m.itemCache[newLibID]; ok {
-					m.items = cached
-					m.contentLibrary = newLibID
-				} else {
-					// Keep current content visible briefly; show skeletons only if
-					// the fetch outlives the reveal delay.
-				}
-				if cachedRecent, ok := m.recentCache[newLibID]; ok {
-					m.recentlyAdded = cachedRecent
-				} else {
-					if m.contentLibrary == newLibID {
-						m.recentlyAdded = nil
-					}
-				}
+				// Keep current content visible briefly; show skeletons only if
+				// the fetch outlives the reveal delay.
 				m.refreshListRows()
 				return m, tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
 			}

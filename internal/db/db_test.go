@@ -29,6 +29,13 @@ func TestOpen_CreatesTables(t *testing.T) {
 		t.Fatalf("sessions table not created: %v", err)
 	}
 	rows.Close()
+
+	// Verify api_cache table exists with expected columns
+	rows, err = store.DB.Query(`SELECT cache_key, data, cached_at, expires_at FROM api_cache LIMIT 0`)
+	if err != nil {
+		t.Fatalf("api_cache table not created: %v", err)
+	}
+	rows.Close()
 }
 
 func TestOpen_Idempotent(t *testing.T) {

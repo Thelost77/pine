@@ -81,6 +81,19 @@ func (s *Store) migrate() error {
 			created_at   TEXT NOT NULL
 		)`,
 		},
+		{
+			name: "create api_cache table",
+			query: `CREATE TABLE IF NOT EXISTS api_cache (
+			cache_key   TEXT PRIMARY KEY,
+			data        BLOB NOT NULL,
+			cached_at   DATETIME NOT NULL,
+			expires_at  DATETIME NOT NULL
+		)`,
+		},
+		{
+			name:  "create api_cache expires index",
+			query: `CREATE INDEX IF NOT EXISTS idx_api_cache_expires ON api_cache(expires_at)`,
+		},
 	}
 
 	for _, m := range migrations {
