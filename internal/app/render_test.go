@@ -1,10 +1,12 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/screens/library"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestViewRendersChapterOverlay(t *testing.T) {
@@ -143,5 +145,41 @@ func TestHelpOverlayDocumentsChapterOverlay(t *testing.T) {
 	}
 	if !containsString(view, ">") || !containsString(view, "play next queued") {
 		t.Fatalf("help overlay should document next queued binding\n%s", view)
+	}
+}
+
+func TestViewKeepsHeaderVisibleDuringPlayback(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenHome
+	m.sessionID = "sess-123"
+	m.player.Title = "My Book"
+	m.player.Playing = true
+	m.player.Duration = 3600
+
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = result.(Model)
+
+	firstLine := strings.Split(m.View(), "\n")[0]
+	if !containsString(firstLine, "pine") || !containsString(firstLine, "Home") {
+		t.Fatalf("header should remain visible on first line during playback, got %q", firstLine)
+	}
+}
+
+func TestPaletteDoesNotHidePlaybackFooter(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenHome
+	m.sessionID = "sess-123"
+	m.player.Title = "My Book"
+	m.player.Playing = true
+	m.player.Duration = 3600
+
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = result.(Model)
+	m.openGlobalPalette()
+
+	lines := strings.Split(m.View(), "\n")
+	lastLine := lines[len(lines)-1]
+	if !containsString(lastLine, "My Book") {
+		t.Fatalf("playback footer should remain visible below palette, got last line %q", lastLine)
 	}
 }

@@ -27,9 +27,9 @@ const (
 // Client is a transparent caching wrapper around abs.Client.
 type Client struct {
 	*abs.Client
-	store      *Store
-	inflightMu sync.Mutex
-	inflight   map[string]*inflightCall
+	store         *Store
+	inflightMutex sync.Mutex
+	inflight      map[string]*inflightCall
 }
 
 type inflightCall struct {
@@ -50,9 +50,9 @@ func NewClient(inner *abs.Client, store *Store) *Client {
 }
 
 func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() error) error {
-	c.inflightMu.Lock()
+	c.inflightMutex.Lock()
 	if call, ok := c.inflight[key]; ok {
-		c.inflightMu.Unlock()
+		c.inflightMutex.Unlock()
 		select {
 		case <-call.done:
 			return call.err
@@ -62,12 +62,12 @@ func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() error)
 	}
 	call := &inflightCall{done: make(chan struct{})}
 	c.inflight[key] = call
-	c.inflightMu.Unlock()
+	c.inflightMutex.Unlock()
 
 	defer func() {
-		c.inflightMu.Lock()
+		c.inflightMutex.Lock()
 		delete(c.inflight, key)
-		c.inflightMu.Unlock()
+		c.inflightMutex.Unlock()
 		close(call.done)
 	}()
 

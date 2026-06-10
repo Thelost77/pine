@@ -37,9 +37,9 @@ type paginatedSeries struct {
 // Libraries -------------------------------------------------------------------
 
 func (s *Store) GetLibraries() ([]abs.Library, bool, error) {
-	var v []abs.Library
-	hit, err := s.Get("libraries", &v)
-	return v, hit, err
+	var libraries []abs.Library
+	hit, err := s.Get("libraries", &libraries)
+	return libraries, hit, err
 }
 
 func (s *Store) PutLibraries(v []abs.Library, ttl time.Duration) error {
