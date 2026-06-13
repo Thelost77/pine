@@ -1556,10 +1556,11 @@ func TestViewIncludesPlayerWhenActive(t *testing.T) {
 	m.player.Speed = 1.0
 	m.width = 80
 	m.height = 24
+	m.player.SetWidth(m.width)
 
 	view := m.View()
 	if !containsString(view, "My Book") {
-		t.Error("expected player bar with title in view")
+		t.Errorf("expected player bar with title in view, got:\n%s", view)
 	}
 }
 
