@@ -542,15 +542,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDeleteItem(msg)
 
 	case detail.ItemDeletedMsg:
-		// Go back to the previous screen since the item no longer exists.
-		// We also want to clear the library/home cache so it doesn't show up.
-		// We do that by having cache.Client.DeleteItem clear the cache.
+		m.home.RemoveItem(msg.ItemID)
+		m.library.RemoveItem(msg.ItemID)
+		if m.searchCache != nil {
+			m.searchCache.Invalidate(m.home.SelectedLibraryID())
+		}
 		return m.back()
 
 	case detail.DeleteEpisodeCmd:
 		return m.handleDeleteEpisode(msg)
 
 	case detail.EpisodeDeletedMsg:
+		m.home.RemoveEpisode(msg.ItemID, msg.EpisodeID)
+		m.library.RemoveEpisode(msg.ItemID, msg.EpisodeID)
+		if m.searchCache != nil {
+			m.searchCache.Invalidate(m.home.SelectedLibraryID())
+		}
 		m.detail, _ = m.detail.Update(msg)
 		return m, nil
 

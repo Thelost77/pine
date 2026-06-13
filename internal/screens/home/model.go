@@ -469,6 +469,93 @@ func mergedUpdatedItem(existing, updated abs.LibraryItem) abs.LibraryItem {
 	return replacement
 }
 
+// RemoveItem removes an item from visible and cached items.
+func (m *Model) RemoveItem(itemID string) {
+	changed := false
+	var c bool
+	m.items, changed = removeItemsByID(m.items, itemID)
+	m.recentlyAdded, c = removeItemsByID(m.recentlyAdded, itemID)
+	changed = changed || c
+	for libID, items := range m.itemCache {
+		if newItems, c := removeItemsByID(items, itemID); c {
+			m.itemCache[libID] = newItems
+			changed = true
+		}
+	}
+	for libID, items := range m.recentCache {
+		if newItems, c := removeItemsByID(items, itemID); c {
+			m.recentCache[libID] = newItems
+			changed = true
+		}
+	}
+	if changed {
+		m.refreshListRows()
+	}
+}
+
+func removeItemsByID(items []abs.LibraryItem, itemID string) ([]abs.LibraryItem, bool) {
+	changed := false
+	var out []abs.LibraryItem
+	for _, item := range items {
+		if item.ID == itemID {
+			changed = true
+		} else {
+			out = append(out, item)
+		}
+	}
+	return out, changed
+}
+
+// RemoveEpisode removes an episode from items, and drops the item entirely if it was featured as a recent episode.
+func (m *Model) RemoveEpisode(itemID, episodeID string) {
+	changed := false
+	var c bool
+	m.items, changed = removeEpisodeFromItems(m.items, itemID, episodeID)
+	m.recentlyAdded, c = removeEpisodeFromItems(m.recentlyAdded, itemID, episodeID)
+	changed = changed || c
+	for libID, items := range m.itemCache {
+		if newItems, c := removeEpisodeFromItems(items, itemID, episodeID); c {
+			m.itemCache[libID] = newItems
+			changed = true
+		}
+	}
+	for libID, items := range m.recentCache {
+		if newItems, c := removeEpisodeFromItems(items, itemID, episodeID); c {
+			m.recentCache[libID] = newItems
+			changed = true
+		}
+	}
+	if changed {
+		m.refreshListRows()
+	}
+}
+
+func removeEpisodeFromItems(items []abs.LibraryItem, itemID, episodeID string) ([]abs.LibraryItem, bool) {
+	changed := false
+	var out []abs.LibraryItem
+	for _, item := range items {
+		if item.ID == itemID {
+			if item.RecentEpisode != nil && item.RecentEpisode.ID == episodeID {
+				changed = true
+				continue
+			}
+			var newEpisodes []abs.PodcastEpisode
+			for _, ep := range item.Media.Episodes {
+				if ep.ID == episodeID {
+					changed = true
+				} else {
+					newEpisodes = append(newEpisodes, ep)
+				}
+			}
+			item.Media.Episodes = newEpisodes
+			out = append(out, item)
+		} else {
+			out = append(out, item)
+		}
+	}
+	return out, changed
+}
+
 // Libraries returns the available libraries.
 func (m Model) Libraries() []abs.Library {
 	return m.libraries

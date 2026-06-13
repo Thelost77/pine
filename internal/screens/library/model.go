@@ -470,6 +470,77 @@ func (m *Model) ReplaceItem(updated abs.LibraryItem) {
 	}
 }
 
+// RemoveItem removes an item from visible and cached items.
+func (m *Model) RemoveItem(itemID string) {
+	changed := false
+	m.items, changed = removeItemsByID(m.items, itemID)
+	for libID, entry := range m.cache {
+		if newItems, c := removeItemsByID(entry.items, itemID); c {
+			entry.items = newItems
+			m.cache[libID] = entry
+			changed = true
+		}
+	}
+	if changed {
+		m.refreshListItems()
+	}
+}
+
+func removeItemsByID(items []abs.LibraryItem, itemID string) ([]abs.LibraryItem, bool) {
+	changed := false
+	var out []abs.LibraryItem
+	for _, item := range items {
+		if item.ID == itemID {
+			changed = true
+		} else {
+			out = append(out, item)
+		}
+	}
+	return out, changed
+}
+
+// RemoveEpisode removes an episode from items, and drops the item entirely if it was featured as a recent episode.
+func (m *Model) RemoveEpisode(itemID, episodeID string) {
+	changed := false
+	m.items, changed = removeEpisodeFromItems(m.items, itemID, episodeID)
+	for libID, entry := range m.cache {
+		if newItems, c := removeEpisodeFromItems(entry.items, itemID, episodeID); c {
+			entry.items = newItems
+			m.cache[libID] = entry
+			changed = true
+		}
+	}
+	if changed {
+		m.refreshListItems()
+	}
+}
+
+func removeEpisodeFromItems(items []abs.LibraryItem, itemID, episodeID string) ([]abs.LibraryItem, bool) {
+	changed := false
+	var out []abs.LibraryItem
+	for _, item := range items {
+		if item.ID == itemID {
+			if item.RecentEpisode != nil && item.RecentEpisode.ID == episodeID {
+				changed = true
+				continue
+			}
+			var newEpisodes []abs.PodcastEpisode
+			for _, ep := range item.Media.Episodes {
+				if ep.ID == episodeID {
+					changed = true
+				} else {
+					newEpisodes = append(newEpisodes, ep)
+				}
+			}
+			item.Media.Episodes = newEpisodes
+			out = append(out, item)
+		} else {
+			out = append(out, item)
+		}
+	}
+	return out, changed
+}
+
 // InvalidateLibrary removes cached library pages for a library.
 func (m *Model) InvalidateLibrary(libraryID string) {
 	delete(m.cache, libraryID)
