@@ -86,8 +86,7 @@ func (m Model) overlayPaletteModal(content string) string {
 		}
 		lineWidth := lipgloss.Width(line)
 		left := ansi.Truncate(baseLines[y+i], x, "")
-		rightWidth := max(0, m.width-(x+lineWidth))
-		right := ansi.TruncateLeft(baseLines[y+i], rightWidth, "")
+		right := ansi.TruncateLeft(baseLines[y+i], x+lineWidth, "")
 		baseLines[y+i] = left + line + right
 	}
 
@@ -270,8 +269,7 @@ func (m Model) overlayChapterModal(content string) string {
 		}
 		lineWidth := lipgloss.Width(line)
 		left := ansi.Truncate(baseLines[y+i], x, "")
-		rightWidth := max(0, m.width-(x+lineWidth))
-		right := ansi.TruncateLeft(baseLines[y+i], rightWidth, "")
+		right := ansi.TruncateLeft(baseLines[y+i], x+lineWidth, "")
 		baseLines[y+i] = left + line + right
 	}
 
