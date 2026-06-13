@@ -82,6 +82,10 @@ ${EDITOR:-vi} docs/releases/v0.1.0.md
 ./scripts/release.sh v0.1.0
 ```
 
+## Known issues
+
+- **Ghostty rendering glitches.** On the Ghostty terminal, the home screen can show stale rows, duplicated item titles, or rows that appear to belong to a different library after pressing `tab`. This is a Ghostty rendering issue, not a pine bug. Pine renders correctly in other terminals such as [Alacritty](https://github.com/alacritty/alacritty), Kitty, WezTerm, or iTerm2. If you hit this, try a different terminal before reporting a bug.
+
 ## Architecture
 
 ```

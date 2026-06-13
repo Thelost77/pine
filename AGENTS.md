@@ -97,6 +97,10 @@ Styles from theme config. Format helpers (timestamps, durations). ListItem adapt
 
 Logs to `~/.config/pine/pine.log` (slog-based, auto-rotated at 5MB). Token/credentials are NOT logged.
 
+## Known Rendering Issues
+
+- **Ghostty terminal** has rendering glitches on the home screen: stale rows, duplicated item titles, or rows that appear to belong to a different library after pressing `tab`. This is a Ghostty issue, not pine. Always reproduce suspected home-view bugs in a non-Ghostty terminal (Alacritty, Kitty, WezTerm, iTerm2) before opening a fix PR. See `README.md` → Known issues for the user-facing note.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
 
