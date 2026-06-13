@@ -60,26 +60,26 @@ func (s *Store) PutPersonalized(libID string, v []abs.PersonalizedResponse, ttl 
 
 // LibraryItems ---------------------------------------------------------------
 
-func (s *Store) GetLibraryItems(libID string, page int) ([]abs.LibraryItem, int, bool, error) {
+func (s *Store) GetLibraryItems(libID string, page, limit int) ([]abs.LibraryItem, int, bool, error) {
 	var v paginatedItems
-	hit, err := s.Get("items:"+libID+":"+strconv.Itoa(page), &v)
+	hit, err := s.Get(fmt.Sprintf("items:%s:%d:%d", libID, limit, page), &v)
 	return v.Items, v.Total, hit, err
 }
 
-func (s *Store) PutLibraryItems(libID string, page int, items []abs.LibraryItem, total int, ttl time.Duration) error {
-	return s.Put("items:"+libID+":"+strconv.Itoa(page), paginatedItems{Items: items, Total: total}, ttl)
+func (s *Store) PutLibraryItems(libID string, page, limit int, items []abs.LibraryItem, total int, ttl time.Duration) error {
+	return s.Put(fmt.Sprintf("items:%s:%d:%d", libID, limit, page), paginatedItems{Items: items, Total: total}, ttl)
 }
 
 // LibrarySeries --------------------------------------------------------------
 
-func (s *Store) GetLibrarySeries(libID string, page int) ([]abs.Series, int, bool, error) {
+func (s *Store) GetLibrarySeries(libID string, page, limit int) ([]abs.Series, int, bool, error) {
 	var v paginatedSeries
-	hit, err := s.Get("series:"+libID+":"+strconv.Itoa(page), &v)
+	hit, err := s.Get(fmt.Sprintf("series:%s:%d:%d", libID, limit, page), &v)
 	return v.Items, v.Total, hit, err
 }
 
-func (s *Store) PutLibrarySeries(libID string, page int, items []abs.Series, total int, ttl time.Duration) error {
-	return s.Put("series:"+libID+":"+strconv.Itoa(page), paginatedSeries{Items: items, Total: total}, ttl)
+func (s *Store) PutLibrarySeries(libID string, page, limit int, items []abs.Series, total int, ttl time.Duration) error {
+	return s.Put(fmt.Sprintf("series:%s:%d:%d", libID, limit, page), paginatedSeries{Items: items, Total: total}, ttl)
 }
 
 // SeriesContents -------------------------------------------------------------

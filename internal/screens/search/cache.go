@@ -13,6 +13,7 @@ import (
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
 	"github.com/sahilm/fuzzy"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func init() {
@@ -107,7 +108,7 @@ func toSnapshotEntries(entries []PersistedEntry) []snapshotEntry {
 
 const (
 	defaultCacheTTL   = 15 * time.Minute
-	snapshotPageLimit = 100
+	snapshotPageLimit = 50
 )
 
 // Cache keeps lightweight per-library search snapshots in memory.
@@ -190,6 +191,15 @@ func (c *Cache) Prepare(ctx context.Context, libraryID, libraryMediaType string)
 		return err
 	}
 	return nil
+}
+
+// PrebuildCmd returns a tea.Cmd that builds the search cache in the background.
+func (c *Cache) PrebuildCmd(libraryID, libraryMediaType string) tea.Cmd {
+	return func() tea.Msg {
+		// Use a detached background context since this runs asynchronously.
+		_ = c.Prepare(context.Background(), libraryID, libraryMediaType)
+		return nil
+	}
 }
 
 // Search returns search results from a cached per-library snapshot.

@@ -544,10 +544,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case detail.ItemDeletedMsg:
 		m.home.RemoveItem(msg.ItemID)
 		m.library.RemoveItem(msg.ItemID)
+		m.home.InvalidateLibrary(m.home.SelectedLibraryID())
+		m.library.InvalidateLibrary(m.home.SelectedLibraryID())
 		if m.searchCache != nil {
 			m.searchCache.Invalidate(m.home.SelectedLibraryID())
 		}
-		return m.back()
+		m, navCmd := m.back()
+		return m, tea.Batch(navCmd, m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
 
 	case detail.DeleteEpisodeCmd:
 		return m.handleDeleteEpisode(msg)
@@ -555,11 +558,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case detail.EpisodeDeletedMsg:
 		m.home.RemoveEpisode(msg.ItemID, msg.EpisodeID)
 		m.library.RemoveEpisode(msg.ItemID, msg.EpisodeID)
+		m.home.InvalidateLibrary(m.home.SelectedLibraryID())
+		m.library.InvalidateLibrary(m.home.SelectedLibraryID())
 		if m.searchCache != nil {
 			m.searchCache.Invalidate(m.home.SelectedLibraryID())
 		}
 		m.detail, _ = m.detail.Update(msg)
-		return m, nil
+		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
 
 	case detail.SeekToBookmarkCmd:
 		return m.handleSeekToBookmark(msg)

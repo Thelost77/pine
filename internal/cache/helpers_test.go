@@ -57,11 +57,11 @@ func TestHelpers_LibraryItems(t *testing.T) {
 
 	wantItems := []abs.LibraryItem{{ID: "li1"}, {ID: "li2"}}
 	wantTotal := 42
-	if err := s.PutLibraryItems("lib1", 2, wantItems, wantTotal, 5*time.Minute); err != nil {
+	if err := s.PutLibraryItems("lib1", 2, 50, wantItems, wantTotal, 5*time.Minute); err != nil {
 		t.Fatalf("PutLibraryItems error: %v", err)
 	}
 
-	gotItems, gotTotal, hit, err := s.GetLibraryItems("lib1", 2)
+	gotItems, gotTotal, hit, err := s.GetLibraryItems("lib1", 2, 50)
 	if err != nil {
 		t.Fatalf("GetLibraryItems error: %v", err)
 	}
@@ -79,11 +79,11 @@ func TestHelpers_LibrarySeries(t *testing.T) {
 
 	wantItems := []abs.Series{{ID: "s1", Name: "Series A"}}
 	wantTotal := 10
-	if err := s.PutLibrarySeries("lib1", 1, wantItems, wantTotal, 5*time.Minute); err != nil {
+	if err := s.PutLibrarySeries("lib1", 1, 50, wantItems, wantTotal, 5*time.Minute); err != nil {
 		t.Fatalf("PutLibrarySeries error: %v", err)
 	}
 
-	gotItems, gotTotal, hit, err := s.GetLibrarySeries("lib1", 1)
+	gotItems, gotTotal, hit, err := s.GetLibrarySeries("lib1", 1, 50)
 	if err != nil {
 		t.Fatalf("GetLibrarySeries error: %v", err)
 	}

@@ -556,6 +556,15 @@ func removeEpisodeFromItems(items []abs.LibraryItem, itemID, episodeID string) (
 	return out, changed
 }
 
+// ReloadCmd forces a fresh data fetch for the current library.
+func (m *Model) ReloadCmd() tea.Cmd {
+	m.loading = true
+	m.loadingVisible = false
+	m.loadingGen++
+	m.refreshListRows()
+	return tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
+}
+
 // Libraries returns the available libraries.
 func (m Model) Libraries() []abs.Library {
 	return m.libraries

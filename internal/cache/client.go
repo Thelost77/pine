@@ -204,7 +204,7 @@ func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, li
 	if c.store == nil {
 		return c.Client.GetLibraryItems(ctx, libraryID, page, limit)
 	}
-	if items, total, hit, _ := c.store.GetLibraryItems(libraryID, page); hit {
+	if items, total, hit, _ := c.store.GetLibraryItems(libraryID, page, limit); hit {
 		return &abs.LibraryItemsResponse{
 			Results: items,
 			Total:   total,
@@ -213,24 +213,24 @@ func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, li
 		}, nil
 	}
 
-	err := c.getOrFetch(ctx, "items:"+libraryID+":"+strconv.Itoa(page), func() error {
+	err := c.getOrFetch(ctx, fmt.Sprintf("items:%s:%d:%d", libraryID, limit, page), func() error {
 		resp, err := c.Client.GetLibraryItems(ctx, libraryID, page, limit)
 		if err != nil {
 			return err
 		}
-		_ = c.store.PutLibraryItems(libraryID, page, resp.Results, resp.Total, ttlLibraryItems)
+		_ = c.store.PutLibraryItems(libraryID, page, limit, resp.Results, resp.Total, ttlLibraryItems)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	items, total, hit, err := c.store.GetLibraryItems(libraryID, page)
+	items, total, hit, err := c.store.GetLibraryItems(libraryID, page, limit)
 	if err != nil {
 		return nil, err
 	}
 	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key items:%s:%d", libraryID, page)
+		return nil, fmt.Errorf("unexpected cache miss after fetch for key items:%s:%d:%d", libraryID, limit, page)
 	}
 	return &abs.LibraryItemsResponse{
 		Results: items,
@@ -245,7 +245,7 @@ func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, l
 	if c.store == nil {
 		return c.Client.GetLibrarySeries(ctx, libraryID, page, limit)
 	}
-	if items, total, hit, _ := c.store.GetLibrarySeries(libraryID, page); hit {
+	if items, total, hit, _ := c.store.GetLibrarySeries(libraryID, page, limit); hit {
 		return &abs.LibrarySeriesResponse{
 			Results: items,
 			Total:   total,
@@ -254,24 +254,24 @@ func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, l
 		}, nil
 	}
 
-	err := c.getOrFetch(ctx, "series:"+libraryID+":"+strconv.Itoa(page), func() error {
+	err := c.getOrFetch(ctx, fmt.Sprintf("series:%s:%d:%d", libraryID, limit, page), func() error {
 		resp, err := c.Client.GetLibrarySeries(ctx, libraryID, page, limit)
 		if err != nil {
 			return err
 		}
-		_ = c.store.PutLibrarySeries(libraryID, page, resp.Results, resp.Total, ttlLibrarySeries)
+		_ = c.store.PutLibrarySeries(libraryID, page, limit, resp.Results, resp.Total, ttlLibrarySeries)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	items, total, hit, err := c.store.GetLibrarySeries(libraryID, page)
+	items, total, hit, err := c.store.GetLibrarySeries(libraryID, page, limit)
 	if err != nil {
 		return nil, err
 	}
 	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key series:%s:%d", libraryID, page)
+		return nil, fmt.Errorf("unexpected cache miss after fetch for key series:%s:%d:%d", libraryID, limit, page)
 	}
 	return &abs.LibrarySeriesResponse{
 		Results: items,

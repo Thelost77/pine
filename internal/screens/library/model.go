@@ -541,6 +541,18 @@ func removeEpisodeFromItems(items []abs.LibraryItem, itemID, episodeID string) (
 	return out, changed
 }
 
+// ReloadCmd forces a fresh data fetch for the current library and resets to page 0.
+func (m *Model) ReloadCmd() tea.Cmd {
+	m.page = 0
+	m.totalItems = 0
+	m.items = nil
+	m.loading = true
+	m.loadingVisible = false
+	m.loadingGen++
+	m.refreshListItems()
+	return tea.Batch(m.fetchLibraryItemsCmd(m.page, pageLimit), m.loadingRevealCmd())
+}
+
 // InvalidateLibrary removes cached library pages for a library.
 func (m *Model) InvalidateLibrary(libraryID string) {
 	delete(m.cache, libraryID)
