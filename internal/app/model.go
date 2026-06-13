@@ -280,6 +280,16 @@ func (m Model) Init() tea.Cmd {
 
 // Update dispatches messages to the active screen and handles navigation.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Workaround for terminal emulators (like Ghostty with kitty keyboard protocol)
+	// that set the Alt modifier when typing international characters via AltGr.
+	// bubbles/textinput ignores KeyRunes if Alt is true.
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyRunes && keyMsg.Alt {
+		if len(keyMsg.Runes) == 1 && keyMsg.Runes[0] >= 0x80 {
+			keyMsg.Alt = false
+			msg = keyMsg
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
