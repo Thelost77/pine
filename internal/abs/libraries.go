@@ -19,6 +19,20 @@ import (
 
 const batchFetchConcurrency = 10
 
+// DeleteEpisode deletes a podcast episode from the server.
+func (c *Client) DeleteEpisode(ctx context.Context, podcastID string, episodeID string, hardDelete bool) error {
+	path := fmt.Sprintf("/api/podcasts/%s/episode/%s", podcastID, episodeID)
+	if hardDelete {
+		path += "?hard=1"
+	}
+
+	_, err := c.do(ctx, "DELETE", path, nil)
+	if err != nil {
+		return fmt.Errorf("delete episode: %w", err)
+	}
+	return nil
+}
+
 // GetLibraries returns all libraries on the server.
 func (c *Client) GetLibraries(ctx context.Context) ([]Library, error) {
 	data, err := c.do(ctx, http.MethodGet, "/api/libraries", nil)

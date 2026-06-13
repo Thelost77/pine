@@ -547,6 +547,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// We do that by having cache.Client.DeleteItem clear the cache.
 		return m.back()
 
+	case detail.DeleteEpisodeCmd:
+		return m.handleDeleteEpisode(msg)
+
+	case detail.EpisodeDeletedMsg:
+		m.detail, _ = m.detail.Update(msg)
+		return m, nil
+
 	case detail.SeekToBookmarkCmd:
 		return m.handleSeekToBookmark(msg)
 
@@ -788,7 +795,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Global back: esc/left goes back but never quits.
 		if m.screen != ScreenLogin {
-			if key.Matches(msg, m.keys.Back) {
+			isConfirmVisible := m.screen == ScreenDetail && m.detail.ConfirmOverlayVisible()
+			if !isConfirmVisible && key.Matches(msg, m.keys.Back) {
 				if len(m.backStack) > 0 {
 					return m.back()
 				}
@@ -1480,6 +1488,22 @@ func (m *Model) handleDeleteItem(cmd detail.DeleteItemCmd) (tea.Model, tea.Cmd) 
 		}
 		return detail.ItemDeletedMsg{
 			ItemID: cmd.ItemID,
+		}
+	}
+}
+
+func (m *Model) handleDeleteEpisode(cmd detail.DeleteEpisodeCmd) (tea.Model, tea.Cmd) {
+	if m.client == nil {
+		return m, nil
+	}
+	return m, func() tea.Msg {
+		err := m.client.DeleteEpisode(context.Background(), cmd.ItemID, cmd.EpisodeID, false)
+		if err != nil {
+			return components.ErrMsg{Err: fmt.Errorf("failed to delete episode: %w", err)}
+		}
+		return detail.EpisodeDeletedMsg{
+			ItemID:    cmd.ItemID,
+			EpisodeID: cmd.EpisodeID,
 		}
 	}
 }

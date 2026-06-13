@@ -101,12 +101,26 @@ type DeleteItemCmd struct {
 	ItemID string
 }
 
+// DeleteEpisodeCmd requests deletion of an episode from the server.
+type DeleteEpisodeCmd struct {
+	ItemID    string
+	EpisodeID string
+}
+
 // ShowDeleteConfirmMsg requests the UI to show the delete confirmation dialog.
-type ShowDeleteConfirmMsg struct{}
+type ShowDeleteConfirmMsg struct {
+	Target string // "delete_item" or "delete_episode"
+}
 
 // ItemDeletedMsg signals the item was successfully deleted.
 type ItemDeletedMsg struct {
 	ItemID string
+}
+
+// EpisodeDeletedMsg signals the episode was successfully deleted.
+type EpisodeDeletedMsg struct {
+	ItemID    string
+	EpisodeID string
 }
 
 // BackMsg signals that the user wants to go back from the detail screen.
@@ -163,7 +177,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		DeleteItem: key.NewBinding(
 			key.WithKeys("D"),
-			key.WithHelp("D", "delete item"),
+			key.WithHelp("D", "del"),
 		),
 		Edit: key.NewBinding(
 			key.WithKeys("e"),
@@ -426,11 +440,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				itemID := m.item.ID
 				return m, func() tea.Msg { return DeleteItemCmd{ItemID: itemID} }
 			}
+			if target, ok := msg.Data.(string); ok && target == "delete_episode" {
+				itemID := m.item.ID
+				episodeID := m.episodes[m.selectedEpisode].ID
+				return m, func() tea.Msg { return DeleteEpisodeCmd{ItemID: itemID, EpisodeID: episodeID} }
+			}
 		}
 		return m, nil
 
 	case ShowDeleteConfirmMsg:
-		m.confirm.Show("Delete Item", "Are you sure you want to delete this item from the server?\nThis action cannot be undone.", "delete_item")
+		if msg.Target == "delete_episode" && m.item.MediaType == "podcast" && len(m.episodes) > m.selectedEpisode {
+			m.confirm.Show("Delete Episode", "Are you sure you want to delete this episode from the server?\nThis action cannot be undone.", "delete_episode")
+		} else {
+			m.confirm.Show("Delete Item", "Are you sure you want to delete this item from the server?\nThis action cannot be undone.", "delete_item")
+		}
+		m.refreshContent()
+		return m, nil
+
+	case EpisodeDeletedMsg:
+		var newEpisodes []abs.PodcastEpisode
+		for _, ep := range m.episodes {
+			if ep.ID != msg.EpisodeID {
+				newEpisodes = append(newEpisodes, ep)
+			}
+		}
+		m.episodes = newEpisodes
+		m.item.Media.Episodes = newEpisodes
+		if m.selectedEpisode >= len(m.episodes) && len(m.episodes) > 0 {
+			m.selectedEpisode = len(m.episodes) - 1
+		}
+		if len(m.episodes) == 0 {
+			m.focusEpisodes = false
+		}
 		m.refreshContent()
 		return m, nil
 
@@ -572,7 +613,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, m.keys.DeleteItem):
-			m.confirm.Show("Delete Item", "Are you sure you want to delete this item from the server?\nThis action cannot be undone.", "delete_item")
+			if m.focusEpisodes && m.item.MediaType == "podcast" && len(m.episodes) > m.selectedEpisode {
+				m.confirm.Show("Delete Episode", "Are you sure you want to delete this episode from the server?\nThis action cannot be undone.", "delete_episode")
+			} else {
+				m.confirm.Show("Delete Item", "Are you sure you want to delete this item from the server?\nThis action cannot be undone.", "delete_item")
+			}
 			m.refreshContent()
 			return m, nil
 		case key.Matches(msg, m.keys.Edit):
@@ -779,6 +824,11 @@ func (m Model) ConfirmOverlayView() string {
 	return m.confirm.View()
 }
 
+// ConfirmOverlayVisible returns whether the confirm overlay is currently visible.
+func (m Model) ConfirmOverlayVisible() bool {
+	return m.confirm.Visible()
+}
+
 func (m Model) SelectedPaletteActions() []components.PaletteItem {
 	item := m.Item()
 	if item.ID == "" {
@@ -805,7 +855,10 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 			{Label: "Add to Queue", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Mark Finished", Action: components.ActionMarkFinished, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
-			{Label: "Delete Item from Server", Action: components.ActionDeleteItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: ShowDeleteConfirmMsg{}},
+			{Label: "Delete Item from Server", Action: components.ActionDeleteItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: ShowDeleteConfirmMsg{Target: "delete_item"}},
+		}
+		if item.MediaType == "podcast" && targetOk {
+			items = append(items, components.PaletteItem{Label: "Delete Episode from Server", Action: components.ActionDeleteItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: ShowDeleteConfirmMsg{Target: "delete_episode"}})
 		}
 		if editItem, editEpisode, ok := m.MetadataEditTarget(); ok {
 			items = append(items, components.PaletteItem{Label: "Edit Metadata", Action: components.ActionEditMetadata, LibraryID: editItem.LibraryID, ItemID: editItem.ID, Data: EditMetadataCmd{Item: editItem, Episode: editEpisode}})

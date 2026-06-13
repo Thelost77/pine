@@ -496,3 +496,17 @@ func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool)
 	}
 	return nil
 }
+
+// DeleteEpisode deletes a podcast episode from the API and invalidates related caches.
+func (c *Client) DeleteEpisode(ctx context.Context, podcastID string, episodeID string, hardDelete bool) error {
+	err := c.Client.DeleteEpisode(ctx, podcastID, episodeID, hardDelete)
+	if err != nil {
+		return err
+	}
+	if c.store != nil {
+		_ = c.store.Delete("item:" + podcastID)
+		// Wipe entire cache to be safe since delete is rare.
+		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+	}
+	return nil
+}
