@@ -44,6 +44,10 @@ func (m Model) View() string {
 		content = m.overlayChapterModal(content)
 	}
 
+	if m.screen == ScreenDetail {
+		content = m.overlayDetailConfirmModal(content)
+	}
+
 	if m.palette.Visible() {
 		content = m.overlayPaletteModal(content)
 	}
@@ -53,6 +57,39 @@ func (m Model) View() string {
 	}
 
 	return content
+}
+
+func (m Model) overlayDetailConfirmModal(content string) string {
+	overlay := m.detail.ConfirmOverlayView()
+	if overlay == "" {
+		return content
+	}
+	if m.width <= 0 || m.height <= 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
+	}
+
+	w := normalizeViewWidth(m.width)
+	baseLines := normalizeOverlayCanvas(content, w, m.height)
+	overlayLines := strings.Split(overlay, "\n")
+	overlayWidth := lipgloss.Width(overlay)
+	overlayHeight := len(overlayLines)
+	if overlayWidth <= 0 || overlayHeight == 0 {
+		return content
+	}
+
+	x := max(0, (m.width-overlayWidth)/2)
+	y := max(0, (m.height-overlayHeight)/2)
+	for i, line := range overlayLines {
+		if y+i >= len(baseLines) {
+			break
+		}
+		lineWidth := lipgloss.Width(line)
+		left := ansi.Truncate(baseLines[y+i], x, "")
+		right := ansi.TruncateLeft(baseLines[y+i], x+lineWidth, "")
+		baseLines[y+i] = left + line + right
+	}
+
+	return strings.Join(baseLines, "\n")
 }
 
 func (m Model) overlayPaletteModal(content string) string {

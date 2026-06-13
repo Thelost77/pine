@@ -481,3 +481,18 @@ func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]abs.Bookmar
 	}
 	return cached, nil
 }
+
+// DeleteItem deletes a library item from the API and invalidates related caches.
+func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool) error {
+	err := c.Client.DeleteItem(ctx, itemID, hardDelete)
+	if err != nil {
+		return err
+	}
+	if c.store != nil {
+		_ = c.store.Delete("item:" + itemID)
+		// Ideally we would invalidate items, recently-added, etc.
+		// But for now, we just wipe the entire cache to be safe since delete is rare.
+		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+	}
+	return nil
+}

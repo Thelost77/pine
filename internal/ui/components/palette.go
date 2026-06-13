@@ -52,6 +52,7 @@ const (
 	ActionContentNavigate
 	ActionPlayDirect
 	ActionEditMetadata
+	ActionDeleteItem
 )
 
 type PaletteItem struct {

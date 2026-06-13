@@ -96,6 +96,19 @@ type BookmarksUpdatedMsg struct {
 	Err       error
 }
 
+// DeleteItemCmd requests deletion of the item from the server.
+type DeleteItemCmd struct {
+	ItemID string
+}
+
+// ShowDeleteConfirmMsg requests the UI to show the delete confirmation dialog.
+type ShowDeleteConfirmMsg struct{}
+
+// ItemDeletedMsg signals the item was successfully deleted.
+type ItemDeletedMsg struct {
+	ItemID string
+}
+
 // BackMsg signals that the user wants to go back from the detail screen.
 type BackMsg struct{}
 
@@ -108,6 +121,7 @@ type KeyMap struct {
 	Back         key.Binding
 	Enter        key.Binding
 	Delete       key.Binding
+	DeleteItem   key.Binding
 	Edit         key.Binding
 	ToggleFocus  key.Binding
 	MarkFinished key.Binding
@@ -146,6 +160,10 @@ func DefaultKeyMap() KeyMap {
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "delete bookmark"),
+		),
+		DeleteItem: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "delete item"),
 		),
 		Edit: key.NewBinding(
 			key.WithKeys("e"),
@@ -195,6 +213,7 @@ type Model struct {
 	episodes         []abs.PodcastEpisode
 	selectedEpisode  int
 	focusEpisodes    bool
+	confirm          components.ConfirmOverlay
 }
 
 // New creates a new detail screen model for the given library item.
@@ -213,6 +232,7 @@ func New(styles ui.Styles, item abs.LibraryItem) Model {
 		episodes:         item.Media.Episodes,
 		selectedEpisode:  0,
 		focusEpisodes:    item.MediaType == "podcast" && len(item.Media.Episodes) > 0,
+		confirm:          components.NewConfirmOverlay(styles),
 	}
 }
 
@@ -390,7 +410,30 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles messages for the detail screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if m.confirm.Visible() {
+		cmd, handled := m.confirm.Update(msg)
+		if handled {
+			m.refreshContent()
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
+	case components.ConfirmMsg:
+		if msg.Confirmed {
+			if target, ok := msg.Data.(string); ok && target == "delete_item" {
+				itemID := m.item.ID
+				return m, func() tea.Msg { return DeleteItemCmd{ItemID: itemID} }
+			}
+		}
+		return m, nil
+
+	case ShowDeleteConfirmMsg:
+		m.confirm.Show("Delete Item", "Are you sure you want to delete this item from the server?\nThis action cannot be undone.", "delete_item")
+		m.refreshContent()
+		return m, nil
+
 	case MarkFinishedMsg:
 		if msg.Progress != nil {
 			m.item.UserMediaProgress = msg.Progress
@@ -528,6 +571,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return DeleteBookmarkCmd{ItemID: itemID, Bookmark: bm}
 				}
 			}
+		case key.Matches(msg, m.keys.DeleteItem):
+			m.confirm.Show("Delete Item", "Are you sure you want to delete this item from the server?\nThis action cannot be undone.", "delete_item")
+			m.refreshContent()
+			return m, nil
 		case key.Matches(msg, m.keys.Edit):
 			if m.focusBookmarks && m.hasFocusableBookmarks() && m.selectedBookmark < len(m.bookmarks) {
 				cmd := m.startBookmarkEdit()
@@ -727,6 +774,11 @@ func (m Model) headerHeight() int {
 	return lines
 }
 
+// ConfirmOverlayView returns the active confirm overlay if any.
+func (m Model) ConfirmOverlayView() string {
+	return m.confirm.View()
+}
+
 func (m Model) SelectedPaletteActions() []components.PaletteItem {
 	item := m.Item()
 	if item.ID == "" {
@@ -753,6 +805,7 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 			{Label: "Add to Queue", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Mark Finished", Action: components.ActionMarkFinished, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+			{Label: "Delete Item from Server", Action: components.ActionDeleteItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: ShowDeleteConfirmMsg{}},
 		}
 		if editItem, editEpisode, ok := m.MetadataEditTarget(); ok {
 			items = append(items, components.PaletteItem{Label: "Edit Metadata", Action: components.ActionEditMetadata, LibraryID: editItem.LibraryID, ItemID: editItem.ID, Data: EditMetadataCmd{Item: editItem, Episode: editEpisode}})

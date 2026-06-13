@@ -35,6 +35,21 @@ func (c *Client) GetLibraries(ctx context.Context) ([]Library, error) {
 	return resp.Libraries, nil
 }
 
+// DeleteItem deletes a library item from the server.
+// To also delete the files from the filesystem, set hardDelete to true.
+func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool) error {
+	path := fmt.Sprintf("/api/items/%s", itemID)
+	if hardDelete {
+		path += "?hard=1"
+	}
+	_, err := c.do(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return fmt.Errorf("delete item: %w", err)
+	}
+	return nil
+}
+
+
 // GetPersonalized returns personalized shelves for a library (e.g. "continue-listening").
 func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]PersonalizedResponse, error) {
 	path := fmt.Sprintf("/api/libraries/%s/personalized", libraryID)

@@ -538,6 +538,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail, _ = m.detail.Update(msg)
 		return m, nil
 
+	case detail.DeleteItemCmd:
+		return m.handleDeleteItem(msg)
+
+	case detail.ItemDeletedMsg:
+		// Go back to the previous screen since the item no longer exists.
+		// We also want to clear the library/home cache so it doesn't show up.
+		// We do that by having cache.Client.DeleteItem clear the cache.
+		return m.back()
+
 	case detail.SeekToBookmarkCmd:
 		return m.handleSeekToBookmark(msg)
 
@@ -1435,6 +1444,11 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		return m.navigate(ScreenSeriesList)
 	case components.ActionSwitchLibrary:
 		return m, nil
+	case components.ActionDeleteItem:
+		if msg, ok := data.(detail.ShowDeleteConfirmMsg); ok && m.screen == ScreenDetail {
+			m.detail, _ = m.detail.Update(msg)
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -1452,5 +1466,20 @@ func (m Model) prewarmCacheCmd() tea.Cmd {
 		}
 		_ = cache.Prepare(context.Background(), libID, libMediaType)
 		return PrewarmDoneMsg{}
+	}
+}
+
+func (m *Model) handleDeleteItem(cmd detail.DeleteItemCmd) (tea.Model, tea.Cmd) {
+	if m.client == nil {
+		return m, nil
+	}
+	return m, func() tea.Msg {
+		err := m.client.DeleteItem(context.Background(), cmd.ItemID, false)
+		if err != nil {
+			return components.ErrMsg{Err: fmt.Errorf("failed to delete item: %w", err)}
+		}
+		return detail.ItemDeletedMsg{
+			ItemID: cmd.ItemID,
+		}
 	}
 }
