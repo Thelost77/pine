@@ -35,8 +35,9 @@ func (m Model) View() string {
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	if m.width > 0 && m.height > 0 {
+		w := normalizeViewWidth(m.width)
 		content = lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content)
-		content = strings.Join(normalizeOverlayCanvas(content, m.width, m.height), "\n")
+		content = strings.Join(normalizeOverlayCanvas(content, w, m.height), "\n")
 	}
 
 	if m.chapterOverlayVisible {
@@ -63,7 +64,8 @@ func (m Model) overlayPaletteModal(content string) string {
 		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
 	}
 
-	baseLines := normalizeOverlayCanvas(content, m.width, m.height)
+	w := normalizeViewWidth(m.width)
+	baseLines := normalizeOverlayCanvas(content, w, m.height)
 	overlayLines := strings.Split(overlay, "\n")
 	overlayWidth := lipgloss.Width(overlay)
 	overlayHeight := len(overlayLines)
@@ -96,12 +98,16 @@ func (m Model) restoreFooter(content, hints, footer string) string {
 	lines := strings.Split(content, "\n")
 
 	hintLine := ""
-	if hints != "" {
-		hintLine = lipgloss.NewStyle().Width(m.width).Render(hints)
-	}
 	footerLine := ""
 	if footer != "" {
-		footerLine = lipgloss.NewStyle().Width(m.width).Render(footer)
+		footerLine = lipgloss.NewStyle().Width(m.width - 1).Render(footer)
+		footerLine = strings.Split(footerLine, "\n")[0]
+		footerLine = ansi.Truncate(footerLine, m.width-1, "")
+	}
+	if hints != "" {
+		hintLine = lipgloss.NewStyle().Width(m.width - 1).Render(hints)
+		hintLine = strings.Split(hintLine, "\n")[0]
+		hintLine = ansi.Truncate(hintLine, m.width-1, "")
 	}
 
 	idx := len(lines) - 1
@@ -118,6 +124,21 @@ func (m Model) restoreFooter(content, hints, footer string) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// normalizeViewWidth subtracts 1 from the terminal width to prevent rendering bugs.
+// In terminal emulators like iTerm2, Ghostty, and macOS Terminal (unlike Alacritty),
+// if a line of text is padded exactly to the terminal's width and has a background color
+// (like the selected list item, hints bar, or player footer), printing the final character
+// in the bottom-right corner forces the cursor to automatically wrap to the next line.
+// This causes the terminal to scroll down by 1 line, which pushes the header off-screen
+// and throws Bubbletea's internal cursor tracking out of sync, leading to duplicated and
+// interleaved text artifacts when switching tabs.
+func normalizeViewWidth(width int) int {
+	if width > 0 {
+		return width - 1
+	}
+	return width
 }
 
 // viewHeader renders the application header bar.
@@ -165,7 +186,7 @@ func (m Model) viewHints() string {
 		parts = append(parts, key("a", "queue"))
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("o", "library"))
-		parts = append(parts, key("tab", "switch lib"))
+		parts = append(parts, key("tab", "switch"))
 	case ScreenLibrary:
 		parts = append(parts, key("→/enter", "open"))
 		parts = append(parts, key("H/L", "page"))
@@ -232,7 +253,8 @@ func (m Model) overlayChapterModal(content string) string {
 		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
 	}
 
-	baseLines := normalizeOverlayCanvas(content, m.width, m.height)
+	w := normalizeViewWidth(m.width)
+	baseLines := normalizeOverlayCanvas(content, w, m.height)
 	overlayLines := strings.Split(overlay, "\n")
 	overlayWidth := lipgloss.Width(overlay)
 	overlayHeight := len(overlayLines)

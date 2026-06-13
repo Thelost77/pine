@@ -183,3 +183,24 @@ func TestPaletteDoesNotHidePlaybackFooter(t *testing.T) {
 		t.Fatalf("playback footer should remain visible below palette, got last line %q", lastLine)
 	}
 }
+
+func TestViewMaintainsStrictHeightConstraint(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenHome
+	m.sessionID = "sess-123"
+	m.player.Title = "My Book"
+	m.player.Playing = true // forces a lot of hints
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "queued-item"}}}
+	m.chapters = []abs.Chapter{{ID: 1}} // more hints
+	
+	// Force a very narrow terminal to guarantee the hints wrap if not truncated
+	m.width = 40
+	m.height = 20
+	m.propagateSize()
+
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.height {
+		t.Fatalf("View() output height=%d, expected exactly m.height=%d. If the output is taller, it will cause the terminal to scroll and hide the header. Output:\n%s", len(lines), m.height, out)
+	}
+}

@@ -568,11 +568,16 @@ func dedupeRecentlyAdded(primary, recent []abs.LibraryItem, limit int) []abs.Lib
 
 	seenTitles := make(map[string]struct{}, len(primary))
 	for _, item := range primary {
-		title := strings.TrimSpace(item.Media.Metadata.Title)
-		if title == "" {
-			continue
+		var key string
+		if item.MediaType == "podcast" && item.RecentEpisode != nil {
+			key = item.RecentEpisode.ID
+		} else {
+			title := strings.TrimSpace(item.Media.Metadata.Title)
+			key = strings.ToLower(title)
 		}
-		seenTitles[strings.ToLower(title)] = struct{}{}
+		if key != "" {
+			seenTitles[key] = struct{}{}
+		}
 	}
 
 	result := make([]abs.LibraryItem, 0, limit)
@@ -591,7 +596,7 @@ func dedupeRecentlyAdded(primary, recent []abs.LibraryItem, limit int) []abs.Lib
 			seenTitles[key] = struct{}{}
 		}
 		result = append(result, item)
-		if len(result) == limit {
+		if len(result) >= limit {
 			break
 		}
 	}

@@ -58,14 +58,15 @@ func (m Model) screenHeight() int {
 
 // propagateSize updates sub-model dimensions.
 func (m *Model) propagateSize() {
+	w := normalizeViewWidth(m.width)
 	sh := m.screenHeight()
-	m.login.SetSize(m.width, sh)
-	m.home.SetSize(m.width, sh)
-	m.library.SetSize(m.width, sh)
-	m.detail.SetSize(m.width, sh)
-	m.metadataEdit.SetSize(m.width, sh)
-	m.seriesList.SetSize(m.width, sh)
-	m.series.SetSize(m.width, sh)
+	m.login.SetSize(w, sh)
+	m.home.SetSize(w, sh)
+	m.library.SetSize(w, sh)
+	m.detail.SetSize(w, sh)
+	m.metadataEdit.SetSize(w, sh)
+	m.seriesList.SetSize(w, sh)
+	m.series.SetSize(w, sh)
 	m.palette.SetSize(m.width, m.height)
 }
 
