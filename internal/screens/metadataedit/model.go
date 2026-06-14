@@ -171,7 +171,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "esc", "left":
+		case "esc":
 			return m, func() tea.Msg { return BackMsg{} }
 		case "tab", "down":
 			m.moveFocus(1)

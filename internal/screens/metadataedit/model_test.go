@@ -293,16 +293,16 @@ func TestSaveNoChangesReturnsBackMsg(t *testing.T) {
 	}
 }
 
-func TestLeftCancels(t *testing.T) {
+func TestLeftDoesNotCancel(t *testing.T) {
 	m := New(testStyles(), abs.LibraryItem{ID: "item-1", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Title"}}})
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
 	if cmd == nil {
-		t.Fatal("cmd = nil, want BackMsg command")
+		return
 	}
 	msg := cmd()
-	if _, ok := msg.(BackMsg); !ok {
-		t.Fatalf("cmd returned %T, want BackMsg", msg)
+	if _, ok := msg.(BackMsg); ok {
+		t.Fatal("left arrow should not produce BackMsg")
 	}
 }
 

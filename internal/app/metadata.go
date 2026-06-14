@@ -37,13 +37,12 @@ func (m Model) handleMetadataSave(msg metadataedit.SaveCmd) (Model, tea.Cmd) {
 			}
 			return metadataedit.SavedMsg{ItemID: msg.ItemID, Generation: msg.Generation, Err: err}
 		}
-
+		if updated != nil {
+			return metadataedit.SavedMsg{ItemID: msg.ItemID, Generation: msg.Generation, Item: updated}
+		}
 		fetched, fetchErr := client.GetLibraryItem(context.Background(), msg.ItemID)
 		if fetchErr == nil {
 			return metadataedit.SavedMsg{ItemID: msg.ItemID, Generation: msg.Generation, Item: fetched}
-		}
-		if updated != nil {
-			return metadataedit.SavedMsg{ItemID: msg.ItemID, Generation: msg.Generation, Item: updated}
 		}
 		return metadataedit.SavedMsg{ItemID: msg.ItemID, Generation: msg.Generation, Err: fetchErr}
 	}
@@ -64,12 +63,12 @@ func (m Model) handleEpisodeMetadataSave(msg metadataedit.SaveEpisodeCmd) (Model
 			return metadataedit.SavedEpisodeMsg{ItemID: msg.ItemID, EpisodeID: msg.EpisodeID, Generation: msg.Generation, Err: err}
 		}
 
+		if updated != nil {
+			return metadataedit.SavedEpisodeMsg{ItemID: msg.ItemID, EpisodeID: msg.EpisodeID, Generation: msg.Generation, Item: updated}
+		}
 		fetched, fetchErr := client.GetLibraryItem(context.Background(), msg.ItemID)
 		if fetchErr == nil {
 			return metadataedit.SavedEpisodeMsg{ItemID: msg.ItemID, EpisodeID: msg.EpisodeID, Generation: msg.Generation, Item: fetched}
-		}
-		if updated != nil {
-			return metadataedit.SavedEpisodeMsg{ItemID: msg.ItemID, EpisodeID: msg.EpisodeID, Generation: msg.Generation, Item: updated}
 		}
 		return metadataedit.SavedEpisodeMsg{ItemID: msg.ItemID, EpisodeID: msg.EpisodeID, Generation: msg.Generation, Err: fetchErr}
 	}
