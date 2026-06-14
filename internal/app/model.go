@@ -679,6 +679,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.library, cmd = m.library.Update(library.SearchCacheReadyMsg{})
 		return m, cmd
 
+	case search.CacheReadyMsg:
+		return m.updateScreen(msg)
+
 	case SleepTimerExpiredMsg:
 		if m.isPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
 			logger.Info("sleep timer expired, stopping playback")
