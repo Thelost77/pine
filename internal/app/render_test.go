@@ -113,7 +113,7 @@ func TestViewHintsKeepSeriesVisibleDuringPlayback(t *testing.T) {
 	m.screen = ScreenLibrary
 	m.sessionID = "sess-123"
 	m.player.Playing = true
-	m.library = library.New(m.styles, m.client, "lib-books", []abs.Library{{ID: "lib-books", Name: "Books", MediaType: "book"}})
+	m.library = library.New(m.styles, m.client, nil, "lib-books", []abs.Library{{ID: "lib-books", Name: "Books", MediaType: "book"}})
 
 	hints := m.viewHints()
 	if !containsString(hints, "s series") {
@@ -127,7 +127,7 @@ func TestViewHintsKeepSeriesVisibleDuringPlayback(t *testing.T) {
 func TestViewHintsHideSeriesOnPodcastLibrary(t *testing.T) {
 	m := newTestModelAuthenticated()
 	m.screen = ScreenLibrary
-	m.library = library.New(m.styles, m.client, "lib-pod", []abs.Library{{ID: "lib-pod", Name: "Pods", MediaType: "podcast"}})
+	m.library = library.New(m.styles, m.client, nil, "lib-pod", []abs.Library{{ID: "lib-pod", Name: "Pods", MediaType: "podcast"}})
 
 	hints := m.viewHints()
 	if containsString(hints, "s series") {

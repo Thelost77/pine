@@ -447,7 +447,7 @@ func TestContentSearchContextUsesActiveLibraryScreen(t *testing.T) {
 		},
 		LibraryID: "lib-podcasts",
 	})
-	m.library = library.New(m.styles, m.client, "lib-books", []abs.Library{
+	m.library = library.New(m.styles, m.client, nil, "lib-books", []abs.Library{
 		{ID: "lib-podcasts", Name: "Podcasts", MediaType: "podcast"},
 		{ID: "lib-books", Name: "Audiobooks", MediaType: "book"},
 	})
@@ -1001,7 +1001,7 @@ func TestLibraryScreenSeriesKeyWinsDuringPlayback(t *testing.T) {
 	m.screen = ScreenLibrary
 	m.sessionID = "sess-123"
 	m.player.Playing = true
-	m.library = library.New(m.styles, m.client, "lib-books", []abs.Library{{ID: "lib-books", Name: "Books", MediaType: "book"}})
+	m.library = library.New(m.styles, m.client, nil, "lib-books", []abs.Library{{ID: "lib-books", Name: "Books", MediaType: "book"}})
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	rm := result.(Model)

@@ -249,6 +249,62 @@ func (c *Cache) Search(ctx context.Context, libraryID, libraryMediaType, query s
 	return snapshot.filter(normalized), nil
 }
 
+// TryGetAll returns all items from the cached snapshot if it is ready,
+// otherwise it returns false. It does not block to build the snapshot.
+func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem, bool) {
+	if c == nil {
+		return nil, false
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	resolvedID, resolvedMediaType := libraryID, libraryMediaType // Best effort without blocking
+
+	// 1. Check in-memory cache
+	if snapshot, ok := c.snapshots[resolvedID]; ok {
+		if c.now().Sub(snapshot.builtAt) <= c.ttl && snapshot.mediaType == resolvedMediaType {
+			snapshot.lastAccessedAt = c.now()
+			return c.buildResultList(snapshot), true
+		}
+	}
+
+	// 2. Check SQLite cache
+	var persisted PersistedSnapshot
+	if c.store != nil {
+		if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit {
+			if c.now().Sub(persisted.BuiltAt) <= c.ttl && persisted.MediaType == resolvedMediaType {
+				snapshot := &librarySnapshot{
+					libraryID:      persisted.LibraryID,
+					mediaType:      persisted.MediaType,
+					builtAt:        persisted.BuiltAt,
+					lastAccessedAt: c.now(),
+					entries:        toSnapshotEntries(persisted.Entries),
+				}
+				c.snapshots[resolvedID] = snapshot
+				return c.buildResultList(snapshot), true
+			}
+		}
+	}
+
+	return nil, false
+}
+
+func (c *Cache) buildResultList(snapshot *librarySnapshot) []abs.LibraryItem {
+	results := make([]abs.LibraryItem, 0, len(snapshot.entries))
+	for _, entry := range snapshot.entries {
+		switch entry.mediaType {
+		case "podcast":
+			results = append(results, entry.podcastResult())
+		case "series":
+			results = append(results, entry.seriesResult())
+		default:
+			results = append(results, entry.bookResult())
+		}
+	}
+	return results
+}
+
 func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType string) (*librarySnapshot, error) {
 	if c == nil || c.client == nil {
 		return nil, fmt.Errorf("not authenticated")

@@ -119,7 +119,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		backStack:    nil,
 		login:        login.New(styles),
 		home:         home.New(styles, client),
-		library:      library.New(styles, client, "", nil),
+		library:      library.New(styles, client, searchCache, "", nil),
 		searchCache:  searchCache,
 		metadataEdit: metadataedit.New(styles, abs.LibraryItem{MediaType: "book"}),
 		seriesList:   serieslist.New(styles, client, "", ""),
@@ -346,7 +346,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.home = home.New(m.styles, m.client)
-		m.library = library.New(m.styles, m.client, "", nil)
+		m.library = library.New(m.styles, m.client, m.searchCache, "", nil)
 		m.searchCache = search.NewCache(m.client, m.cacheStore)
 		m.metadataEdit = metadataedit.New(m.styles, abs.LibraryItem{MediaType: "book"})
 		m.seriesList = serieslist.New(m.styles, m.client, "", "")
@@ -675,7 +675,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case PrewarmDoneMsg:
-		return m, nil
+		var cmd tea.Cmd
+		m.library, cmd = m.library.Update(library.SearchCacheReadyMsg{})
+		return m, cmd
 
 	case SleepTimerExpiredMsg:
 		if m.isPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {

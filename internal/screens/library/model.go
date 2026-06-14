@@ -8,6 +8,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -50,6 +51,9 @@ type LibraryItemsMsg struct {
 
 // GoBackMsg requests navigating back from the library screen.
 type GoBackMsg struct{}
+
+// SearchCacheReadyMsg signals that the search cache has finished building its snapshot.
+type SearchCacheReadyMsg struct{}
 
 // NavigateDetailMsg requests navigation to the detail screen for an item.
 type NavigateDetailMsg struct {
@@ -124,19 +128,18 @@ type Model struct {
 	height          int
 	styles          ui.Styles
 	client          *cache.Client
+	searchCache     *search.Cache
 	libraryID       string
 	libraries       []abs.Library
 	selectedLibrary int
 }
 
 type libraryCacheEntry struct {
-	items      []abs.LibraryItem
-	page       int
-	totalItems int
+	items []abs.LibraryItem
 }
 
 // New creates a new library screen model.
-func New(styles ui.Styles, client *cache.Client, libraryID string, libraries []abs.Library) Model {
+func New(styles ui.Styles, client *cache.Client, searchCache *search.Cache, libraryID string, libraries []abs.Library) Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(styles.Accent.GetForeground()).
@@ -176,6 +179,7 @@ func New(styles ui.Styles, client *cache.Client, libraryID string, libraries []a
 		keys:            DefaultKeyMap(),
 		styles:          styles,
 		client:          client,
+		searchCache:     searchCache,
 		cache:           make(map[string]libraryCacheEntry),
 		libraryID:       libraryID,
 		libraries:       libraries,
@@ -209,12 +213,31 @@ func (m *Model) Configure(libraryID string, libraries []abs.Library) {
 		return
 	}
 
+	if m.tryLoadFromCache() {
+		return
+	}
+
 	m.page = 0
 	m.totalItems = 0
 	m.loading = true
 	m.loadingVisible = false
 	m.loadingGen++
 	m.refreshListItems()
+}
+
+func (m *Model) tryLoadFromCache() bool {
+	if m.searchCache != nil {
+		if items, ok := m.searchCache.TryGetAll(m.libraryID, m.SelectedLibraryMediaType()); ok {
+			m.items = items
+			m.contentLibrary = m.libraryID
+			m.loading = false
+			m.loadingVisible = false
+			m.totalItems = len(items)
+			m.refreshListItems()
+			return true
+		}
+	}
+	return false
 }
 
 // SetSize updates the terminal dimensions for the library screen.
@@ -229,6 +252,17 @@ func (m Model) Init() tea.Cmd {
 	if m.contentLibrary != "" && m.contentLibrary == m.libraryID {
 		return nil
 	}
+	// We use a copy of m since Init() takes a value receiver, but if we get a cache hit,
+	// returning a command that emits the items immediately avoids another network request.
+	if m.searchCache != nil {
+		if items, ok := m.searchCache.TryGetAll(m.libraryID, m.SelectedLibraryMediaType()); ok {
+			// Fake a LibraryItemsMsg to update the model in the Update loop.
+			libID := m.libraryID
+			return func() tea.Msg {
+				return LibraryItemsMsg{Items: items, Total: len(items), Page: 0, LibraryID: libID}
+			}
+		}
+	}
 	m.page = 0
 	return tea.Batch(m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
 }
@@ -236,6 +270,13 @@ func (m Model) Init() tea.Cmd {
 // Update handles messages for the library screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case SearchCacheReadyMsg:
+		if m.tryLoadFromCache() {
+			// Successfully loaded all items from the background-built search cache.
+			return m, nil
+		}
+		return m, nil
+
 	case LibraryItemsMsg:
 		m.loading = false
 		m.loadingVisible = false
@@ -301,11 +342,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.libraryID = m.libraries[m.selectedLibrary].ID
 				m.updateListTitle()
 				m.err = nil
+				m.loadingGen++
+				if m.tryLoadFromCache() {
+					return m, nil
+				}
 				m.page = 0
 				m.totalItems = 0
 				m.loading = true
 				m.loadingVisible = false
-				m.loadingGen++
 				m.refreshListItems()
 				return m, tea.Batch(m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
 			}

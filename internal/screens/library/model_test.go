@@ -11,11 +11,11 @@ import (
 )
 
 func newTestModel() Model {
-	return New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", nil)
+	return New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil, "lib-001", nil)
 }
 
 func newTestModelNoClient() Model {
-	return New(ui.DefaultStyles(), nil, "lib-001", nil)
+	return New(ui.DefaultStyles(), nil, nil, "lib-001", nil)
 }
 
 func ptrString(s string) *string  { return &s }
@@ -178,7 +178,7 @@ func TestEnterEmitsNavigateDetailMsg(t *testing.T) {
 
 func TestSKeyEmitsNavigateSeriesListMsg(t *testing.T) {
 	libs := []abs.Library{{ID: "lib-001", Name: "Books", MediaType: "book"}}
-	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil, "lib-001", libs)
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if cmd == nil {
@@ -589,7 +589,7 @@ func TestTabSwitchPreservesStaleItemsAndFetches(t *testing.T) {
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil, "lib-001", libs)
 	m.SetSize(80, 24)
 
 	firstItems := makeItems(2)
@@ -674,7 +674,7 @@ func TestConfigureFetchesWhenLibraryChanges(t *testing.T) {
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil, "lib-001", libs)
 	firstItems := makeItems(2)
 	secondItems := makeItems(2)
 	secondItems[0].ID = "pod-1"
@@ -718,7 +718,7 @@ func TestConfigureFetchesWhenSwitchingToPreviouslyEmptyLibrary(t *testing.T) {
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), "lib-001", libs)
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil, "lib-001", libs)
 
 	firstItems := makeItems(2)
 	m, _ = m.Update(LibraryItemsMsg{
@@ -763,7 +763,7 @@ func TestInitFetchesWhenConfiguredLibraryDiffersFromVisibleItems(t *testing.T) {
 		{ID: "lib-001", Name: "Books", MediaType: "book"},
 		{ID: "lib-002", Name: "Podcasts", MediaType: "podcast"},
 	}
-	m := New(ui.DefaultStyles(), nil, "lib-001", libs)
+	m := New(ui.DefaultStyles(), nil, nil, "lib-001", libs)
 	m.SetSize(80, 24)
 
 	firstItems := makeItems(2)
