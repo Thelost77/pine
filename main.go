@@ -60,8 +60,10 @@ func main() {
 	if *clearCache {
 		if err := cacheStore.ClearAll(); err != nil {
 			fmt.Fprintf(os.Stderr, "error clearing cache: %v\n", err)
+			store.Close()
 			os.Exit(1)
 		}
+		store.Close()
 		fmt.Println("Cache cleared successfully.")
 		os.Exit(0)
 	}

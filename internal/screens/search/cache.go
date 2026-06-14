@@ -29,6 +29,7 @@ type PersistedSnapshot struct {
 	BuiltAt        time.Time
 	LastAccessedAt time.Time
 	Entries        []PersistedEntry
+	Items          []abs.LibraryItem
 }
 
 // PersistedEntry is a gob-serializable representation of snapshotEntry.
@@ -137,6 +138,7 @@ type librarySnapshot struct {
 	builtAt        time.Time
 	lastAccessedAt time.Time
 	entries        []snapshotEntry
+	items          []abs.LibraryItem
 }
 
 type snapshotEntry struct {
@@ -265,7 +267,7 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 	if snapshot, ok := c.snapshots[resolvedID]; ok {
 		if c.now().Sub(snapshot.builtAt) <= c.ttl && snapshot.mediaType == resolvedMediaType {
 			snapshot.lastAccessedAt = c.now()
-			return c.buildResultList(snapshot), true
+			return snapshot.items, true
 		}
 	}
 
@@ -280,9 +282,10 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 					builtAt:        persisted.BuiltAt,
 					lastAccessedAt: c.now(),
 					entries:        toSnapshotEntries(persisted.Entries),
+					items:          persisted.Items,
 				}
 				c.snapshots[resolvedID] = snapshot
-				return c.buildResultList(snapshot), true
+				return snapshot.items, true
 			}
 		}
 	}
@@ -378,6 +381,7 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 					BuiltAt:        now,
 					LastAccessedAt: now,
 					Entries:        persistedEntries,
+					Items:          snapshot.items,
 				}, c.ttl)
 			}
 		}
@@ -428,6 +432,7 @@ func (c *Cache) buildSnapshot(ctx context.Context, libraryID, libraryMediaType s
 
 func (c *Cache) buildBookSnapshot(ctx context.Context, libraryID string) (*librarySnapshot, error) {
 	entries := make([]snapshotEntry, 0)
+	items := make([]abs.LibraryItem, 0)
 	page := 0
 
 	for {
@@ -435,6 +440,8 @@ func (c *Cache) buildBookSnapshot(ctx context.Context, libraryID string) (*libra
 		if err != nil {
 			return nil, fmt.Errorf("list library items: %w", err)
 		}
+
+		items = append(items, resp.Results...)
 
 		for _, item := range resp.Results {
 			author := item.Media.Metadata.DisplayAuthor()
@@ -471,6 +478,7 @@ func (c *Cache) buildBookSnapshot(ctx context.Context, libraryID string) (*libra
 		libraryID: libraryID,
 		mediaType: "book",
 		entries:   entries,
+		items:     items,
 	}, nil
 }
 
@@ -518,6 +526,7 @@ func (c *Cache) buildSeriesSnapshot(ctx context.Context, libraryID string) (*lib
 
 func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*librarySnapshot, error) {
 	entries := make([]snapshotEntry, 0)
+	items := make([]abs.LibraryItem, 0)
 	page := 0
 
 	for {
@@ -525,6 +534,8 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 		if err != nil {
 			return nil, fmt.Errorf("list podcast library items: %w", err)
 		}
+
+		items = append(items, resp.Results...)
 
 		ids := make([]string, len(resp.Results))
 		for i, item := range resp.Results {
@@ -568,6 +579,7 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 		libraryID: libraryID,
 		mediaType: "podcast",
 		entries:   entries,
+		items:     items,
 	}, nil
 }
 
