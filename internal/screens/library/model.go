@@ -438,6 +438,12 @@ func (m *Model) refreshListItems() {
 		items[i] = libraryListItem{kind: rowKindItem, Item: item}
 	}
 	m.list.SetItems(items)
+
+	if m.totalItems > len(m.items) {
+		m.list.SetStatusBarItemName("item (loading all...)", "items (loading all...)")
+	} else {
+		m.list.SetStatusBarItemName("item", "items")
+	}
 }
 
 func (m Model) loadingRevealCmd() tea.Cmd {
