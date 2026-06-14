@@ -50,6 +50,10 @@ func main() {
 		cachedClient = cache.NewClient(absClient, cacheStore)
 	}
 
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of pine:\n")
+		flag.PrintDefaults()
+	}
 	clearCache := flag.Bool("clear-cache", false, "Clear all local application cache")
 	flag.Parse()
 
