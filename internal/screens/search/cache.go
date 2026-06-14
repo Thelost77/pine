@@ -227,12 +227,17 @@ func (c *Cache) Prepare(ctx context.Context, libraryID, libraryMediaType string)
 	return nil
 }
 
+// CacheReadyMsg signals that the cache for a library is built.
+type CacheReadyMsg struct {
+	LibraryID string
+}
+
 // PrebuildCmd returns a tea.Cmd that builds the search cache in the background.
 func (c *Cache) PrebuildCmd(libraryID, libraryMediaType string) tea.Cmd {
 	return func() tea.Msg {
 		// Use a detached background context since this runs asynchronously.
 		_ = c.Prepare(context.Background(), libraryID, libraryMediaType)
-		return nil
+		return CacheReadyMsg{LibraryID: libraryID}
 	}
 }
 
@@ -276,16 +281,19 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 	if c.store != nil {
 		if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit {
 			if c.now().Sub(persisted.BuiltAt) <= c.ttl && persisted.MediaType == resolvedMediaType {
-				snapshot := &librarySnapshot{
-					libraryID:      persisted.LibraryID,
-					mediaType:      persisted.MediaType,
-					builtAt:        persisted.BuiltAt,
-					lastAccessedAt: c.now(),
-					entries:        toSnapshotEntries(persisted.Entries),
-					items:          persisted.Items,
+				// Prevent loading legacy cache where Items was not saved yet
+				if len(persisted.Items) > 0 || len(persisted.Entries) == 0 {
+					snapshot := &librarySnapshot{
+						libraryID:      persisted.LibraryID,
+						mediaType:      persisted.MediaType,
+						builtAt:        persisted.BuiltAt,
+						lastAccessedAt: c.now(),
+						entries:        toSnapshotEntries(persisted.Entries),
+						items:          persisted.Items,
+					}
+					c.snapshots[resolvedID] = snapshot
+					return snapshot.items, true
 				}
-				c.snapshots[resolvedID] = snapshot
-				return snapshot.items, true
 			}
 		}
 	}

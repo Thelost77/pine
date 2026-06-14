@@ -252,8 +252,7 @@ func (m Model) Init() tea.Cmd {
 	if m.contentLibrary != "" && m.contentLibrary == m.libraryID {
 		return nil
 	}
-	// We use a copy of m since Init() takes a value receiver, but if we get a cache hit,
-	// returning a command that emits the items immediately avoids another network request.
+	cmds := []tea.Cmd{}
 	if m.searchCache != nil {
 		if items, ok := m.searchCache.TryGetAll(m.libraryID, m.SelectedLibraryMediaType()); ok {
 			// Fake a LibraryItemsMsg to update the model in the Update loop.
@@ -262,15 +261,17 @@ func (m Model) Init() tea.Cmd {
 				return LibraryItemsMsg{Items: items, Total: len(items), Page: 0, LibraryID: libID}
 			}
 		}
+		cmds = append(cmds, m.searchCache.PrebuildCmd(m.libraryID, m.SelectedLibraryMediaType()))
 	}
 	m.page = 0
-	return tea.Batch(m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
+	cmds = append(cmds, m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages for the library screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case SearchCacheReadyMsg:
+	case SearchCacheReadyMsg, search.CacheReadyMsg:
 		if m.tryLoadFromCache() {
 			// Successfully loaded all items from the background-built search cache.
 			return m, nil
@@ -600,7 +601,16 @@ func (m *Model) ReloadCmd() tea.Cmd {
 	m.loadingVisible = false
 	m.loadingGen++
 	m.refreshListItems()
-	return tea.Batch(m.fetchLibraryItemsCmd(m.page, pageLimit), m.loadingRevealCmd())
+	
+	cmds := []tea.Cmd{
+		m.fetchLibraryItemsCmd(m.page, pageLimit),
+		m.loadingRevealCmd(),
+	}
+	if m.searchCache != nil {
+		m.searchCache.Invalidate(m.libraryID)
+		cmds = append(cmds, m.searchCache.PrebuildCmd(m.libraryID, m.SelectedLibraryMediaType()))
+	}
+	return tea.Batch(cmds...)
 }
 
 // InvalidateLibrary removes cached library pages for a library.
