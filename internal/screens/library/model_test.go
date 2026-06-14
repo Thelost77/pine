@@ -1,11 +1,15 @@
 package library
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -814,4 +818,85 @@ func containsString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestLibraryItemsMsgPrefersCache(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":[{"id":"cache-1","libraryId":"lib-race","mediaType":"book","media":{"metadata":{"title":"Cached Book"}}}],"total":1,"limit":100,"page":0}`))
+	}))
+	defer srv.Close()
+
+	c := search.NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+	c.Prepare(context.Background(), "lib-race", "book")
+
+	libs := []abs.Library{
+		{ID: "lib-race", MediaType: "book"},
+	}
+	m := New(ui.DefaultStyles(), nil, c, "lib-race", libs)
+	m.loading = true
+
+	pageItems := []abs.LibraryItem{
+		{ID: "page-1", LibraryID: "lib-race", MediaType: "book"},
+	}
+	msg := LibraryItemsMsg{
+		Items:     pageItems,
+		Total:     1,
+		Page:      0,
+		LibraryID: "lib-race",
+	}
+
+	m, _ = m.Update(msg)
+
+	if len(m.Items()) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(m.Items()))
+	}
+	if m.Items()[0].ID != "cache-1" {
+		t.Errorf("expected cached item 'cache-1', got '%s'", m.Items()[0].ID)
+	}
+}
+
+func TestNextLibTriggersPrebuild(t *testing.T) {
+	libs := []abs.Library{
+		{ID: "lib-1", Name: "Books", MediaType: "book"},
+		{ID: "lib-2", Name: "Podcasts", MediaType: "podcast"},
+	}
+	c := search.NewCache(cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil)
+	m := New(ui.DefaultStyles(), nil, c, "lib-1", libs)
+
+	msg := tea.KeyMsg{Type: tea.KeyTab}
+	_, cmd := m.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected a command after TAB")
+	}
+
+	batchMsg := cmd()
+	batch, ok := batchMsg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", batchMsg)
+	}
+
+	var gotLibraryItemsMsg bool
+	var gotPrewarmDoneMsg bool
+
+	for _, batchCmd := range batch {
+		if batchCmd == nil {
+			continue
+		}
+		res := batchCmd()
+		switch res.(type) {
+		case LibraryItemsMsg:
+			gotLibraryItemsMsg = true
+		case search.CacheReadyMsg:
+			gotPrewarmDoneMsg = true
+		}
+	}
+
+	if !gotLibraryItemsMsg {
+		t.Error("expected LibraryItemsMsg from batch")
+	}
+	if !gotPrewarmDoneMsg {
+		t.Error("expected CacheReadyMsg from batch")
+	}
 }

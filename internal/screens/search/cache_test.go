@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -344,5 +345,68 @@ func TestCachePersistsSnapshotToDiskAndRestoresOnRestart(t *testing.T) {
 	}
 	if listCalls != 1 {
 		t.Fatalf("list calls after restart = %d, want 1 (should have loaded from disk)", listCalls)
+	}
+}
+
+func TestBuildSnapshotPagination(t *testing.T) {
+	var listCalls int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/libraries/lib-pagi/items" && r.URL.Path != "/api/libraries/lib-pagi/series" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		
+		if r.URL.Path == "/api/libraries/lib-pagi/series" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"results":[],"total":0,"limit":50,"page":0}`))
+			return
+		}
+		
+		listCalls++
+
+		// Query params: limit=50, page=...
+		// But in cache test we just serve based on the listCalls
+		var count int
+		if listCalls <= 2 {
+			count = 50 // Pages 0 and 1
+		} else {
+			count = 0 // Page 2
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if count == 0 {
+			w.Write([]byte(`{"results":[],"total":100,"limit":50,"page":2}`))
+			return
+		}
+
+		// generate count items
+		results := ""
+		for i := 0; i < count; i++ {
+			if i > 0 {
+				results += ","
+			}
+			results += fmt.Sprintf(`{"id":"book-%d","libraryId":"lib-pagi","mediaType":"book","media":{"metadata":{"title":"Book %d"}}}`, i, i)
+		}
+		w.Write([]byte(fmt.Sprintf(`{"results":[%s],"total":100,"limit":50,"page":%d}`, results, listCalls-1)))
+	}))
+	defer srv.Close()
+
+	c := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+	
+	err := c.Prepare(context.Background(), "lib-pagi", "book")
+	if err != nil {
+		t.Fatalf("failed to prepare cache: %v", err)
+	}
+
+	if listCalls != 2 {
+		t.Fatalf("expected exactly 2 pagination calls, got %d", listCalls)
+	}
+
+	items, ok := c.TryGetAll("lib-pagi", "book")
+	if !ok {
+		t.Fatalf("expected cache to be built")
+	}
+	if len(items) != 100 {
+		t.Fatalf("expected 100 items in cache, got %d", len(items))
 	}
 }
