@@ -51,19 +51,19 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 
 	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
-	first, err := cache.Search(context.Background(), "lib-pod", "podcast", "Jas")
+	first, err := cache.Search(context.Background(), "lib-pod", "podcast", "Joe")
 	if err != nil {
 		t.Fatalf("first Search() error: %v", err)
 	}
-	second, err := cache.Search(context.Background(), "lib-pod", "podcast", "Car")
+	second, err := cache.Search(context.Background(), "lib-pod", "podcast", "Rogan")
 	if err != nil {
 		t.Fatalf("second Search() error: %v", err)
 	}
 
-	if len(first) != 1 || first[0].RecentEpisode == nil || first[0].RecentEpisode.Title != "Jason..." {
+	if len(first) != 1 || first[0].Media.Metadata.Title != "Joe Rogan" {
 		t.Fatalf("unexpected first results: %#v", first)
 	}
-	if len(second) != 1 || second[0].RecentEpisode == nil || second[0].RecentEpisode.Title != "Carl..." {
+	if len(second) != 1 || second[0].Media.Metadata.Title != "Joe Rogan" {
 		t.Fatalf("unexpected second results: %#v", second)
 	}
 	if listCalls != 1 {
@@ -206,7 +206,7 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 		case "/api/libraries/lib-pod/items":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{
-				"results":[{"id":"pod-001","libraryId":"lib-pod","mediaType":"podcast","media":{"metadata":{"title":"Business"}}}],
+				"results":[{"id":"pod-001","libraryId":"lib-pod","mediaType":"podcast","media":{"metadata":{"title":"$100M+ Advice That'll Piss Off Every Business Guru (ft. DHH) [9xOaqIkaBZQ]"}}}],
 				"total":1,
 				"limit":100,
 				"page":0
@@ -218,10 +218,8 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 				"libraryId":"lib-pod",
 				"mediaType":"podcast",
 				"media":{
-					"metadata":{"title":"Business"},
-					"episodes":[
-						{"id":"ep-001","title":"$100M+ Advice That'll Piss Off Every Business Guru (ft. DHH) [9xOaqIkaBZQ]","duration":3600}
-					]
+					"metadata":{"title":"$100M+ Advice That'll Piss Off Every Business Guru (ft. DHH) [9xOaqIkaBZQ]"},
+					"episodes":[]
 				}
 			}`))
 		default:
@@ -239,7 +237,7 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].RecentEpisode == nil || results[0].RecentEpisode.Title != "$100M+ Advice That'll Piss Off Every Business Guru (ft. DHH) [9xOaqIkaBZQ]" {
+	if results[0].Media.Metadata.Title != "$100M+ Advice That'll Piss Off Every Business Guru (ft. DHH) [9xOaqIkaBZQ]" {
 		t.Fatalf("unexpected result: %#v", results)
 	}
 }

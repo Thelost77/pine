@@ -12,6 +12,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/logger"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 )
@@ -41,11 +42,6 @@ type PersistedEntry struct {
 	Author    string
 	Duration  float64
 
-	PodcastTitle    string
-	EpisodeID       string
-	EpisodeTitle    string
-	EpisodeDuration float64
-
 	SeriesID   string
 	SeriesName string
 
@@ -65,10 +61,6 @@ func (e snapshotEntry) toPersisted() PersistedEntry {
 		Title:               e.title,
 		Author:              e.author,
 		Duration:            e.duration,
-		PodcastTitle:        e.podcastTitle,
-		EpisodeID:           e.episodeID,
-		EpisodeTitle:        e.episodeTitle,
-		EpisodeDuration:     e.episodeDuration,
 		SeriesID:            e.seriesID,
 		SeriesName:          e.seriesName,
 		PrimarySearchText:   e.primarySearchText,
@@ -90,10 +82,6 @@ func toSnapshotEntries(entries []PersistedEntry) []snapshotEntry {
 			title:               e.Title,
 			author:              e.Author,
 			duration:            e.Duration,
-			podcastTitle:        e.PodcastTitle,
-			episodeID:           e.EpisodeID,
-			episodeTitle:        e.EpisodeTitle,
-			episodeDuration:     e.EpisodeDuration,
 			seriesID:            e.SeriesID,
 			seriesName:          e.SeriesName,
 			primarySearchText:   e.PrimarySearchText,
@@ -148,11 +136,6 @@ type snapshotEntry struct {
 	title     string
 	author    string
 	duration  float64
-
-	podcastTitle    string
-	episodeID       string
-	episodeTitle    string
-	episodeDuration float64
 
 	seriesID   string
 	seriesName string
@@ -236,7 +219,12 @@ type CacheReadyMsg struct {
 func (c *Cache) PrebuildCmd(libraryID, libraryMediaType string) tea.Cmd {
 	return func() tea.Msg {
 		// Use a detached background context since this runs asynchronously.
-		_ = c.Prepare(context.Background(), libraryID, libraryMediaType)
+		err := c.Prepare(context.Background(), libraryID, libraryMediaType)
+		if err != nil {
+			logger.Error("PrebuildCmd failed to build cache", "err", err, "libraryID", libraryID)
+		} else {
+			logger.Info("PrebuildCmd successfully built cache", "libraryID", libraryID)
+		}
 		return CacheReadyMsg{LibraryID: libraryID}
 	}
 }
@@ -350,6 +338,7 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 					builtAt:        persisted.BuiltAt,
 					lastAccessedAt: persisted.LastAccessedAt,
 					entries:        toSnapshotEntries(persisted.Entries),
+					items:          persisted.Items,
 				}
 				c.mu.Lock()
 				c.snapshots[resolvedID] = snapshot
@@ -543,8 +532,6 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 			return nil, fmt.Errorf("list podcast library items: %w", err)
 		}
 
-		items = append(items, resp.Results...)
-
 		ids := make([]string, len(resp.Results))
 		for i, item := range resp.Results {
 			ids[i] = item.ID
@@ -553,24 +540,33 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 		if err != nil {
 			return nil, err
 		}
+
 		for _, fullItem := range fullItems {
-			for _, episode := range fullItem.Media.Episodes {
-				entries = append(entries, snapshotEntry{
-					itemID:              fullItem.ID,
-					libraryID:           fullItem.LibraryID,
-					mediaType:           "podcast",
-					podcastTitle:        fullItem.Media.Metadata.Title,
-					episodeID:           episode.ID,
-					episodeTitle:        episode.Title,
-					episodeDuration:     episode.Duration,
-					primarySearchText:   normalizeSearchText(episode.Title),
-					secondarySearchText: normalizeSearchText(fullItem.Media.Metadata.Title),
-					combinedSearchText:  combineSearchText(episode.Title, fullItem.Media.Metadata.Title),
-					fuzzySearchText:     compactNormalizedText(combineSearchText(episode.Title, fullItem.Media.Metadata.Title)),
-					primaryTokens:       tokenizeSearchText(normalizeSearchText(episode.Title)),
-					combinedTokens:      tokenizeSearchText(combineSearchText(episode.Title, fullItem.Media.Metadata.Title)),
-				})
+			if fullItem == nil {
+				continue
 			}
+			items = append(items, *fullItem)
+
+			author := fullItem.Media.Metadata.DisplayAuthor()
+			if author == "Unknown author" {
+				author = ""
+			}
+
+			// Add the podcast itself to the search index
+			entries = append(entries, snapshotEntry{
+				itemID:              fullItem.ID,
+				libraryID:           fullItem.LibraryID,
+				mediaType:           "podcast",
+				title:               fullItem.Media.Metadata.Title,
+				author:              author,
+				duration:            fullItem.Media.TotalDuration(),
+				primarySearchText:   normalizeSearchText(fullItem.Media.Metadata.Title),
+				secondarySearchText: normalizeSearchText(author),
+				combinedSearchText:  combineSearchText(fullItem.Media.Metadata.Title, author),
+				fuzzySearchText:     compactNormalizedText(combineSearchText(fullItem.Media.Metadata.Title, author)),
+				primaryTokens:       tokenizeSearchText(normalizeSearchText(fullItem.Media.Metadata.Title)),
+				combinedTokens:      tokenizeSearchText(combineSearchText(fullItem.Media.Metadata.Title, author)),
+			})
 		}
 
 		if len(resp.Results) == 0 || len(resp.Results) < snapshotPageLimit {
@@ -769,25 +765,19 @@ func (e snapshotEntry) bookResult() abs.LibraryItem {
 }
 
 func (e snapshotEntry) podcastResult() abs.LibraryItem {
-	episode := abs.PodcastEpisode{
-		ID:       e.episodeID,
-		Title:    e.episodeTitle,
-		Duration: e.episodeDuration,
+	var authorName *string
+	if e.author != "" {
+		authorName = &e.author
 	}
 	return abs.LibraryItem{
 		ID:        e.itemID,
 		LibraryID: e.libraryID,
 		MediaType: "podcast",
-		RecentEpisode: &abs.PodcastEpisode{
-			ID:       episode.ID,
-			Title:    episode.Title,
-			Duration: episode.Duration,
-		},
 		Media: abs.Media{
 			Metadata: abs.MediaMetadata{
-				Title: e.podcastTitle,
+				Title:      e.title,
+				AuthorName: authorName,
 			},
-			Episodes: []abs.PodcastEpisode{episode},
 		},
 	}
 }

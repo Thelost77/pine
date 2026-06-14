@@ -8,6 +8,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
@@ -228,6 +229,7 @@ func (m *Model) Configure(libraryID string, libraries []abs.Library) {
 func (m *Model) tryLoadFromCache() bool {
 	if m.searchCache != nil {
 		if items, ok := m.searchCache.TryGetAll(m.libraryID, m.SelectedLibraryMediaType()); ok {
+			logger.Info("Library tryLoadFromCache HIT", "libraryID", m.libraryID, "items", len(items))
 			m.items = items
 			m.contentLibrary = m.libraryID
 			m.loading = false
@@ -255,11 +257,14 @@ func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{}
 	if m.searchCache != nil {
 		if items, ok := m.searchCache.TryGetAll(m.libraryID, m.SelectedLibraryMediaType()); ok {
+			logger.Info("Library Init TryGetAll HIT", "libraryID", m.libraryID, "items", len(items), "mediaType", m.SelectedLibraryMediaType())
 			// Fake a LibraryItemsMsg to update the model in the Update loop.
 			libID := m.libraryID
 			return func() tea.Msg {
 				return LibraryItemsMsg{Items: items, Total: len(items), Page: 0, LibraryID: libID}
 			}
+		} else {
+			logger.Info("Library Init TryGetAll MISS", "libraryID", m.libraryID, "mediaType", m.SelectedLibraryMediaType())
 		}
 		cmds = append(cmds, m.searchCache.PrebuildCmd(m.libraryID, m.SelectedLibraryMediaType()))
 	}
@@ -279,6 +284,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case LibraryItemsMsg:
+		logger.Info("Library Received LibraryItemsMsg", "libraryID", msg.LibraryID, "items", len(msg.Items), "page", msg.Page, "myLibID", m.libraryID)
 		m.loading = false
 		m.loadingVisible = false
 		if msg.LibraryID != "" && m.libraryID != "" && msg.LibraryID != m.libraryID {
@@ -288,6 +294,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.Err
 			return m, nil
 		}
+
+		// If this is the initial page load, but the background cache has
+		// finished building in the meantime, prefer the full cache over the page.
+		if msg.Page == 0 && m.tryLoadFromCache() {
+			return m, nil
+		}
+
 		m.totalItems = msg.Total
 		m.page = msg.Page
 
@@ -352,7 +365,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.loading = true
 				m.loadingVisible = false
 				m.refreshListItems()
-				return m, tea.Batch(m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd())
+				
+				cmds := []tea.Cmd{m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd()}
+				if m.searchCache != nil {
+					cmds = append(cmds, m.searchCache.PrebuildCmd(m.libraryID, m.SelectedLibraryMediaType()))
+				}
+				return m, tea.Batch(cmds...)
 			}
 			return m, nil
 		}
