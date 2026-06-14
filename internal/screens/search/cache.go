@@ -185,6 +185,38 @@ func (c *Cache) Invalidate(libraryID string) {
 	c.mu.Unlock()
 }
 
+// UpdateItem replaces cached metadata for a single item in-place.
+// This avoids a full re-fetch from ABS which can return stale data.
+func (c *Cache) UpdateItem(item abs.LibraryItem) {
+	if c == nil || item.LibraryID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snap, ok := c.snapshots[item.LibraryID]
+	if !ok {
+		return
+	}
+	title := item.Media.Metadata.Title
+	author := item.Media.Metadata.DisplayAuthor()
+	if author == "Unknown author" {
+		author = ""
+	}
+	for i, e := range snap.entries {
+		if e.itemID == item.ID {
+			snap.entries[i].title = title
+			snap.entries[i].author = author
+			snap.entries[i].primarySearchText = normalizeSearchText(title)
+			snap.entries[i].secondarySearchText = normalizeSearchText(author)
+			snap.entries[i].combinedSearchText = combineSearchText(title, author)
+			snap.entries[i].fuzzySearchText = compactNormalizedText(combineSearchText(title, author))
+			snap.entries[i].primaryTokens = tokenizeSearchText(normalizeSearchText(title))
+			snap.entries[i].combinedTokens = tokenizeSearchText(combineSearchText(title, author))
+			return
+		}
+	}
+}
+
 // Prepare ensures the library snapshot exists before the user starts searching.
 func (c *Cache) Prepare(ctx context.Context, libraryID, libraryMediaType string) error {
 	if _, err := c.ensureSnapshot(ctx, libraryID, libraryMediaType); err != nil {

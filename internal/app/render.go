@@ -243,7 +243,7 @@ func (m Model) viewHints() string {
 	case ScreenMetadataEdit:
 		parts = append(parts, key("tab", "field"))
 		parts = append(parts, key("enter", "save"))
-		parts = append(parts, key("←/esc", "cancel"))
+		parts = append(parts, key("esc", "cancel"))
 	case ScreenSeriesList:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("←/esc", "back"))

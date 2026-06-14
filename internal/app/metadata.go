@@ -148,7 +148,7 @@ func (m *Model) applyMetadataUpdate(updated abs.LibraryItem) bool {
 	m.home.ReplaceItem(updated)
 	m.library.ReplaceItem(updated)
 	if m.searchCache != nil {
-		m.searchCache.Invalidate(updated.LibraryID)
+		m.searchCache.UpdateItem(updated)
 	}
 
 	for i := range m.queue {
