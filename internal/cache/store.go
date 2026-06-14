@@ -74,3 +74,12 @@ func (s *Store) EvictExpired() error {
 	}
 	return nil
 }
+
+// ClearAll removes all cache entries.
+func (s *Store) ClearAll() error {
+	_, err := s.db.DB.Exec(`DELETE FROM api_cache`)
+	if err != nil {
+		return fmt.Errorf("clear all cache entries: %w", err)
+	}
+	return nil
+}

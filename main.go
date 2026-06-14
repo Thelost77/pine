@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +48,18 @@ func main() {
 	var cachedClient *cache.Client
 	if absClient != nil {
 		cachedClient = cache.NewClient(absClient, cacheStore)
+	}
+
+	clearCache := flag.Bool("clear-cache", false, "Clear all local application cache")
+	flag.Parse()
+
+	if *clearCache {
+		if err := cacheStore.ClearAll(); err != nil {
+			fmt.Fprintf(os.Stderr, "error clearing cache: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Cache cleared successfully.")
+		os.Exit(0)
 	}
 
 	model := app.New(cfg, store, cachedClient, cacheStore)
