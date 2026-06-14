@@ -510,3 +510,27 @@ func (c *Client) DeleteEpisode(ctx context.Context, podcastID string, episodeID 
 	}
 	return nil
 }
+
+// UpdateLibraryItemMedia updates media metadata and invalidates caches.
+func (c *Client) UpdateLibraryItemMedia(ctx context.Context, itemID string, req abs.UpdateMediaRequest) (*abs.LibraryItem, error) {
+	updated, err := c.Client.UpdateLibraryItemMedia(ctx, itemID, req)
+	if err != nil {
+		return nil, err
+	}
+	if c.store != nil {
+		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+	}
+	return updated, nil
+}
+
+// UpdatePodcastEpisode updates episode metadata and invalidates caches.
+func (c *Client) UpdatePodcastEpisode(ctx context.Context, itemID, episodeID string, req abs.UpdatePodcastEpisodeRequest) (*abs.LibraryItem, error) {
+	updated, err := c.Client.UpdatePodcastEpisode(ctx, itemID, episodeID, req)
+	if err != nil {
+		return nil, err
+	}
+	if c.store != nil {
+		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+	}
+	return updated, nil
+}

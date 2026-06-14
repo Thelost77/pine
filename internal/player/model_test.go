@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newTestModel() Model {
@@ -152,7 +152,7 @@ func TestViewPlaying(t *testing.T) {
 	m := newTestModel()
 	m.Title = "My Audiobook"
 	m.Playing = true
-	m.Position = 754 // 12:34
+	m.Position = 754  // 12:34
 	m.Duration = 1725 // 28:45
 	m.Speed = 1.0
 	m.width = 80

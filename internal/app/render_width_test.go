@@ -1,8 +1,8 @@
 package app
 
 import (
-	"strings"
 	"github.com/Thelost77/pine/internal/ui"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -29,7 +29,7 @@ func TestModelViewWidthNoScrollBug(t *testing.T) {
 			t.Errorf("line %d is %d characters wide, expected < 80 to prevent terminal scrolling", i, w)
 		}
 	}
-	
+
 	if !strings.Contains(out, "pine") {
 		t.Errorf("expected header 'pine' in view output")
 	}

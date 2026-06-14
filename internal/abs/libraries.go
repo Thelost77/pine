@@ -63,7 +63,6 @@ func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool)
 	return nil
 }
 
-
 // GetPersonalized returns personalized shelves for a library (e.g. "continue-listening").
 func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]PersonalizedResponse, error) {
 	path := fmt.Sprintf("/api/libraries/%s/personalized", libraryID)

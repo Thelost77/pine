@@ -350,11 +350,11 @@ func TestPaletteViewStaticHeight(t *testing.T) {
 	styles := ui.DefaultStyles()
 	p := NewPalette()
 	p.SetStyles(styles)
-	
+
 	// Test on two different sized terminal heights
 	for _, terminalHeight := range []int{20, 30} {
 		p.SetSize(80, terminalHeight)
-		
+
 		// Expected list height calculation:
 		// listHeight := max(1, height - 2 - paletteChromeHeight) = max(1, height - 9).
 		// paletteChromeHeight = 7 (border(2) + padding(2) + title(1) + input(1) + footer(1)).
@@ -367,16 +367,16 @@ func TestPaletteViewStaticHeight(t *testing.T) {
 		if expectedListHeight < 1 {
 			expectedListHeight = 1
 		}
-		
+
 		// Open with 2 items (well below expectedListHeight)
 		p.Open([]PaletteItem{
 			{Label: "Item 1", Action: ActionGoHome},
 			{Label: "Item 2", Action: ActionGoLibrary},
 		}, nil)
-		
+
 		view1 := p.View()
 		height1 := len(strings.Split(view1, "\n"))
-		
+
 		// Open with 5 items (still below/different number of items)
 		p.Open([]PaletteItem{
 			{Label: "Item 1", Action: ActionGoHome},
@@ -385,14 +385,14 @@ func TestPaletteViewStaticHeight(t *testing.T) {
 			{Label: "Item 4", Action: ActionShowQueue},
 			{Label: "Item 5", Action: ActionClearQueue},
 		}, nil)
-		
+
 		view2 := p.View()
 		height2 := len(strings.Split(view2, "\n"))
-		
+
 		if height1 != height2 {
 			t.Errorf("expected palette height to be constant, got height1=%d (2 items) and height2=%d (5 items) for terminalHeight=%d", height1, height2, terminalHeight)
 		}
-		
+
 		// Expected view height = listHeight + paletteChromeHeight = listHeight + 7
 		expectedViewHeight := expectedListHeight + paletteChromeHeight
 		if height1 != expectedViewHeight {

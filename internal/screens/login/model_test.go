@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func newTestModel() Model {

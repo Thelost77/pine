@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Thelost77/pine/internal/config"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Styles holds all lipgloss styles derived from the active theme.

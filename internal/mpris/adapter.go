@@ -11,85 +11,85 @@ import (
 // RootAdapter implements types.OrgMprisMediaPlayer2Adapter with static values.
 type RootAdapter struct{}
 
-func (r RootAdapter) Raise() error                       { return nil }
-func (r RootAdapter) Quit() error                        { return nil }
-func (r RootAdapter) CanQuit() (bool, error)             { return true, nil }
-func (r RootAdapter) CanRaise() (bool, error)            { return false, nil }
-func (r RootAdapter) HasTrackList() (bool, error)        { return false, nil }
-func (r RootAdapter) Identity() (string, error)          { return "pine", nil }
+func (r RootAdapter) Raise() error                           { return nil }
+func (r RootAdapter) Quit() error                            { return nil }
+func (r RootAdapter) CanQuit() (bool, error)                 { return true, nil }
+func (r RootAdapter) CanRaise() (bool, error)                { return false, nil }
+func (r RootAdapter) HasTrackList() (bool, error)            { return false, nil }
+func (r RootAdapter) Identity() (string, error)              { return "pine", nil }
 func (r RootAdapter) SupportedUriSchemes() ([]string, error) { return nil, nil }
 func (r RootAdapter) SupportedMimeTypes() ([]string, error)  { return nil, nil }
-func (r RootAdapter) DesktopEntry() (string, error)         { return "pine", nil }
+func (r RootAdapter) DesktopEntry() (string, error)          { return "pine", nil }
 
 // PlayerAdapter implements types.OrgMprisMediaPlayer2PlayerAdapter using closures.
 // Each method field is a closure that reads from a ModelAccessor.
 type PlayerAdapter struct {
-	OnNext        func() error
-	OnPrevious    func() error
-	OnPause        func() error
-	OnPlayPause    func() error
-	OnStop         func() error
-	OnPlay         func() error
-	OnSeek         func(offset types.Microseconds) error
-	OnSetPosition  func(trackId string, position types.Microseconds) error
-	OnOpenUri      func(uri string) error
+	OnNext           func() error
+	OnPrevious       func() error
+	OnPause          func() error
+	OnPlayPause      func() error
+	OnStop           func() error
+	OnPlay           func() error
+	OnSeek           func(offset types.Microseconds) error
+	OnSetPosition    func(trackId string, position types.Microseconds) error
+	OnOpenUri        func(uri string) error
 	OnPlaybackStatus func() (types.PlaybackStatus, error)
-	OnRate         func() (float64, error)
-	OnSetRate      func(rate float64) error
-	OnMetadata     func() (types.Metadata, error)
-	OnVolume       func() (float64, error)
-	OnSetVolume    func(vol float64) error
-	OnPosition     func() (int64, error)
-	OnMinimumRate  func() (float64, error)
-	OnMaximumRate  func() (float64, error)
-	OnCanGoNext    func() (bool, error)
-	OnCanGoPrevious func() (bool, error)
-	OnCanPlay      func() (bool, error)
-	OnCanPause     func() (bool, error)
-	OnCanSeek      func() (bool, error)
-	OnCanControl   func() (bool, error)
+	OnRate           func() (float64, error)
+	OnSetRate        func(rate float64) error
+	OnMetadata       func() (types.Metadata, error)
+	OnVolume         func() (float64, error)
+	OnSetVolume      func(vol float64) error
+	OnPosition       func() (int64, error)
+	OnMinimumRate    func() (float64, error)
+	OnMaximumRate    func() (float64, error)
+	OnCanGoNext      func() (bool, error)
+	OnCanGoPrevious  func() (bool, error)
+	OnCanPlay        func() (bool, error)
+	OnCanPause       func() (bool, error)
+	OnCanSeek        func() (bool, error)
+	OnCanControl     func() (bool, error)
 }
 
-func (p PlayerAdapter) Next() error                              { return p.OnNext() }
-func (p PlayerAdapter) Previous() error                          { return p.OnPrevious() }
-func (p PlayerAdapter) Pause() error                             { return p.OnPause() }
-func (p PlayerAdapter) PlayPause() error                         { return p.OnPlayPause() }
-func (p PlayerAdapter) Stop() error                              { return p.OnStop() }
-func (p PlayerAdapter) Play() error                              { return p.OnPlay() }
-func (p PlayerAdapter) Seek(offset types.Microseconds) error     { return p.OnSeek(offset) }
+func (p PlayerAdapter) Next() error                          { return p.OnNext() }
+func (p PlayerAdapter) Previous() error                      { return p.OnPrevious() }
+func (p PlayerAdapter) Pause() error                         { return p.OnPause() }
+func (p PlayerAdapter) PlayPause() error                     { return p.OnPlayPause() }
+func (p PlayerAdapter) Stop() error                          { return p.OnStop() }
+func (p PlayerAdapter) Play() error                          { return p.OnPlay() }
+func (p PlayerAdapter) Seek(offset types.Microseconds) error { return p.OnSeek(offset) }
 func (p PlayerAdapter) SetPosition(trackId string, position types.Microseconds) error {
 	return p.OnSetPosition(trackId, position)
 }
-func (p PlayerAdapter) OpenUri(uri string) error                 { return p.OnOpenUri(uri) }
+func (p PlayerAdapter) OpenUri(uri string) error                      { return p.OnOpenUri(uri) }
 func (p PlayerAdapter) PlaybackStatus() (types.PlaybackStatus, error) { return p.OnPlaybackStatus() }
-func (p PlayerAdapter) Rate() (float64, error)                   { return p.OnRate() }
-func (p PlayerAdapter) SetRate(rate float64) error               { return p.OnSetRate(rate) }
-func (p PlayerAdapter) Metadata() (types.Metadata, error)        { return p.OnMetadata() }
-func (p PlayerAdapter) Volume() (float64, error)                 { return p.OnVolume() }
-func (p PlayerAdapter) SetVolume(vol float64) error              { return p.OnSetVolume(vol) }
-func (p PlayerAdapter) Position() (int64, error)                 { return p.OnPosition() }
-func (p PlayerAdapter) MinimumRate() (float64, error)            { return p.OnMinimumRate() }
-func (p PlayerAdapter) MaximumRate() (float64, error)            { return p.OnMaximumRate() }
-func (p PlayerAdapter) CanGoNext() (bool, error)                 { return p.OnCanGoNext() }
-func (p PlayerAdapter) CanGoPrevious() (bool, error)             { return p.OnCanGoPrevious() }
-func (p PlayerAdapter) CanPlay() (bool, error)                   { return p.OnCanPlay() }
-func (p PlayerAdapter) CanPause() (bool, error)                  { return p.OnCanPause() }
-func (p PlayerAdapter) CanSeek() (bool, error)                   { return p.OnCanSeek() }
-func (p PlayerAdapter) CanControl() (bool, error)                { return p.OnCanControl() }
+func (p PlayerAdapter) Rate() (float64, error)                        { return p.OnRate() }
+func (p PlayerAdapter) SetRate(rate float64) error                    { return p.OnSetRate(rate) }
+func (p PlayerAdapter) Metadata() (types.Metadata, error)             { return p.OnMetadata() }
+func (p PlayerAdapter) Volume() (float64, error)                      { return p.OnVolume() }
+func (p PlayerAdapter) SetVolume(vol float64) error                   { return p.OnSetVolume(vol) }
+func (p PlayerAdapter) Position() (int64, error)                      { return p.OnPosition() }
+func (p PlayerAdapter) MinimumRate() (float64, error)                 { return p.OnMinimumRate() }
+func (p PlayerAdapter) MaximumRate() (float64, error)                 { return p.OnMaximumRate() }
+func (p PlayerAdapter) CanGoNext() (bool, error)                      { return p.OnCanGoNext() }
+func (p PlayerAdapter) CanGoPrevious() (bool, error)                  { return p.OnCanGoPrevious() }
+func (p PlayerAdapter) CanPlay() (bool, error)                        { return p.OnCanPlay() }
+func (p PlayerAdapter) CanPause() (bool, error)                       { return p.OnCanPause() }
+func (p PlayerAdapter) CanSeek() (bool, error)                        { return p.OnCanSeek() }
+func (p PlayerAdapter) CanControl() (bool, error)                     { return p.OnCanControl() }
 
 // NewPlayerAdapter creates a PlayerAdapter whose closures read from the accessor.
 // accessor is a function that returns the current ModelAccessor, called on each read.
 func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) PlayerAdapter {
 	return PlayerAdapter{
-		OnNext:     actions.Next,
-		OnPrevious: actions.Previous,
-		OnPause:    actions.Pause,
-		OnPlayPause: actions.PlayPause,
-		OnStop:     actions.Stop,
-		OnPlay:     actions.Play,
-		OnSeek:     actions.Seek,
+		OnNext:        actions.Next,
+		OnPrevious:    actions.Previous,
+		OnPause:       actions.Pause,
+		OnPlayPause:   actions.PlayPause,
+		OnStop:        actions.Stop,
+		OnPlay:        actions.Play,
+		OnSeek:        actions.Seek,
 		OnSetPosition: actions.SetPosition,
-		OnOpenUri:  func(string) error { return nil },
+		OnOpenUri:     func(string) error { return nil },
 		OnPlaybackStatus: func() (types.PlaybackStatus, error) {
 			a := accessor()
 			if a.IsPlaying() {
@@ -129,14 +129,14 @@ func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) Play
 		OnPosition: func() (int64, error) {
 			return int64(accessor().PlayerPosition() * 1_000_000), nil
 		},
-		OnMinimumRate:  func() (float64, error) { return 0.5, nil },
-		OnMaximumRate:  func() (float64, error) { return 4.0, nil },
-		OnCanGoNext:    func() (bool, error) { return accessor().QueueLength() > 0, nil },
+		OnMinimumRate:   func() (float64, error) { return 0.5, nil },
+		OnMaximumRate:   func() (float64, error) { return 4.0, nil },
+		OnCanGoNext:     func() (bool, error) { return accessor().QueueLength() > 0, nil },
 		OnCanGoPrevious: func() (bool, error) { return true, nil },
-		OnCanPlay:      func() (bool, error) { return true, nil },
-		OnCanPause:     func() (bool, error) { return true, nil },
-		OnCanSeek:      func() (bool, error) { return true, nil },
-		OnCanControl:   func() (bool, error) { return true, nil },
+		OnCanPlay:       func() (bool, error) { return true, nil },
+		OnCanPause:      func() (bool, error) { return true, nil },
+		OnCanSeek:       func() (bool, error) { return true, nil },
+		OnCanControl:    func() (bool, error) { return true, nil },
 	}
 }
 

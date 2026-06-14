@@ -192,7 +192,7 @@ func TestViewMaintainsStrictHeightConstraint(t *testing.T) {
 	m.player.Playing = true // forces a lot of hints
 	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "queued-item"}}}
 	m.chapters = []abs.Chapter{{ID: 1}} // more hints
-	
+
 	// Force a very narrow terminal to guarantee the hints wrap if not truncated
 	m.width = 40
 	m.height = 20

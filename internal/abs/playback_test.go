@@ -173,7 +173,7 @@ func TestStartEpisodePlaySessionHTTP(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	session, err := c.StartEpisodePlaySession(context.Background(), "li-pod-001", "ep-001", DeviceInfo{
-		DeviceID: "test-device",
+		DeviceID:   "test-device",
 		ClientName: "abs-cli-test",
 	})
 	if err != nil {

@@ -8,30 +8,30 @@ import (
 )
 
 type mockAccessor struct {
-	playing    bool
-	paused     bool
-	hasItem    bool
-	title      string
-	authors    []string
-	itemID     string
-	position   float64
-	duration   float64
-	volume     int
-	speed      float64
-	queueLen   int
+	playing  bool
+	paused   bool
+	hasItem  bool
+	title    string
+	authors  []string
+	itemID   string
+	position float64
+	duration float64
+	volume   int
+	speed    float64
+	queueLen int
 }
 
-func (m *mockAccessor) IsPlaying() bool        { return m.playing }
-func (m *mockAccessor) IsPaused() bool         { return m.paused }
-func (m *mockAccessor) HasActiveItem() bool    { return m.hasItem }
-func (m *mockAccessor) CurrentTitle() string   { return m.title }
+func (m *mockAccessor) IsPlaying() bool          { return m.playing }
+func (m *mockAccessor) IsPaused() bool           { return m.paused }
+func (m *mockAccessor) HasActiveItem() bool      { return m.hasItem }
+func (m *mockAccessor) CurrentTitle() string     { return m.title }
 func (m *mockAccessor) CurrentAuthors() []string { return m.authors }
-func (m *mockAccessor) CurrentItemID() string  { return m.itemID }
-func (m *mockAccessor) PlayerPosition() float64 { return m.position }
-func (m *mockAccessor) PlayerDuration() float64 { return m.duration }
-func (m *mockAccessor) PlayerVolume() int       { return m.volume }
-func (m *mockAccessor) PlayerSpeed() float64    { return m.speed }
-func (m *mockAccessor) QueueLength() int        { return m.queueLen }
+func (m *mockAccessor) CurrentItemID() string    { return m.itemID }
+func (m *mockAccessor) PlayerPosition() float64  { return m.position }
+func (m *mockAccessor) PlayerDuration() float64  { return m.duration }
+func (m *mockAccessor) PlayerVolume() int        { return m.volume }
+func (m *mockAccessor) PlayerSpeed() float64     { return m.speed }
+func (m *mockAccessor) QueueLength() int         { return m.queueLen }
 
 func accessorFn(a *mockAccessor) func() ModelAccessor {
 	return func() ModelAccessor { return a }
@@ -70,9 +70,9 @@ func TestRootAdapterIdentity(t *testing.T) {
 
 func TestPlayerAdapterPlaybackStatus(t *testing.T) {
 	tests := []struct {
-		name   string
+		name     string
 		accessor *mockAccessor
-		want   types.PlaybackStatus
+		want     types.PlaybackStatus
 	}{
 		{"playing", &mockAccessor{playing: true}, types.PlaybackStatusPlaying},
 		{"paused", &mockAccessor{paused: true}, types.PlaybackStatusPaused},
