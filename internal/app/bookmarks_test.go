@@ -44,10 +44,6 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 		{LibraryItemID: "item-001", Title: "Existing", Time: 60, CreatedAt: 1700000000000},
 	})
 
-	oldTimeNow := timeNowMillis
-	timeNowMillis = func() int64 { return 1700099000000 }
-	defer func() { timeNowMillis = oldTimeNow }()
-
 	_, cmd := m.handleAddBookmark(detail.AddBookmarkCmd{Item: testBookmarkItem("item-001")})
 	if cmd == nil {
 		t.Fatal("expected bookmark command")
@@ -69,6 +65,9 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 	}
 	if updateMsg.Bookmarks[1].Time != 120 {
 		t.Errorf("bookmark[1] time = %f, want 120", updateMsg.Bookmarks[1].Time)
+	}
+	if updateMsg.Bookmarks[1].CreatedAt == 0 {
+		t.Error("bookmark[1] CreatedAt should be set")
 	}
 }
 

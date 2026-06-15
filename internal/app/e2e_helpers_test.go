@@ -339,30 +339,6 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"error":"item not found"}`))
 
-		// --- Search (book library) ---
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-001/search"):
-			q := r.URL.Query().Get("q")
-			var matched []abs.SearchResultEntry
-			for _, item := range items {
-				if strings.Contains(strings.ToLower(item.Media.Metadata.Title), strings.ToLower(q)) {
-					matched = append(matched, abs.SearchResultEntry{LibraryItem: item, MatchKey: "title", MatchText: item.Media.Metadata.Title})
-				}
-			}
-			resp := abs.SearchResult{Book: matched}
-			json.NewEncoder(w).Encode(resp)
-
-		// --- Search (podcast library) ---
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-pods/search"):
-			q := r.URL.Query().Get("q")
-			var matched []abs.SearchResultEntry
-			for _, item := range podcastItems {
-				if strings.Contains(strings.ToLower(item.Media.Metadata.Title), strings.ToLower(q)) {
-					matched = append(matched, abs.SearchResultEntry{LibraryItem: item, MatchKey: "title", MatchText: item.Media.Metadata.Title})
-				}
-			}
-			resp := abs.SearchResult{Podcast: matched}
-			json.NewEncoder(w).Encode(resp)
-
 		// --- Bookmarks (via progress endpoint) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/progress/"):
 			itemID := strings.TrimPrefix(r.URL.Path, "/api/me/progress/")

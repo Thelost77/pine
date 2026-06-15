@@ -19,9 +19,6 @@ var personalizedFixture []byte
 //go:embed testdata/library_items.json
 var libraryItemsFixture []byte
 
-//go:embed testdata/search.json
-var searchFixture []byte
-
 // --- Deserialization tests (fixture-based) ---
 
 func TestGetLibrariesDeserialization(t *testing.T) {
@@ -104,25 +101,6 @@ func TestGetLibraryItemsDeserialization(t *testing.T) {
 	}
 	if resp.Results[1].Media.Metadata.Title != "Mystery Novel" {
 		t.Errorf("second result title = %q, want %q", resp.Results[1].Media.Metadata.Title, "Mystery Novel")
-	}
-}
-
-func TestSearchLibraryDeserialization(t *testing.T) {
-	var resp SearchResult
-	if err := json.Unmarshal(searchFixture, &resp); err != nil {
-		t.Fatalf("failed to unmarshal fixture: %v", err)
-	}
-	if len(resp.Book) != 1 {
-		t.Fatalf("expected 1 book result, got %d", len(resp.Book))
-	}
-	if resp.Book[0].LibraryItem.Media.Metadata.Title != "The Great Adventure" {
-		t.Errorf("book title = %q, want %q", resp.Book[0].LibraryItem.Media.Metadata.Title, "The Great Adventure")
-	}
-	if len(resp.Podcast) != 1 {
-		t.Fatalf("expected 1 podcast result, got %d", len(resp.Podcast))
-	}
-	if resp.Podcast[0].LibraryItem.MediaType != "podcast" {
-		t.Errorf("podcast mediaType = %q, want %q", resp.Podcast[0].LibraryItem.MediaType, "podcast")
 	}
 }
 
@@ -567,33 +545,6 @@ func TestGetRecentlyAddedHTTP(t *testing.T) {
 	}
 	if items[1].ID != "li-book-001" {
 		t.Errorf("items[1].ID = %q, want li-book-001", items[1].ID)
-	}
-}
-
-func TestSearchLibraryHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/libraries/lib-1/search" {
-			t.Errorf("path = %q, want /api/libraries/lib-1/search", r.URL.Path)
-		}
-		q := r.URL.Query()
-		if q.Get("q") != "adventure" {
-			t.Errorf("q = %q, want adventure", q.Get("q"))
-		}
-		if q.Get("limit") != "12" {
-			t.Errorf("limit = %q, want 12", q.Get("limit"))
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(searchFixture)
-	}))
-	defer srv.Close()
-
-	c := NewClient(srv.URL, "tok")
-	result, err := c.SearchLibrary(context.Background(), "lib-1", "adventure")
-	if err != nil {
-		t.Fatalf("SearchLibrary() error: %v", err)
-	}
-	if len(result.Book) != 1 {
-		t.Fatalf("expected 1 book, got %d", len(result.Book))
 	}
 }
 

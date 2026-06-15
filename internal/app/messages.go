@@ -73,9 +73,6 @@ type QueueEntry struct {
 	Episode *abs.PodcastEpisode
 }
 
-// PlayerReadyMsg signals that mpv has been launched and connected.
-type PlayerReadyMsg struct{}
-
 // SyncTickMsg fires every 30 seconds to sync playback progress with ABS.
 type SyncTickMsg struct{}
 

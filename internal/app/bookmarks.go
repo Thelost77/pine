@@ -12,8 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-var timeNowMillis = func() int64 { return time.Now().UnixMilli() }
-
 // handleAddBookmark creates a bookmark at the current playback position.
 func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 	if m.client == nil {
@@ -45,7 +43,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		if cacheStore != nil {
 			_ = cacheStore.Delete("bookmarks:" + itemID)
 		}
-		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: timeNowMillis()}
+		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: time.Now().UnixMilli()}
 		updated := append(append([]abs.Bookmark{}, existing...), newBm)
 		logger.Info("bookmark added locally", "itemID", itemID, "count", len(updated))
 		return detail.BookmarksUpdatedMsg{Bookmarks: updated}

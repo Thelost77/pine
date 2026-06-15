@@ -955,12 +955,8 @@ func TestE2E_SessionPersistence(t *testing.T) {
 	})
 
 	// Verify account saved
-	accounts, err := store.ListAccounts()
-	if err != nil {
-		t.Fatalf("ListAccounts: %v", err)
-	}
-	if len(accounts) == 0 {
-		t.Error("expected account to be saved after login")
+	if _, err := store.GetDefaultAccount(); err != nil {
+		t.Errorf("expected default account to be saved after login: %v", err)
 	}
 }
 
@@ -994,8 +990,7 @@ func TestE2E_FullJourney(t *testing.T) {
 	assertAPICallMade(t, log, "POST", "/login")
 
 	// Verify account saved to DB
-	accounts, _ := store.ListAccounts()
-	if len(accounts) == 0 {
+	if _, err := store.GetDefaultAccount(); err != nil {
 		t.Error("account should be saved after login")
 	}
 

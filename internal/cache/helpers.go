@@ -124,19 +124,8 @@ func (s *Store) PutBookmarks(itemID string, v []abs.Bookmark, ttl time.Duration)
 	return s.Put("bookmarks:"+itemID, v, ttl)
 }
 
-// Episodes -------------------------------------------------------------------
-
-func (s *Store) GetEpisodes(itemID string) ([]abs.PodcastEpisode, bool, error) {
-	var v []abs.PodcastEpisode
-	hit, err := s.Get("episodes:"+itemID, &v)
-	return v, hit, err
-}
-
-func (s *Store) PutEpisodes(itemID string, v []abs.PodcastEpisode, ttl time.Duration) error {
-	return s.Put("episodes:"+itemID, v, ttl)
-}
-
 // RecentEpisodes -------------------------------------------------------------
+
 
 func (s *Store) GetRecentEpisodes(libID string, limit int) ([]abs.LibraryItem, bool, error) {
 	var v []abs.LibraryItem

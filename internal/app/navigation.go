@@ -114,15 +114,3 @@ func (m Model) updateScreen(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// navigateWithCleanup navigates to a screen. Playback continues in background.
-func (m Model) navigateWithCleanup(target Screen) (Model, tea.Cmd) {
-	return m.navigate(target)
-}
-
-// backWithCleanup goes back. No-op if back stack is empty.
-func (m Model) backWithCleanup() (Model, tea.Cmd) {
-	if len(m.backStack) == 0 {
-		return m, nil
-	}
-	return m.back()
-}

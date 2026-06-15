@@ -324,10 +324,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case NavigateMsg:
-		return m.navigateWithCleanup(msg.Screen)
+		return m.navigate(msg.Screen)
 
 	case BackMsg:
-		return m.backWithCleanup()
+		if len(m.backStack) == 0 {
+			return m, nil
+		}
+		return m.back()
 
 	case login.LoginSuccessMsg:
 		logger.Info("login success", "server", msg.ServerURL, "user", msg.Username)
@@ -1160,10 +1163,10 @@ type PaletteContextProvider interface {
 
 func (m Model) handlePaletteAction(action components.PaletteAction, payload, libraryID, itemID string, data any) (Model, tea.Cmd) {
 	switch action {
-	case components.ActionGoHome:
-		return m.navigateWithCleanup(ScreenHome)
-	case components.ActionGoLibrary:
-		return m.navigateWithCleanup(ScreenLibrary)
+		case components.ActionGoHome:
+			return m.navigate(ScreenHome)
+		case components.ActionGoLibrary:
+			return m.navigate(ScreenLibrary)
 	case components.ActionGoSeriesList:
 		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
 		return m.navigate(ScreenSeriesList)

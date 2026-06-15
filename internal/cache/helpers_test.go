@@ -164,27 +164,6 @@ func TestHelpers_Bookmarks(t *testing.T) {
 	}
 }
 
-func TestHelpers_Episodes(t *testing.T) {
-	dbStore := openTestDB(t)
-	s := NewStore(dbStore)
-
-	want := []abs.PodcastEpisode{{ID: "ep1", Title: "Pilot"}}
-	if err := s.PutEpisodes("li1", want, 5*time.Minute); err != nil {
-		t.Fatalf("PutEpisodes error: %v", err)
-	}
-
-	got, hit, err := s.GetEpisodes("li1")
-	if err != nil {
-		t.Fatalf("GetEpisodes error: %v", err)
-	}
-	if !hit {
-		t.Fatal("expected hit")
-	}
-	if len(got) != 1 || got[0].Title != "Pilot" {
-		t.Fatalf("got %+v, want %+v", got, want)
-	}
-}
-
 func TestHelpers_RecentEpisodes(t *testing.T) {
 	dbStore := openTestDB(t)
 	s := NewStore(dbStore)

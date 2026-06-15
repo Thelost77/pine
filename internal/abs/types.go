@@ -304,19 +304,6 @@ type LibraryItemsResponse struct {
 	Page    int           `json:"page"`
 }
 
-// SearchResult is returned by GET /api/libraries/{id}/search.
-type SearchResult struct {
-	Book    []SearchResultEntry `json:"book"`
-	Podcast []SearchResultEntry `json:"podcast"`
-}
-
-// SearchResultEntry wraps a LibraryItem in a search result with match context.
-type SearchResultEntry struct {
-	LibraryItem LibraryItem `json:"libraryItem"`
-	MatchKey    string      `json:"matchKey,omitempty"`
-	MatchText   string      `json:"matchText,omitempty"`
-}
-
 // PersonalizedResponse is a section returned by GET /api/libraries/{id}/personalized.
 type PersonalizedResponse struct {
 	ID       string        `json:"id"` // e.g. "continue-listening"

@@ -237,21 +237,6 @@ func (c *Client) getLibraryItems(ctx context.Context, libraryID string, page, li
 	return &resp, nil
 }
 
-// SearchLibrary searches a library by query string.
-func (c *Client) SearchLibrary(ctx context.Context, libraryID, query string) (*SearchResult, error) {
-	path := fmt.Sprintf("/api/libraries/%s/search?q=%s&limit=12", libraryID, url.QueryEscape(query))
-	data, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("search library: %w", err)
-	}
-
-	var resp SearchResult
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("decode search response: %w", err)
-	}
-	return &resp, nil
-}
-
 const podcastSearchPageLimit = 100
 
 // SearchPodcastEpisodes scans podcast library items and returns episode-level prefix hits.
