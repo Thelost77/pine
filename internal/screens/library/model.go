@@ -732,7 +732,7 @@ func (i libraryListItem) Description() string {
 	if i.kind != rowKindItem {
 		return i.description
 	}
-	context := "Unknown author"
+	var context string
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
 		context = i.Item.Media.Metadata.Title
 	} else {

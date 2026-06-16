@@ -31,7 +31,6 @@ import (
 const headerHeight = 2
 const errorBannerHeight = 1
 const playerFooterHeight = 1
-const hintsBarHeight = 1
 const syncInterval = 30 * time.Second
 
 // Model is the root application model that manages screen routing.
@@ -1506,9 +1505,7 @@ func (m *Model) handleDeleteItem(cmd detail.DeleteItemCmd) (tea.Model, tea.Cmd) 
 		if err != nil {
 			return components.ErrMsg{Err: fmt.Errorf("failed to delete item: %w", err)}
 		}
-		return detail.ItemDeletedMsg{
-			ItemID: cmd.ItemID,
-		}
+		return detail.ItemDeletedMsg(cmd)
 	}
 }
 
@@ -1521,9 +1518,6 @@ func (m *Model) handleDeleteEpisode(cmd detail.DeleteEpisodeCmd) (tea.Model, tea
 		if err != nil {
 			return components.ErrMsg{Err: fmt.Errorf("failed to delete episode: %w", err)}
 		}
-		return detail.EpisodeDeletedMsg{
-			ItemID:    cmd.ItemID,
-			EpisodeID: cmd.EpisodeID,
-		}
+		return detail.EpisodeDeletedMsg(cmd)
 	}
 }

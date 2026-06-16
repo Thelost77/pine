@@ -107,17 +107,15 @@ type Cache struct {
 	ttl    time.Duration
 	now    func() time.Time
 
-	mu          sync.Mutex
-	snapshots   map[string]*librarySnapshot
-	builds      map[string]*snapshotBuild
-	generations map[string]uint64
+	mu        sync.Mutex
+	snapshots map[string]*librarySnapshot
+	builds    map[string]*snapshotBuild
 }
 
 type snapshotBuild struct {
-	done       chan struct{}
-	generation uint64
-	snapshot   *librarySnapshot
-	err        error
+	done     chan struct{}
+	snapshot *librarySnapshot
+	err      error
 }
 
 type librarySnapshot struct {
@@ -289,21 +287,6 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 	return nil, false
 }
 
-func (c *Cache) buildResultList(snapshot *librarySnapshot) []abs.LibraryItem {
-	results := make([]abs.LibraryItem, 0, len(snapshot.entries))
-	for _, entry := range snapshot.entries {
-		switch entry.mediaType {
-		case "podcast":
-			results = append(results, entry.podcastResult())
-		case "series":
-			results = append(results, entry.seriesResult())
-		default:
-			results = append(results, entry.bookResult())
-		}
-	}
-	return results
-}
-
 func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType string) (*librarySnapshot, error) {
 	if c == nil || c.client == nil {
 		return nil, fmt.Errorf("not authenticated")
@@ -317,84 +300,82 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 		return &librarySnapshot{libraryID: "", mediaType: resolvedMediaType}, nil
 	}
 
-	for {
-		now := c.now()
+	now := c.now()
 
-		c.mu.Lock()
-		if snapshot, ok := c.snapshots[resolvedID]; ok && snapshot.mediaType == resolvedMediaType && now.Sub(snapshot.builtAt) < c.ttl {
-			snapshot.lastAccessedAt = now
+	c.mu.Lock()
+	if snapshot, ok := c.snapshots[resolvedID]; ok && snapshot.mediaType == resolvedMediaType && now.Sub(snapshot.builtAt) < c.ttl {
+		snapshot.lastAccessedAt = now
+		c.mu.Unlock()
+		return snapshot, nil
+	}
+	c.mu.Unlock()
+
+	// Try to restore from disk cache
+	if c.store != nil {
+		var persisted PersistedSnapshot
+		if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit && persisted.MediaType == resolvedMediaType {
+			snapshot := &librarySnapshot{
+				libraryID:      persisted.LibraryID,
+				mediaType:      persisted.MediaType,
+				builtAt:        persisted.BuiltAt,
+				lastAccessedAt: persisted.LastAccessedAt,
+				entries:        toSnapshotEntries(persisted.Entries),
+				items:          persisted.Items,
+			}
+			c.mu.Lock()
+			c.snapshots[resolvedID] = snapshot
 			c.mu.Unlock()
 			return snapshot, nil
 		}
-		c.mu.Unlock()
-
-		// Try to restore from disk cache
-		if c.store != nil {
-			var persisted PersistedSnapshot
-			if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit && persisted.MediaType == resolvedMediaType {
-				snapshot := &librarySnapshot{
-					libraryID:      persisted.LibraryID,
-					mediaType:      persisted.MediaType,
-					builtAt:        persisted.BuiltAt,
-					lastAccessedAt: persisted.LastAccessedAt,
-					entries:        toSnapshotEntries(persisted.Entries),
-					items:          persisted.Items,
-				}
-				c.mu.Lock()
-				c.snapshots[resolvedID] = snapshot
-				c.mu.Unlock()
-				return snapshot, nil
-			}
-		}
-
-		c.mu.Lock()
-		if build, ok := c.builds[resolvedID]; ok {
-			c.mu.Unlock()
-			select {
-			case <-build.done:
-				return build.snapshot, build.err
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		build := &snapshotBuild{done: make(chan struct{})}
-		c.builds[resolvedID] = build
-		c.mu.Unlock()
-
-		snapshot, err := c.buildSnapshot(ctx, resolvedID, resolvedMediaType)
-		if err == nil {
-			snapshot.builtAt = now
-			snapshot.lastAccessedAt = now
-			// Persist to disk cache
-			if c.store != nil {
-				persistedEntries := make([]PersistedEntry, len(snapshot.entries))
-				for i, e := range snapshot.entries {
-					persistedEntries[i] = e.toPersisted()
-				}
-				_ = c.store.Put("search-snapshot:"+resolvedID, PersistedSnapshot{
-					LibraryID:      snapshot.libraryID,
-					MediaType:      snapshot.mediaType,
-					BuiltAt:        now,
-					LastAccessedAt: now,
-					Entries:        persistedEntries,
-					Items:          snapshot.items,
-				}, c.ttl)
-			}
-		}
-
-		c.mu.Lock()
-		delete(c.builds, resolvedID)
-		if err == nil {
-			c.snapshots[resolvedID] = snapshot
-		}
-		build.snapshot = snapshot
-		build.err = err
-		close(build.done)
-		c.mu.Unlock()
-
-		return snapshot, err
 	}
+
+	c.mu.Lock()
+	if build, ok := c.builds[resolvedID]; ok {
+		c.mu.Unlock()
+		select {
+		case <-build.done:
+			return build.snapshot, build.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	build := &snapshotBuild{done: make(chan struct{})}
+	c.builds[resolvedID] = build
+	c.mu.Unlock()
+
+	snapshot, err := c.buildSnapshot(ctx, resolvedID, resolvedMediaType)
+	if err == nil {
+		snapshot.builtAt = now
+		snapshot.lastAccessedAt = now
+		// Persist to disk cache
+		if c.store != nil {
+			persistedEntries := make([]PersistedEntry, len(snapshot.entries))
+			for i, e := range snapshot.entries {
+				persistedEntries[i] = e.toPersisted()
+			}
+			_ = c.store.Put("search-snapshot:"+resolvedID, PersistedSnapshot{
+				LibraryID:      snapshot.libraryID,
+				MediaType:      snapshot.mediaType,
+				BuiltAt:        now,
+				LastAccessedAt: now,
+				Entries:        persistedEntries,
+				Items:          snapshot.items,
+			}, c.ttl)
+		}
+	}
+
+	c.mu.Lock()
+	delete(c.builds, resolvedID)
+	if err == nil {
+		c.snapshots[resolvedID] = snapshot
+	}
+	build.snapshot = snapshot
+	build.err = err
+	close(build.done)
+	c.mu.Unlock()
+
+	return snapshot, err
 }
 
 func (c *Cache) buildSnapshot(ctx context.Context, libraryID, libraryMediaType string) (*librarySnapshot, error) {

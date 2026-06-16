@@ -730,7 +730,7 @@ func itemTitle(item abs.LibraryItem) string {
 }
 
 func itemDescription(item abs.LibraryItem) string {
-	contextLabel := "Unknown author"
+	var contextLabel string
 	if item.MediaType == "podcast" && item.RecentEpisode != nil {
 		contextLabel = item.Media.Metadata.Title
 	} else {

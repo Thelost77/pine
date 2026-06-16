@@ -28,20 +28,20 @@ func Open(path string) (*Store, error) {
 	}
 
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 
 	// Enable WAL mode for better concurrent access
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("setting WAL mode: %w", err)
 	}
 	logger.Debug("database WAL mode enabled", "path", path)
 
 	s := &Store{DB: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 

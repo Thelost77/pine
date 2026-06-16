@@ -320,7 +320,7 @@ func (m *Mpv) stopProcess(reason string) {
 }
 
 func logMpvPipe(stream string, pid int, r io.ReadCloser) {
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {

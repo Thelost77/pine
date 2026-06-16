@@ -15,7 +15,6 @@ import (
 
 var (
 	instance *slog.Logger
-	logFile  *os.File
 	once     sync.Once
 	nop      = slog.New(slog.NewTextHandler(io.Discard, nil))
 )
@@ -40,7 +39,6 @@ func Init() func() {
 		if err != nil {
 			return
 		}
-		logFile = f
 		instance = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 		}))

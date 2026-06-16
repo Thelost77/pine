@@ -34,7 +34,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	var absClient *abs.Client
 	if acct, err := store.GetDefaultAccount(); err == nil && acct.Token != "" {
@@ -60,10 +60,10 @@ func main() {
 	if *clearCache {
 		if err := cacheStore.ClearAll(); err != nil {
 			fmt.Fprintf(os.Stderr, "error clearing cache: %v\n", err)
-			store.Close()
+			_ = store.Close()
 			os.Exit(1)
 		}
-		store.Close()
+		_ = store.Close()
 		fmt.Println("Cache cleared successfully.")
 		os.Exit(0)
 	}
