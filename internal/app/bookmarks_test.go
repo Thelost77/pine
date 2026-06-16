@@ -30,7 +30,7 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/me/item/item-001/bookmark" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -104,7 +104,7 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 			}
 			createdTitle = req.Title
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -171,7 +171,7 @@ func TestHandleUpdateBookmarkUpdatesTitle(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch && r.URL.Path == "/api/me/item/item-001/bookmark" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -227,7 +227,7 @@ func TestHandleSeekToBookmarkStartsPlaybackWhenStopped(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/items/item-multitrack/play":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(abs.PlaySession{
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
 				ID: "sess-bookmark-start",
 				AudioTracks: []abs.AudioTrack{
 					{Index: 0, StartOffset: 0, ContentURL: "/s/item/item-multitrack/track0.mp3", Duration: 1800},
@@ -240,7 +240,7 @@ func TestHandleSeekToBookmarkStartsPlaybackWhenStopped(t *testing.T) {
 				t.Fatalf("decode progress body: %v", err)
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 		default:
 			http.NotFound(w, r)
 		}

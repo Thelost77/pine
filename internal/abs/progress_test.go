@@ -87,7 +87,7 @@ func TestGetMediaProgressHTTP(t *testing.T) {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"libraryItemId": "li-001",
 			"currentTime": 120.5,
 			"progress": 0.03,

@@ -823,12 +823,12 @@ func containsString(s, substr string) bool {
 func TestLibraryItemsMsgPrefersCache(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"results":[{"id":"cache-1","libraryId":"lib-race","mediaType":"book","media":{"metadata":{"title":"Cached Book"}}}],"total":1,"limit":100,"page":0}`))
+		_, _ = w.Write([]byte(`{"results":[{"id":"cache-1","libraryId":"lib-race","mediaType":"book","media":{"metadata":{"title":"Cached Book"}}}],"total":1,"limit":100,"page":0}`))
 	}))
 	defer srv.Close()
 
 	c := search.NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
-	c.Prepare(context.Background(), "lib-race", "book")
+	_ = c.Prepare(context.Background(), "lib-race", "book")
 
 	libs := []abs.Library{
 		{ID: "lib-race", MediaType: "book"},

@@ -158,7 +158,7 @@ func TestEpisodeFieldsAreEditableByKeyboard(t *testing.T) {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{step.text}})
 	}
 
-	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter command = nil, want SaveEpisodeCmd")
 	}

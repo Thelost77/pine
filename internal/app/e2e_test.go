@@ -2096,7 +2096,7 @@ func TestE2E_CacheSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	cfg := config.Default()
 	client := abs.NewClient(srv.URL, "jwt-token-e2e")

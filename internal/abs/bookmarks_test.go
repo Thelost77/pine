@@ -18,7 +18,7 @@ func TestGetBookmarksHTTP(t *testing.T) {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"libraryItemId": "li-001",
 			"currentTime": 0,
 			"progress": 0,
@@ -58,7 +58,7 @@ func TestCreateBookmarkHTTP(t *testing.T) {
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -94,7 +94,7 @@ func TestUpdateBookmarkHTTP(t *testing.T) {
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -160,7 +160,7 @@ func TestDeleteBookmarkHTTPPreservesBookmarkPrecision(t *testing.T) {
 func TestGetBookmarksEmptyResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraryItemId":"li-002","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[]}`))
+		_, _ = w.Write([]byte(`{"libraryItemId":"li-002","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[]}`))
 	}))
 	defer srv.Close()
 
@@ -203,7 +203,7 @@ func TestGetBookmarksServerErrorReturnsError(t *testing.T) {
 func TestGetBookmarksMalformedResponseReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraryItemId":`))
+		_, _ = w.Write([]byte(`{"libraryItemId":`))
 	}))
 	defer srv.Close()
 

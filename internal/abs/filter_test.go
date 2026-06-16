@@ -42,7 +42,7 @@ func TestFilterAudioLibraries_KeepsAudiobooks(t *testing.T) {
 			}},
 			Total: 1,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -73,7 +73,7 @@ func TestFilterAudioLibraries_ExcludesEbooks(t *testing.T) {
 			}},
 			Total: 1,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -99,7 +99,7 @@ func TestFilterAudioLibraries_DetectsAudioByNumTracks(t *testing.T) {
 			}},
 			Total: 1,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -125,7 +125,7 @@ func TestFilterAudioLibraries_DetectsAudioByNumAudioFiles(t *testing.T) {
 			}},
 			Total: 1,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 

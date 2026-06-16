@@ -14,28 +14,28 @@ func TestOpen_CreatesTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Verify accounts table exists with expected columns
 	rows, err := store.DB.Query(`SELECT id, server_url, username, token, is_default, created_at FROM accounts LIMIT 0`)
 	if err != nil {
 		t.Fatalf("accounts table not created: %v", err)
 	}
-	rows.Close()
+_ = rows.Close()
 
 	// Verify sessions table exists with expected columns
 	rows, err = store.DB.Query(`SELECT id, item_id, session_id, current_time, duration, created_at FROM sessions LIMIT 0`)
 	if err != nil {
 		t.Fatalf("sessions table not created: %v", err)
 	}
-	rows.Close()
+_ = rows.Close()
 
 	// Verify api_cache table exists with expected columns
 	rows, err = store.DB.Query(`SELECT cache_key, data, cached_at, expires_at FROM api_cache LIMIT 0`)
 	if err != nil {
 		t.Fatalf("api_cache table not created: %v", err)
 	}
-	rows.Close()
+_ = rows.Close()
 }
 
 func TestOpen_Idempotent(t *testing.T) {
@@ -47,13 +47,13 @@ func TestOpen_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Open() error: %v", err)
 	}
-	store1.Close()
+	_ = store1.Close()
 
 	store2, err := Open(path)
 	if err != nil {
 		t.Fatalf("second Open() error: %v", err)
 	}
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 
 	// Insert a row, verify it survives re-open
 	_, err = store2.DB.Exec(`INSERT INTO accounts (id, server_url, username, token, is_default, created_at) VALUES ('a1', 'http://localhost', 'user', 'tok', 1, datetime('now'))`)
@@ -79,7 +79,7 @@ func TestOpen_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatal("database file was not created")

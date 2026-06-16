@@ -237,7 +237,7 @@ func TestLoginSuccessWithMockServer(t *testing.T) {
 			ID: "usr1", Username: "alice", Token: "jwt-token-abc",
 		}}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -335,7 +335,7 @@ func TestLoginFailureWithUnreachableServer(t *testing.T) {
 	m = tabTo(m, fieldPassword)
 	m = typeString(m, "pass")
 
-	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected login command")
 	}

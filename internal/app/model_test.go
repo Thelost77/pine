@@ -552,8 +552,7 @@ func TestBackMsg(t *testing.T) {
 func TestBackEmptyStackIsNoOp(t *testing.T) {
 	m := newTestModel()
 
-	result, cmd := m.Update(BackMsg{})
-	m = result.(Model)
+	_, cmd := m.Update(BackMsg{})
 	if cmd != nil {
 		t.Fatal("back on empty stack should be no-op")
 	}
@@ -1822,15 +1821,6 @@ func TestNormalPlaybackErrorShowsBanner(t *testing.T) {
 	if cmd == nil {
 		t.Error("expected auto-dismiss cmd for error banner")
 	}
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // --- Error banner tests ---

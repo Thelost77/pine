@@ -115,7 +115,7 @@ func TestGetLibrariesHTTP(t *testing.T) {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(librariesFixture)
+		_, _ = w.Write(librariesFixture)
 	}))
 	defer srv.Close()
 
@@ -138,7 +138,7 @@ func TestGetPersonalizedHTTP(t *testing.T) {
 			t.Errorf("path = %q, want /api/libraries/lib-1/personalized", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(personalizedFixture)
+		_, _ = w.Write(personalizedFixture)
 	}))
 	defer srv.Close()
 
@@ -165,7 +165,7 @@ func TestGetLibraryItemsHTTP(t *testing.T) {
 			t.Errorf("limit = %q, want 10", q.Get("limit"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(libraryItemsFixture)
+		_, _ = w.Write(libraryItemsFixture)
 	}))
 	defer srv.Close()
 
@@ -194,7 +194,7 @@ func TestGetLibraryItemHTTP(t *testing.T) {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "li-pod-001",
 			"mediaType": "podcast",
 			"media": {
@@ -239,7 +239,7 @@ func TestGetLibraryItemHTTP_WithSeriesMetadata(t *testing.T) {
 			t.Error("expected expanded=1 query param")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "li-book-001",
 			"libraryId": "lib-books-001",
 			"addedAt": 1711111111111,
@@ -289,7 +289,7 @@ func TestGetLibraryItemHTTP_WithSeriesMetadataArray(t *testing.T) {
 			t.Error("expected expanded=1 query param")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "li-book-001",
 			"libraryId": "lib-books-001",
 			"addedAt": 1711111111111,
@@ -332,7 +332,7 @@ func TestGetSeriesHTTP(t *testing.T) {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "series-expanse",
 			"name": "The Expanse"
 		}`))
@@ -364,7 +364,7 @@ func TestGetLibrarySeriesHTTP(t *testing.T) {
 			t.Errorf("limit = %q, want 50", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"results": [
 				{
 					"id": "series-expanse",
@@ -401,7 +401,7 @@ func TestGetSeriesContentsHTTP(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/libraries/lib-books-001/series/series-expanse":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"id": "series-expanse",
 				"name": "The Expanse"
 			}`))
@@ -416,7 +416,7 @@ func TestGetSeriesContentsHTTP(t *testing.T) {
 				t.Fatalf("unexpected page %q", r.URL.Query().Get("page"))
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "li-book-002",
@@ -525,7 +525,7 @@ func TestGetRecentlyAddedHTTP(t *testing.T) {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
 
@@ -556,7 +556,7 @@ func TestSearchPodcastEpisodesHTTP(t *testing.T) {
 				t.Errorf("page = %q, want 0", r.URL.Query().Get("page"))
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "pod-001",
@@ -571,13 +571,13 @@ func TestSearchPodcastEpisodesHTTP(t *testing.T) {
 			}`))
 		case "/api/libraries/lib-pod/search":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"book":[],"podcast":[]}`))
+			_, _ = w.Write([]byte(`{"book":[],"podcast":[]}`))
 		case "/api/items/pod-001":
 			if r.URL.Query().Get("expanded") != "1" {
 				t.Error("expected expanded=1 query param")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"id": "pod-001",
 				"libraryId": "lib-pod",
 				"mediaType": "podcast",
@@ -617,7 +617,7 @@ func TestSearchPodcastEpisodesHTTP_FindsEpisodeWhenShowSearchWouldMiss(t *testin
 		switch r.URL.Path {
 		case "/api/libraries/lib-pod/items":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results": [
 					{
 						"id": "pod-001",
@@ -632,7 +632,7 @@ func TestSearchPodcastEpisodesHTTP_FindsEpisodeWhenShowSearchWouldMiss(t *testin
 			}`))
 		case "/api/items/pod-001":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"id": "pod-001",
 				"libraryId": "lib-pod",
 				"mediaType": "podcast",
@@ -671,7 +671,7 @@ func TestGetRecentEpisodesHTTP(t *testing.T) {
 			t.Errorf("limit = %q, want 3", r.URL.Query().Get("limit"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"episodes": [
 				{
 					"libraryItemId": "li-pod-001",

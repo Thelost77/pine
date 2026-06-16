@@ -77,7 +77,7 @@ func newMockABSServer(log *apiLog) *httptest.Server {
 				},
 				CurrentTime: 42.0,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		case r.Method == http.MethodPost && r.URL.Path == "/api/items/pod-001/play/ep-001":
 			resp := abs.PlaySession{
@@ -87,19 +87,19 @@ func newMockABSServer(log *apiLog) *httptest.Server {
 				},
 				CurrentTime: 340.0,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-abc/sync":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-abc/close":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/item-001":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		default:
 			w.WriteHeader(http.StatusNotFound)

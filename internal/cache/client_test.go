@@ -16,7 +16,7 @@ func TestClient_CacheHit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
 	}))
 	defer srv.Close()
 
@@ -53,7 +53,7 @@ func TestClient_TTLExpiry(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
 	}))
 	defer srv.Close()
 
@@ -86,11 +86,11 @@ func TestClient_ErrorNotCached(t *testing.T) {
 		requestCount++
 		if requestCount == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`error`))
+			_, _ = w.Write([]byte(`error`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
 	}))
 	defer srv.Close()
 
@@ -125,7 +125,7 @@ func TestClient_ConcurrentDeduplication(t *testing.T) {
 		mu.Unlock()
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
 	}))
 	defer srv.Close()
 
@@ -157,7 +157,7 @@ func TestClient_NilStore(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
 	}))
 	defer srv.Close()
 
@@ -189,7 +189,7 @@ func TestClient_GetLibraryItem_CacheHit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"li1","mediaType":"book","media":{"metadata":{"title":"Book One"}}}`))
+		_, _ = w.Write([]byte(`{"id":"li1","mediaType":"book","media":{"metadata":{"title":"Book One"}}}`))
 	}))
 	defer srv.Close()
 
@@ -225,9 +225,9 @@ func TestClient_GetRecentlyAdded_CacheHit(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/libraries/lib1/personalized":
-			w.Write([]byte(`[{"id":"recently-added","entities":[{"id":"li1","libraryId":"lib1","addedAt":2,"mediaType":"book","media":{"metadata":{"title":"A"}}}]}]`))
+			_, _ = w.Write([]byte(`[{"id":"recently-added","entities":[{"id":"li1","libraryId":"lib1","addedAt":2,"mediaType":"book","media":{"metadata":{"title":"A"}}}]}]`))
 		case "/api/libraries/lib2/personalized":
-			w.Write([]byte(`[{"id":"recently-added","entities":[{"id":"li2","libraryId":"lib2","addedAt":1,"mediaType":"podcast","media":{"metadata":{"title":"B"}}}]}]`))
+			_, _ = w.Write([]byte(`[{"id":"recently-added","entities":[{"id":"li2","libraryId":"lib2","addedAt":1,"mediaType":"podcast","media":{"metadata":{"title":"B"}}}]}]`))
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}

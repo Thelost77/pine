@@ -54,7 +54,7 @@ func TestStartPlaySessionRequestBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(playSessionFixture)
+		_, _ = w.Write(playSessionFixture)
 	}))
 	defer srv.Close()
 
@@ -96,7 +96,7 @@ func TestStartPlaySessionHTTP(t *testing.T) {
 			t.Errorf("method = %q, want POST", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(playSessionFixture)
+		_, _ = w.Write(playSessionFixture)
 	}))
 	defer srv.Close()
 
@@ -162,7 +162,7 @@ func TestStartEpisodePlaySessionHTTP(t *testing.T) {
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "session-ep-001",
 			"audioTracks": [{"contentUrl": "/s/item/li-pod-001/ep1.mp3", "duration": 1200.5}],
 			"currentTime": 0,

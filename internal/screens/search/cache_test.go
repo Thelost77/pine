@@ -23,7 +23,7 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 		case "/api/libraries/lib-pod/items":
 			listCalls++
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results":[{"id":"pod-001","libraryId":"lib-pod","mediaType":"podcast","media":{"metadata":{"title":"Joe Rogan"}}}],
 				"total":1,
 				"limit":100,
@@ -32,7 +32,7 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 		case "/api/items/pod-001":
 			itemCalls++
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"id":"pod-001",
 				"libraryId":"lib-pod",
 				"mediaType":"podcast",
@@ -83,7 +83,7 @@ func TestCacheKeepsSnapshotsPerLibraryID(t *testing.T) {
 		case "/api/libraries/lib-a/items":
 			calls["lib-a"]++
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results":[{"id":"book-001","libraryId":"lib-a","mediaType":"book","media":{"metadata":{"title":"Alpha","authorName":"Ann","duration":3600}}}],
 				"total":1,
 				"limit":100,
@@ -92,7 +92,7 @@ func TestCacheKeepsSnapshotsPerLibraryID(t *testing.T) {
 		case "/api/libraries/lib-b/items":
 			calls["lib-b"]++
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results":[{"id":"book-002","libraryId":"lib-b","mediaType":"book","media":{"metadata":{"title":"Beta","authorName":"Bob","duration":2400}}}],
 				"total":1,
 				"limit":100,
@@ -100,7 +100,7 @@ func TestCacheKeepsSnapshotsPerLibraryID(t *testing.T) {
 			}`))
 		case "/api/libraries/lib-a/series", "/api/libraries/lib-b/series":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -133,7 +133,7 @@ func TestCacheRebuildsStaleSnapshot(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/libraries/lib-a/series" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
 			return
 		}
 		if r.URL.Path != "/api/libraries/lib-a/items" {
@@ -141,7 +141,7 @@ func TestCacheRebuildsStaleSnapshot(t *testing.T) {
 		}
 		listCalls++
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"results":[{"id":"book-001","libraryId":"lib-a","mediaType":"book","media":{"metadata":{"title":"Alpha","authorName":"Ann","duration":3600}}}],
 			"total":1,
 			"limit":100,
@@ -206,7 +206,7 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/libraries/lib-pod/items":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"results":[{"id":"pod-001","libraryId":"lib-pod","mediaType":"podcast","media":{"metadata":{"title":"$100M+ Advice That'll Piss Off Every Business Guru (ft. DHH) [9xOaqIkaBZQ]"}}}],
 				"total":1,
 				"limit":100,
@@ -214,7 +214,7 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 			}`))
 		case "/api/items/pod-001":
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"id":"pod-001",
 				"libraryId":"lib-pod",
 				"mediaType":"podcast",
@@ -247,14 +247,14 @@ func TestCacheBookSearchUsesFuzzyFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/libraries/lib-a/series" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
 			return
 		}
 		if r.URL.Path != "/api/libraries/lib-a/items" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"results":[
 				{"id":"book-001","libraryId":"lib-a","mediaType":"book","media":{"metadata":{"title":"The Great Gatsby","authorName":"F. Scott Fitzgerald","duration":3600}}},
 				{"id":"book-002","libraryId":"lib-a","mediaType":"book","media":{"metadata":{"title":"Gone Girl","authorName":"Gillian Flynn","duration":4200}}}
@@ -294,7 +294,7 @@ func TestCachePersistsSnapshotToDiskAndRestoresOnRestart(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/libraries/lib-a/series" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":100,"page":0}`))
 			return
 		}
 		if r.URL.Path != "/api/libraries/lib-a/items" {
@@ -302,7 +302,7 @@ func TestCachePersistsSnapshotToDiskAndRestoresOnRestart(t *testing.T) {
 		}
 		listCalls++
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"results":[{"id":"book-001","libraryId":"lib-a","mediaType":"book","media":{"metadata":{"title":"Alpha","authorName":"Ann","duration":3600}}}],
 			"total":1,
 			"limit":100,
@@ -316,7 +316,7 @@ func TestCachePersistsSnapshotToDiskAndRestoresOnRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer dbStore.Close()
+	defer func() { _ = dbStore.Close() }()
 
 	cacheStore := cache.NewStore(dbStore)
 	client := cache.NewClient(abs.NewClient(srv.URL, "tok"), nil)
@@ -358,7 +358,7 @@ func TestBuildSnapshotPagination(t *testing.T) {
 		
 		if r.URL.Path == "/api/libraries/lib-pagi/series" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"results":[],"total":0,"limit":50,"page":0}`))
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":50,"page":0}`))
 			return
 		}
 		
@@ -375,7 +375,7 @@ func TestBuildSnapshotPagination(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		if count == 0 {
-			w.Write([]byte(`{"results":[],"total":100,"limit":50,"page":2}`))
+			_, _ = w.Write([]byte(`{"results":[],"total":100,"limit":50,"page":2}`))
 			return
 		}
 
@@ -387,7 +387,7 @@ func TestBuildSnapshotPagination(t *testing.T) {
 			}
 			results += fmt.Sprintf(`{"id":"book-%d","libraryId":"lib-pagi","mediaType":"book","media":{"metadata":{"title":"Book %d"}}}`, i, i)
 		}
-		w.Write([]byte(fmt.Sprintf(`{"results":[%s],"total":100,"limit":50,"page":%d}`, results, listCalls-1)))
+		_, _ = fmt.Fprintf(w, `{"results":[%s],"total":100,"limit":50,"page":%d}`, results, listCalls-1)
 	}))
 	defer srv.Close()
 

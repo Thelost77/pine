@@ -125,12 +125,6 @@ func (s *e2eServerState) shouldReturnNoTracks(itemID, episodeID string) bool {
 	return s.noTrackEpisode[itemID+"|"+episodeID]
 }
 
-func (s *e2eServerState) setForce401(v bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.force401 = v
-}
-
 func (s *e2eServerState) getForce401() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -251,7 +245,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			resp := abs.LoginResponse{User: abs.LoginUser{
 				ID: "usr-001", Username: "alice", Token: "jwt-token-e2e",
 			}}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			status := state.getMeStatus()
@@ -264,7 +258,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			}{
 				Bookmarks: state.allBookmarks(),
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		// --- Libraries ---
 		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries":
@@ -276,7 +270,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 					{ID: "lib-pods", Name: "Podcasts", MediaType: "podcast"},
 				},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		// --- Personalized (book library) ---
 		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-001/personalized":
@@ -286,7 +280,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 					Entities: items[:2],
 				},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		// --- Personalized (podcast library) ---
 		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-pods/personalized":
@@ -296,7 +290,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 					Entities: podcastItems[:1],
 				},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		// --- Library items (books) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-001/items"):
@@ -306,7 +300,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				Limit:   20,
 				Page:    0,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		// --- Library items (podcasts) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-pods/items"):
@@ -316,7 +310,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				Limit:   20,
 				Page:    0,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		// --- Get single item (expanded, for podcast episodes) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/items/"):
@@ -332,12 +326,12 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			// Find the item
 			for _, item := range append(items, podcastItems...) {
 				if item.ID == itemID {
-					json.NewEncoder(w).Encode(item)
+					_ = json.NewEncoder(w).Encode(item)
 					return
 				}
 			}
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"error":"item not found"}`))
+			_, _ = w.Write([]byte(`{"error":"item not found"}`))
 
 		// --- Bookmarks (via progress endpoint) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/progress/"):
@@ -358,11 +352,11 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				Progress:      0.0117,
 				Bookmarks:     bms,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/me/progress/"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		// --- Create bookmark ---
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/bookmark"):
@@ -380,7 +374,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				})
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		// --- Update bookmark ---
 		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/bookmark"):
@@ -392,7 +386,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				state.updateBookmark(itemID, bmTime, bmTitle)
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		// --- Delete bookmark ---
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/bookmark/"):
@@ -401,11 +395,11 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				itemID := parts[4]
 				// Parse the time from URL
 				var bmTime float64
-				fmt.Sscanf(parts[6], "%f", &bmTime)
+				_, _ = fmt.Sscanf(parts[6], "%f", &bmTime)
 				state.deleteBookmark(itemID, bmTime)
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		// --- Episode playback: POST /api/items/{id}/play/{episodeId} ---
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/play/"):
@@ -416,7 +410,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				epID := parts[5]
 				if state.shouldReturnNoTracks(itemID, epID) {
 					resp := abs.PlaySession{ID: "sess-ep-empty-e2e", EpisodeID: epID, CurrentTime: 0}
-					json.NewEncoder(w).Encode(resp)
+					_ = json.NewEncoder(w).Encode(resp)
 					return
 				}
 				resp := abs.PlaySession{
@@ -426,7 +420,7 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 					},
 					CurrentTime: 0,
 				}
-				json.NewEncoder(w).Encode(resp)
+				_ = json.NewEncoder(w).Encode(resp)
 			} else {
 				w.WriteHeader(http.StatusBadRequest)
 			}
@@ -463,19 +457,19 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 					},
 				}
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/sync"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"error":"not found"}`))
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
 		}
 	}))
 }
@@ -504,7 +498,7 @@ func newE2EModelWithDB(t *testing.T, srv *httptest.Server, mp *mockPlayer) (Mode
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := config.Default()
 	client := abs.NewClient(srv.URL, "jwt-token-e2e")
@@ -518,7 +512,7 @@ func newE2EModelUnauthWithDB(t *testing.T, srv *httptest.Server, mp *mockPlayer)
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := config.Default()
 	return NewWithPlayer(cfg, store, nil, nil, mp), store
@@ -622,14 +616,6 @@ func assertViewContains(t *testing.T, m Model, substr string) {
 	v := m.View()
 	if !strings.Contains(v, substr) {
 		t.Errorf("View() does not contain %q\n--- View output (first 500 chars) ---\n%.500s", substr, v)
-	}
-}
-
-func assertViewNotContains(t *testing.T, m Model, substr string) {
-	t.Helper()
-	v := m.View()
-	if strings.Contains(v, substr) {
-		t.Errorf("View() should not contain %q", substr)
 	}
 }
 
