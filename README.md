@@ -11,11 +11,15 @@ Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](htt
 - Browse your audiobook and podcast libraries
 - Play audiobooks with chapter navigation and multi-track support
 - Play podcast episodes with progress tracking
+- Persistent local API cache for instant startup and near-instant library switching
+- Command palette (`Ctrl+P`) for global search and quick actions from anywhere
+- Metadata editor for books and episodes
+- MPRIS media-key support
 - Bookmarks — create, edit, navigate to, and delete
 - Sleep timer
 - Automatic progress sync every 30 seconds
-- Library search
 - Multiple library support with tab switching
+- Delete books and podcast episodes from the server
 - Keyboard-driven navigation
 - Everforest dark theme
 - Session restore — pick up where you left off
@@ -36,7 +40,8 @@ go install github.com/Thelost77/pine@latest
 ## Usage
 
 ```sh
-pine
+pine                # start the TUI
+pine --clear-cache  # clear local cache and exit
 ```
 
 On first run, you'll be prompted to log in to your Audiobookshelf server. pine stores the server URL, username, and auth token locally in `~/.config/pine/pine.db` for future sessions.
@@ -52,18 +57,21 @@ Some keys are context-specific.
 | `enter` / `→` | Open / select |
 | `j` / `k` | Navigate down / up |
 | `h` / `l` | Seek backward / forward |
-| `p` / `space` | Play / pause |
+| `space` / `p` | Play / pause |
 | `a` / `A` | Add to queue / play next |
+| `>` | Play next queued item |
 | `n` / `N` | Next / previous chapter |
 | `+` / `-` | Speed up / down |
 | `]` / `[` | Volume up / down |
 | `c` | Open chapter list |
-| `s` / `S` | Browse series in library / cycle sleep timer during playback |
+| `s` | Browse series (library) |
+| `S` | Cycle sleep timer during playback |
 | `b` | Add bookmark |
 | `d` / `e` | Delete / edit bookmark |
 | `f` | Mark finished |
+| `m` | Edit metadata (detail view) |
 | `tab` | Switch focus / library |
-| `/` | Search |
+| `ctrl+p` | Command palette |
 | `o` | Open library |
 | `?` | Help overlay |
 
@@ -78,8 +86,8 @@ See `internal/config/config.go` for the current fields and defaults.
 Create SemVer tags with a leading `v` so Go can resolve `@latest` and versioned installs correctly. Keep release notes in `docs/releases/` and publish the tag plus the GitHub Release together.
 
 ```sh
-${EDITOR:-vi} docs/releases/v0.1.0.md
-./scripts/release.sh v0.1.0
+${EDITOR:-vi} docs/releases/v0.4.0.md
+./scripts/release.sh v0.4.0
 ```
 
 ## Known issues
@@ -93,17 +101,19 @@ main.go         Entry point
 internal/
   abs/          Audiobookshelf API client
   app/          Root model, screen routing, playback lifecycle
+  cache/        Persistent API cache store and cached client wrapper
   config/       TOML configuration
   db/           SQLite persistence (accounts, last session)
   logger/       File-based structured logging
+  mpris/        MPRIS D-Bus adapter for media-key integration
   player/       mpv IPC wrapper
-  screens/      Screen models (login, home, library, detail, search, series, serieslist)
-  ui/           Shared styles, formatting, components
+  screens/      Screen models (login, home, library, detail, metadataedit, series, serieslist)
+  ui/           Shared styles, formatting, components (confirm, error, help, palette)
 ```
 
 ## Status
 
-Active development. Core functionality works — audiobooks, podcasts, bookmarks, chapters, search, and progress sync are all functional.
+Active development. Core functionality is stable — audiobooks, podcasts, bookmarks, chapters, search, persistent cache, metadata editing, server-side deletion, and progress sync are all functional.
 
 ## Acknowledgements
 

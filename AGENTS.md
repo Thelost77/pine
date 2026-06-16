@@ -21,14 +21,16 @@ go vet ./...                        # type-check
 
 | File | Responsibility |
 |------|---------------|
-| `model.go` | Root Model struct, Update dispatcher (400+ line switch), sleep timer, chapter overlay, 401 handling |
+| `model.go` | Root Model struct, Update dispatcher, sleep timer, chapter overlay, command palette, 401 handling |
 | `playback.go` | Playback lifecycle: handlePlayCmd → handlePlaySessionMsg → handlePlayerReady → handlePositionMsg → handleSyncTick → stopPlayback → Cleanup. Track rollover for multi-track books. Session restore on startup. |
 | `navigation.go` | Screen routing via back stack, propagateSize (sets all 7 screen models), initScreen, updateScreen dispatch |
-| `render.go` | View composition: header + error banner + screen + hints + player footer + chapter overlay modal |
+| `render.go` | View composition: header + error banner + screen + hints + player footer + chapter overlay modal + confirmation overlay |
 | `bookmarks.go` | Bookmark CRUD, chapter next/prev, seek logic (in-track vs cross-track), fetchBookmarksCmd/fetchEpisodesCmd/fetchBookDetailCmd |
+| `metadata.go` | Metadata editor save flow: server PATCH, cache eviction, detail refresh |
 | `messages.go` | Screen enum, PlaySessionMsg, PlaySessionData, QueueEntry, all root-level message types |
-| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, chapters, sleep) |
+| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, chapters, sleep, command palette) |
 | `queue.go` | Queue entry enqueue/dequeue with dedup, clone helpers |
+| `mpris_state.go` | MPRIS bridge message conversion between player state and D-Bus adapter |
 
 ### Player (internal/player/)
 
@@ -45,11 +47,29 @@ go vet ./...                        # type-check
 |--------|-----------|-------|
 | `login` | model.go, view.go | 3-field form (server, username, password), tab navigation |
 | `home` | model.go, view.go | Personalized shelves: continue-listening + recently-added. Library switching with tab. Item/recent caches per library. Skeleton loading with 500ms reveal delay. |
-| `library` | model.go, view.go | Paginated item list (50/page), infinite scroll prefetch at 80%, per-library page cache. Library switching with tab. |
-| `detail` | model.go, view.go | Viewport-scrollable content: description, series row, episodes list (podcasts), bookmarks list, inline bookmark editing. Tab cycles focus between sections. |
-| `search` | model.go, view.go, cache.go | Text input + results list. 50ms debounce. Cache layer builds full library snapshots (all items fetched, normalized, tokenized) with 15min TTL. Fuzzy matching via sahilm/fuzzy. |
+| `library` | model.go, view.go | Paginated item list (50/page), infinite scroll prefetch at 80%, per-library page cache shared with search cache. Library switching with tab. |
+| `detail` | model.go, view.go | Viewport-scrollable content: description, series row, episodes list (podcasts), bookmarks list, inline bookmark editing, item deletion. Tab cycles focus between sections. |
+| `metadataedit` | model.go, view.go | Inline metadata editor for books and podcast episodes. |
 | `serieslist` | model.go | Paginated series browser (50/page), infinite scroll. |
 | `series` | model.go | Books within a series, sorted by sequence number. Highlights current item. |
+| `search` | cache.go | No longer a standalone screen. Fuzzy-search cache used by the command palette and shared with the library view. Builds full library snapshots (all items fetched, normalized, tokenized) with background pre-warm. |
+
+### Cache (internal/cache/)
+
+| File | Responsibility |
+|------|---------------|
+| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly, falls back to API, and triggers background rebuilds. |
+| `store.go` | SQLite-backed cache persistence and `ClearAll`. |
+| `helpers.go` | Cache key helpers and cache-aware filtering utilities. |
+
+### MPRIS (internal/mpris/)
+
+| File | Responsibility |
+|------|---------------|
+| `adapter.go` | D-Bus MPRIS adapter exposing playback status, metadata, and seek controls. |
+| `bridge.go` | Bubbletea message bridge between the MPRIS adapter and root model. |
+| `accessor.go` | Read-only MPRIS property accessor. |
+| `server.go` | D-Bus service registration. |
 
 ### API (internal/abs/)
 
@@ -72,7 +92,7 @@ TOML config with defaults. Theme (Everforest Dark palette), player (speed, seek)
 
 ### UI (internal/ui/)
 
-Styles from theme config. Format helpers (timestamps, durations). ListItem adapter for bubbles list. Components: HelpOverlay, ErrorBanner (5s auto-dismiss).
+Styles from theme config. Format helpers (timestamps, durations). ListItem adapter for bubbles list. Components: HelpOverlay, ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette.
 
 ## Key Patterns to Follow
 
@@ -81,8 +101,9 @@ Styles from theme config. Format helpers (timestamps, durations). ListItem adapt
 - All async work in `tea.Cmd` closures captures needed values by copy, never model references
 - `tea.Batch` for concurrent async operations
 - Skeleton loading with generation-gated reveal delays (home: 500ms, library: 150ms)
-- Cache-first data loading: home screen caches per-library items, library screen caches per-library pages
+- Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
 - `q` always quits, `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only
+- `ctrl+p` opens the global command palette from any screen
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
 
 ## Testing
@@ -91,6 +112,9 @@ Styles from theme config. Format helpers (timestamps, durations). ListItem adapt
 - E2E tests in `internal/app/e2e_test.go` + `e2e_helpers_test.go` use mock HTTP server + mock player
 - E2E tests drive the bubbletea Update loop programmatically (no real TUI)
 - `internal/app/model_test.go`, `playback_test.go`, `bookmarks_test.go`, `render_test.go` for app-level tests
+- `internal/cache/*_test.go` for cache store and helper behavior
+- `internal/mpris/mpris_test.go` for the D-Bus adapter and bridge
+- `internal/screens/metadataedit/model_test.go` for the metadata editor
 - Screen models have individual `*_test.go` files
 
 ## Logging
