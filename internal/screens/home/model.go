@@ -143,8 +143,6 @@ type Model struct {
 	client          *cache.Client
 	libraries       []abs.Library
 	selectedLibrary int
-	itemCache       map[string][]abs.LibraryItem
-	recentCache     map[string][]abs.LibraryItem
 }
 
 // New creates a new home screen model.
@@ -166,13 +164,11 @@ func New(styles ui.Styles, client *cache.Client) Model {
 	l.SetItems(buildSkeletonRows(styles))
 
 	return Model{
-		list:        l,
-		loading:     true,
-		keys:        DefaultKeyMap(),
-		styles:      styles,
-		client:      client,
-		itemCache:   make(map[string][]abs.LibraryItem),
-		recentCache: make(map[string][]abs.LibraryItem),
+		list:    l,
+		loading: true,
+		keys:    DefaultKeyMap(),
+		styles:  styles,
+		client:  client,
 	}
 }
 
@@ -415,32 +411,17 @@ func (m Model) RecentlyAdded() []abs.LibraryItem {
 	return m.recentlyAdded
 }
 
-// ReplaceItem updates matching visible and cached items with fresh metadata.
+// ReplaceItem updates matching visible items with fresh metadata.
 func (m *Model) ReplaceItem(updated abs.LibraryItem) {
 	changed := replaceItemsByID(m.items, updated)
 	changed = replaceItemsByID(m.recentlyAdded, updated) || changed
-	for libID, items := range m.itemCache {
-		if replaceItemsByID(items, updated) {
-			m.itemCache[libID] = items
-			changed = true
-		}
-	}
-	for libID, items := range m.recentCache {
-		if replaceItemsByID(items, updated) {
-			m.recentCache[libID] = items
-			changed = true
-		}
-	}
 	if changed {
 		m.refreshListRows()
 	}
 }
 
-// InvalidateLibrary removes cached home rows for a library.
-func (m *Model) InvalidateLibrary(libraryID string) {
-	delete(m.itemCache, libraryID)
-	delete(m.recentCache, libraryID)
-}
+// InvalidateLibrary is a no-op for the home screen; kept for interface parity.
+func (m *Model) InvalidateLibrary(libraryID string) {}
 
 func replaceItemsByID(items []abs.LibraryItem, updated abs.LibraryItem) bool {
 	changed := false
@@ -469,25 +450,13 @@ func mergedUpdatedItem(existing, updated abs.LibraryItem) abs.LibraryItem {
 	return replacement
 }
 
-// RemoveItem removes an item from visible and cached items.
+// RemoveItem removes an item from visible items.
 func (m *Model) RemoveItem(itemID string) {
 	changed := false
 	var c bool
 	m.items, changed = removeItemsByID(m.items, itemID)
 	m.recentlyAdded, c = removeItemsByID(m.recentlyAdded, itemID)
 	changed = changed || c
-	for libID, items := range m.itemCache {
-		if newItems, c := removeItemsByID(items, itemID); c {
-			m.itemCache[libID] = newItems
-			changed = true
-		}
-	}
-	for libID, items := range m.recentCache {
-		if newItems, c := removeItemsByID(items, itemID); c {
-			m.recentCache[libID] = newItems
-			changed = true
-		}
-	}
 	if changed {
 		m.refreshListRows()
 	}
@@ -513,18 +482,6 @@ func (m *Model) RemoveEpisode(itemID, episodeID string) {
 	m.items, changed = removeEpisodeFromItems(m.items, itemID, episodeID)
 	m.recentlyAdded, c = removeEpisodeFromItems(m.recentlyAdded, itemID, episodeID)
 	changed = changed || c
-	for libID, items := range m.itemCache {
-		if newItems, c := removeEpisodeFromItems(items, itemID, episodeID); c {
-			m.itemCache[libID] = newItems
-			changed = true
-		}
-	}
-	for libID, items := range m.recentCache {
-		if newItems, c := removeEpisodeFromItems(items, itemID, episodeID); c {
-			m.recentCache[libID] = newItems
-			changed = true
-		}
-	}
 	if changed {
 		m.refreshListRows()
 	}
