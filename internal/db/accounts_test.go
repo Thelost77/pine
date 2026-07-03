@@ -23,7 +23,6 @@ func TestSaveAccount_Insert(t *testing.T) {
 		ID:        "acc-1",
 		ServerURL: "http://localhost:13378",
 		Username:  "admin",
-		Token:     "tok-abc",
 		IsDefault: true,
 	}
 
@@ -44,9 +43,6 @@ func TestSaveAccount_Insert(t *testing.T) {
 	if got.Username != acc.Username {
 		t.Errorf("Username = %q, want %q", got.Username, acc.Username)
 	}
-	if got.Token != acc.Token {
-		t.Errorf("Token = %q, want %q", got.Token, acc.Token)
-	}
 	if !got.IsDefault {
 		t.Error("IsDefault = false, want true")
 	}
@@ -62,7 +58,6 @@ func TestSaveAccount_Upsert(t *testing.T) {
 		ID:        "acc-1",
 		ServerURL: "http://old.server",
 		Username:  "admin",
-		Token:     "tok-old",
 		IsDefault: true,
 	}
 	if err := s.SaveAccount(acc); err != nil {
@@ -70,7 +65,6 @@ func TestSaveAccount_Upsert(t *testing.T) {
 	}
 
 	acc.ServerURL = "http://new.server"
-	acc.Token = "tok-new"
 	if err := s.SaveAccount(acc); err != nil {
 		t.Fatalf("second SaveAccount() error: %v", err)
 	}
@@ -81,9 +75,6 @@ func TestSaveAccount_Upsert(t *testing.T) {
 	}
 	if got.ServerURL != "http://new.server" {
 		t.Errorf("ServerURL = %q, want %q", got.ServerURL, "http://new.server")
-	}
-	if got.Token != "tok-new" {
-		t.Errorf("Token = %q, want %q", got.Token, "tok-new")
 	}
 }
 
@@ -100,7 +91,7 @@ func TestSaveAccount_FirstAccountBecomesDefault(t *testing.T) {
 	s := openTestStore(t)
 
 	// Save without explicitly setting IsDefault
-	acc := Account{ID: "a1", ServerURL: "http://s", Username: "u", Token: "t"}
+	acc := Account{ID: "a1", ServerURL: "http://s", Username: "u"}
 	if err := s.SaveAccount(acc); err != nil {
 		t.Fatal(err)
 	}

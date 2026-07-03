@@ -1,9 +1,14 @@
 package db
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Thelost77/pine/internal/secrets"
+	"github.com/zalando/go-keyring"
+	_ "modernc.org/sqlite"
 )
 
 func TestOpen_CreatesTables(t *testing.T) {
@@ -17,7 +22,7 @@ func TestOpen_CreatesTables(t *testing.T) {
 	defer store.Close()
 
 	// Verify accounts table exists with expected columns
-	rows, err := store.DB.Query(`SELECT id, server_url, username, token, is_default, created_at FROM accounts LIMIT 0`)
+	rows, err := store.DB.Query(`SELECT id, server_url, username, is_default, created_at FROM accounts LIMIT 0`)
 	if err != nil {
 		t.Fatalf("accounts table not created: %v", err)
 	}
@@ -56,7 +61,7 @@ func TestOpen_Idempotent(t *testing.T) {
 	defer store2.Close()
 
 	// Insert a row, verify it survives re-open
-	_, err = store2.DB.Exec(`INSERT INTO accounts (id, server_url, username, token, is_default, created_at) VALUES ('a1', 'http://localhost', 'user', 'tok', 1, datetime('now'))`)
+	_, err = store2.DB.Exec(`INSERT INTO accounts (id, server_url, username, is_default, created_at) VALUES ('a1', 'http://localhost', 'user', 1, datetime('now'))`)
 	if err != nil {
 		t.Fatalf("insert after re-open failed: %v", err)
 	}
@@ -68,6 +73,52 @@ func TestOpen_Idempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 row, got %d", count)
+	}
+}
+
+func TestOpen_MigratesLegacyAccountTokenToKeychain(t *testing.T) {
+	keyring.MockInit()
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error: %v", err)
+	}
+	_, err = legacy.Exec(`CREATE TABLE accounts (
+		id TEXT PRIMARY KEY,
+		server_url TEXT NOT NULL,
+		username TEXT NOT NULL,
+		token TEXT NOT NULL,
+		is_default INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("create legacy accounts: %v", err)
+	}
+	_, err = legacy.Exec(`INSERT INTO accounts (id, server_url, username, token, is_default, created_at)
+		VALUES ('a1', 'https://abs.example.com', 'alice', 'legacy-token', 1, datetime('now'))`)
+	if err != nil {
+		t.Fatalf("insert legacy account: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error: %v", err)
+	}
+	defer store.Close()
+
+	token, err := secrets.GetToken("https://abs.example.com", "alice")
+	if err != nil {
+		t.Fatalf("GetToken() error: %v", err)
+	}
+	if token != "legacy-token" {
+		t.Fatalf("token = %q, want legacy-token", token)
+	}
+	if store.hasColumn("accounts", "token") {
+		t.Fatal("legacy token column still exists")
 	}
 }
 
