@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/Thelost77/pine/internal/secrets"
 )
 
 // Account represents a stored Audiobookshelf server account.
@@ -11,6 +13,7 @@ type Account struct {
 	ID        string
 	ServerURL string
 	Username  string
+	Token     string
 	IsDefault bool
 	CreatedAt time.Time
 }
@@ -31,15 +34,17 @@ func (s *Store) SaveAccount(a Account) error {
 	if a.IsDefault {
 		isDefault = 1
 	}
+	storedToken := secrets.EncodeToken(a.ServerURL, a.Username, a.Token)
 
 	_, err := s.DB.Exec(`
-		INSERT INTO accounts (id, server_url, username, is_default, created_at)
-		VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
+		INSERT INTO accounts (id, server_url, username, token, is_default, created_at)
+		VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
 		ON CONFLICT(id) DO UPDATE SET
 			server_url = excluded.server_url,
 			username   = excluded.username,
+			token      = CASE WHEN excluded.token <> '' THEN excluded.token ELSE accounts.token END,
 			is_default = excluded.is_default
-	`, a.ID, a.ServerURL, a.Username, isDefault, a.ID)
+	`, a.ID, a.ServerURL, a.Username, storedToken, isDefault, a.ID)
 	if err != nil {
 		return fmt.Errorf("saving account: %w", err)
 	}
@@ -50,7 +55,7 @@ func (s *Store) SaveAccount(a Account) error {
 // Returns an error if no default account is set.
 func (s *Store) GetDefaultAccount() (Account, error) {
 	row := s.DB.QueryRow(`
-		SELECT id, server_url, username, is_default, created_at
+		SELECT id, server_url, username, token, is_default, created_at
 		FROM accounts WHERE is_default = 1 LIMIT 1
 	`)
 	return scanAccount(row)
@@ -61,9 +66,14 @@ func scanAccount(row *sql.Row) (Account, error) {
 	var a Account
 	var isDefault int
 	var createdAt string
-	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &isDefault, &createdAt)
+	var storedToken string
+	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &storedToken, &isDefault, &createdAt)
 	if err != nil {
 		return Account{}, fmt.Errorf("scanning account: %w", err)
+	}
+	a.Token, err = secrets.DecodeToken(a.ServerURL, a.Username, storedToken)
+	if err != nil {
+		return Account{}, fmt.Errorf("decoding account token: %w", err)
 	}
 	a.IsDefault = isDefault == 1
 	a.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)

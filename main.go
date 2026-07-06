@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
-	"github.com/Thelost77/pine/internal/secrets"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -44,10 +42,8 @@ func main() {
 		if serverURL == "" {
 			serverURL = cfg.Server.Address
 		}
-		if token, err := secrets.GetToken(serverURL, acct.Username); err == nil && token != "" {
-			absClient = abs.NewClient(serverURL, token)
-		} else if err != nil && !errors.Is(err, secrets.ErrNotFound) {
-			logger.Warn("failed to load token from keychain", "err", err)
+		if acct.Token != "" {
+			absClient = abs.NewClient(serverURL, acct.Token)
 		}
 	}
 	cacheStore := cache.NewStore(store)

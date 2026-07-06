@@ -4,10 +4,10 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/secrets"
-	"github.com/zalando/go-keyring"
 	_ "modernc.org/sqlite"
 )
 
@@ -22,25 +22,25 @@ func TestOpen_CreatesTables(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	// Verify accounts table exists with expected columns
-	rows, err := store.DB.Query(`SELECT id, server_url, username, is_default, created_at FROM accounts LIMIT 0`)
+	rows, err := store.DB.Query(`SELECT id, server_url, username, token, is_default, created_at FROM accounts LIMIT 0`)
 	if err != nil {
 		t.Fatalf("accounts table not created: %v", err)
 	}
-_ = rows.Close()
+	_ = rows.Close()
 
 	// Verify sessions table exists with expected columns
 	rows, err = store.DB.Query(`SELECT id, item_id, session_id, current_time, duration, created_at FROM sessions LIMIT 0`)
 	if err != nil {
 		t.Fatalf("sessions table not created: %v", err)
 	}
-_ = rows.Close()
+	_ = rows.Close()
 
 	// Verify api_cache table exists with expected columns
 	rows, err = store.DB.Query(`SELECT cache_key, data, cached_at, expires_at FROM api_cache LIMIT 0`)
 	if err != nil {
 		t.Fatalf("api_cache table not created: %v", err)
 	}
-_ = rows.Close()
+	_ = rows.Close()
 }
 
 func TestOpen_Idempotent(t *testing.T) {
@@ -76,8 +76,7 @@ func TestOpen_Idempotent(t *testing.T) {
 	}
 }
 
-func TestOpen_MigratesLegacyAccountTokenToKeychain(t *testing.T) {
-	keyring.MockInit()
+func TestOpen_MigratesLegacyAccountTokenToObfuscatedColumn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 
 	legacy, err := sql.Open("sqlite", path)
@@ -110,15 +109,22 @@ func TestOpen_MigratesLegacyAccountTokenToKeychain(t *testing.T) {
 	}
 	defer store.Close()
 
-	token, err := secrets.GetToken("https://abs.example.com", "alice")
+	var storedToken string
+	if err := store.DB.QueryRow(`SELECT token FROM accounts WHERE id = 'a1'`).Scan(&storedToken); err != nil {
+		t.Fatalf("select token: %v", err)
+	}
+	if storedToken == "legacy-token" || strings.Contains(storedToken, "legacy-token") {
+		t.Fatalf("expected obfuscated token, got %q", storedToken)
+	}
+	if !secrets.IsObfuscatedToken(storedToken) {
+		t.Fatalf("expected obfuscated token prefix, got %q", storedToken)
+	}
+	token, err := secrets.DecodeToken("https://abs.example.com", "alice", storedToken)
 	if err != nil {
-		t.Fatalf("GetToken() error: %v", err)
+		t.Fatalf("DecodeToken() error: %v", err)
 	}
 	if token != "legacy-token" {
 		t.Fatalf("token = %q, want legacy-token", token)
-	}
-	if store.hasColumn("accounts", "token") {
-		t.Fatal("legacy token column still exists")
 	}
 }
 

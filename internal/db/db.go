@@ -66,6 +66,7 @@ func (s *Store) migrate() error {
 			id         TEXT PRIMARY KEY,
 			server_url TEXT NOT NULL,
 			username   TEXT NOT NULL,
+			token      TEXT NOT NULL DEFAULT '',
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL
 		)`,
@@ -104,10 +105,13 @@ func (s *Store) migrate() error {
 		logger.Debug("database migration applied", "migration", m.name)
 	}
 
-	if err := s.migrateAccountTokenColumn("token_encrypted"); err != nil {
+	if err := s.ensureAccountTokenColumn(); err != nil {
 		return err
 	}
-	if err := s.migrateAccountTokenColumn("token"); err != nil {
+	if err := s.migrateTokenEncryptedColumn(); err != nil {
+		return err
+	}
+	if err := s.normalizeAccountTokens(); err != nil {
 		return err
 	}
 
@@ -125,35 +129,64 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-func (s *Store) migrateAccountTokenColumn(column string) error {
-	if !s.hasColumn("accounts", column) {
+func (s *Store) ensureAccountTokenColumn() error {
+	if s.hasColumn("accounts", "token") {
 		return nil
 	}
+	if _, err := s.DB.Exec(`ALTER TABLE accounts ADD COLUMN token TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("adding account token column: %w", err)
+	}
+	logger.Info("database migration applied", "migration", "add account token column")
+	return nil
+}
 
-	query := fmt.Sprintf(`SELECT server_url, username, %s FROM accounts WHERE %s <> ''`, column, column)
-	rows, err := s.DB.Query(query)
+func (s *Store) migrateTokenEncryptedColumn() error {
+	if !s.hasColumn("accounts", "token_encrypted") {
+		return nil
+	}
+	if _, err := s.DB.Exec(`UPDATE accounts SET token = token_encrypted WHERE token = '' AND token_encrypted <> ''`); err != nil {
+		return fmt.Errorf("copying legacy encrypted account tokens: %w", err)
+	}
+	logger.Info("database migration applied", "migration", "copy legacy token_encrypted column")
+	return nil
+}
+
+func (s *Store) normalizeAccountTokens() error {
+	rows, err := s.DB.Query(`SELECT id, server_url, username, token FROM accounts WHERE token <> ''`)
 	if err != nil {
-		return fmt.Errorf("querying legacy account tokens: %w", err)
+		return fmt.Errorf("querying account tokens: %w", err)
 	}
 	defer rows.Close()
 
+	type tokenUpdate struct {
+		id    string
+		token string
+	}
+	var updates []tokenUpdate
 	for rows.Next() {
-		var serverURL, username, token string
-		if err := rows.Scan(&serverURL, &username, &token); err != nil {
-			return fmt.Errorf("scanning legacy account token: %w", err)
+		var id, serverURL, username, token string
+		if err := rows.Scan(&id, &serverURL, &username, &token); err != nil {
+			return fmt.Errorf("scanning account token: %w", err)
 		}
-		if err := secrets.SetToken(serverURL, username, token); err != nil {
-			return fmt.Errorf("migrating account token to keychain: %w", err)
+		if secrets.IsObfuscatedToken(token) {
+			continue
 		}
+		updates = append(updates, tokenUpdate{
+			id:    id,
+			token: secrets.EncodeToken(serverURL, username, token),
+		})
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating legacy account tokens: %w", err)
+		return fmt.Errorf("iterating account tokens: %w", err)
 	}
-
-	if err := s.dropAccountTokenColumn(); err != nil {
-		return err
+	for _, update := range updates {
+		if _, err := s.DB.Exec(`UPDATE accounts SET token = ? WHERE id = ?`, update.token, update.id); err != nil {
+			return fmt.Errorf("normalizing account token: %w", err)
+		}
 	}
-	logger.Info("database migration applied", "migration", "move account token to keychain", "column", column)
+	if len(updates) > 0 {
+		logger.Info("database migration applied", "migration", "obfuscate account tokens", "count", len(updates))
+	}
 	return nil
 }
 
@@ -161,36 +194,4 @@ func (s *Store) hasColumn(table, column string) bool {
 	var count int
 	row := s.DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column)
 	return row.Scan(&count) == nil && count > 0
-}
-
-func (s *Store) dropAccountTokenColumn() error {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return fmt.Errorf("starting account token migration: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`CREATE TABLE accounts_new (
-		id         TEXT PRIMARY KEY,
-		server_url TEXT NOT NULL,
-		username   TEXT NOT NULL,
-		is_default INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL
-	)`); err != nil {
-		return fmt.Errorf("creating tokenless accounts table: %w", err)
-	}
-	if _, err := tx.Exec(`INSERT INTO accounts_new (id, server_url, username, is_default, created_at)
-		SELECT id, server_url, username, is_default, created_at FROM accounts`); err != nil {
-		return fmt.Errorf("copying tokenless accounts: %w", err)
-	}
-	if _, err := tx.Exec(`DROP TABLE accounts`); err != nil {
-		return fmt.Errorf("dropping legacy accounts table: %w", err)
-	}
-	if _, err := tx.Exec(`ALTER TABLE accounts_new RENAME TO accounts`); err != nil {
-		return fmt.Errorf("renaming tokenless accounts table: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing account token migration: %w", err)
-	}
-	return nil
 }

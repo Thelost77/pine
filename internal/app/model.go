@@ -20,7 +20,6 @@ import (
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/screens/series"
 	"github.com/Thelost77/pine/internal/screens/serieslist"
-	"github.com/Thelost77/pine/internal/secrets"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -338,13 +337,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.client = cache.NewClient(absClient, m.cacheStore)
 		if m.db != nil {
 			accountID := fmt.Sprintf("%s@%s", msg.ServerURL, msg.Username)
-			if err := secrets.SetToken(msg.ServerURL, msg.Username, msg.Token); err != nil {
-				logger.Warn("failed to save token to keychain", "err", err)
-			}
 			if err := m.db.SaveAccount(db.Account{
 				ID:        accountID,
 				ServerURL: msg.ServerURL,
 				Username:  msg.Username,
+				Token:     msg.Token,
 				IsDefault: true,
 			}); err != nil {
 				logger.Warn("failed to save account", "err", err)

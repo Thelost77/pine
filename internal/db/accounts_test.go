@@ -2,7 +2,10 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Thelost77/pine/internal/secrets"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -23,6 +26,7 @@ func TestSaveAccount_Insert(t *testing.T) {
 		ID:        "acc-1",
 		ServerURL: "http://localhost:13378",
 		Username:  "admin",
+		Token:     "tok-1",
 		IsDefault: true,
 	}
 
@@ -43,11 +47,25 @@ func TestSaveAccount_Insert(t *testing.T) {
 	if got.Username != acc.Username {
 		t.Errorf("Username = %q, want %q", got.Username, acc.Username)
 	}
+	if got.Token != acc.Token {
+		t.Errorf("Token = %q, want %q", got.Token, acc.Token)
+	}
 	if !got.IsDefault {
 		t.Error("IsDefault = false, want true")
 	}
 	if got.CreatedAt.IsZero() {
 		t.Error("CreatedAt should not be zero")
+	}
+
+	var storedToken string
+	if err := s.DB.QueryRow(`SELECT token FROM accounts WHERE id = ?`, acc.ID).Scan(&storedToken); err != nil {
+		t.Fatalf("select stored token: %v", err)
+	}
+	if storedToken == acc.Token || strings.Contains(storedToken, acc.Token) {
+		t.Fatalf("expected obfuscated stored token, got %q", storedToken)
+	}
+	if !secrets.IsObfuscatedToken(storedToken) {
+		t.Fatalf("expected obfuscated token prefix, got %q", storedToken)
 	}
 }
 

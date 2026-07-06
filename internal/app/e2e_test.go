@@ -15,7 +15,6 @@ import (
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
-	"github.com/Thelost77/pine/internal/secrets"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -955,16 +954,13 @@ func TestE2E_SessionPersistence(t *testing.T) {
 		Username:  "alice",
 	})
 
-	// Verify account saved
-	if _, err := store.GetDefaultAccount(); err != nil {
+	// Verify account and token saved
+	acct, err := store.GetDefaultAccount()
+	if err != nil {
 		t.Errorf("expected default account to be saved after login: %v", err)
 	}
-	token, err := secrets.GetToken(srv.URL, "alice")
-	if err != nil {
-		t.Errorf("expected token to be saved in keychain: %v", err)
-	}
-	if token != "jwt-token-e2e" {
-		t.Errorf("keychain token = %q, want jwt-token-e2e", token)
+	if acct.Token != "jwt-token-e2e" {
+		t.Errorf("account token = %q, want jwt-token-e2e", acct.Token)
 	}
 }
 
