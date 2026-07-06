@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/Thelost77/pine/internal/logger"
+	"github.com/Thelost77/pine/internal/secrets"
 	_ "modernc.org/sqlite"
 )
 
@@ -65,7 +66,6 @@ func (s *Store) migrate() error {
 			id         TEXT PRIMARY KEY,
 			server_url TEXT NOT NULL,
 			username   TEXT NOT NULL,
-			token      TEXT NOT NULL,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL
 		)`,
@@ -104,9 +104,11 @@ func (s *Store) migrate() error {
 		logger.Debug("database migration applied", "migration", m.name)
 	}
 
-	// Rename legacy column; ignore error if already renamed or column doesn't exist.
-	if _, err := s.DB.Exec(`ALTER TABLE accounts RENAME COLUMN token_encrypted TO token`); err == nil {
-		logger.Info("database migration applied", "migration", "rename token_encrypted column")
+	if err := s.migrateAccountTokenColumn("token_encrypted"); err != nil {
+		return err
+	}
+	if err := s.migrateAccountTokenColumn("token"); err != nil {
+		return err
 	}
 
 	// Add episode_id column if it doesn't exist (SQLite doesn't support IF NOT EXISTS for ALTER TABLE)
@@ -120,5 +122,75 @@ func (s *Store) migrate() error {
 		logger.Info("database migration applied", "migration", "add episode_id column")
 	}
 
+	return nil
+}
+
+func (s *Store) migrateAccountTokenColumn(column string) error {
+	if !s.hasColumn("accounts", column) {
+		return nil
+	}
+
+	query := fmt.Sprintf(`SELECT server_url, username, %s FROM accounts WHERE %s <> ''`, column, column)
+	rows, err := s.DB.Query(query)
+	if err != nil {
+		return fmt.Errorf("querying legacy account tokens: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var serverURL, username, token string
+		if err := rows.Scan(&serverURL, &username, &token); err != nil {
+			return fmt.Errorf("scanning legacy account token: %w", err)
+		}
+		if err := secrets.SetToken(serverURL, username, token); err != nil {
+			return fmt.Errorf("migrating account token to keychain: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating legacy account tokens: %w", err)
+	}
+
+	if err := s.dropAccountTokenColumn(); err != nil {
+		return err
+	}
+	logger.Info("database migration applied", "migration", "move account token to keychain", "column", column)
+	return nil
+}
+
+func (s *Store) hasColumn(table, column string) bool {
+	var count int
+	row := s.DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column)
+	return row.Scan(&count) == nil && count > 0
+}
+
+func (s *Store) dropAccountTokenColumn() error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("starting account token migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE accounts_new (
+		id         TEXT PRIMARY KEY,
+		server_url TEXT NOT NULL,
+		username   TEXT NOT NULL,
+		is_default INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("creating tokenless accounts table: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO accounts_new (id, server_url, username, is_default, created_at)
+		SELECT id, server_url, username, is_default, created_at FROM accounts`); err != nil {
+		return fmt.Errorf("copying tokenless accounts: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE accounts`); err != nil {
+		return fmt.Errorf("dropping legacy accounts table: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE accounts_new RENAME TO accounts`); err != nil {
+		return fmt.Errorf("renaming tokenless accounts table: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing account token migration: %w", err)
+	}
 	return nil
 }

@@ -11,7 +11,6 @@ type Account struct {
 	ID        string
 	ServerURL string
 	Username  string
-	Token     string
 	IsDefault bool
 	CreatedAt time.Time
 }
@@ -34,14 +33,13 @@ func (s *Store) SaveAccount(a Account) error {
 	}
 
 	_, err := s.DB.Exec(`
-		INSERT INTO accounts (id, server_url, username, token, is_default, created_at)
-		VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
+		INSERT INTO accounts (id, server_url, username, is_default, created_at)
+		VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
 		ON CONFLICT(id) DO UPDATE SET
 			server_url = excluded.server_url,
 			username   = excluded.username,
-			token      = excluded.token,
 			is_default = excluded.is_default
-	`, a.ID, a.ServerURL, a.Username, a.Token, isDefault, a.ID)
+	`, a.ID, a.ServerURL, a.Username, isDefault, a.ID)
 	if err != nil {
 		return fmt.Errorf("saving account: %w", err)
 	}
@@ -52,7 +50,7 @@ func (s *Store) SaveAccount(a Account) error {
 // Returns an error if no default account is set.
 func (s *Store) GetDefaultAccount() (Account, error) {
 	row := s.DB.QueryRow(`
-		SELECT id, server_url, username, token, is_default, created_at
+		SELECT id, server_url, username, is_default, created_at
 		FROM accounts WHERE is_default = 1 LIMIT 1
 	`)
 	return scanAccount(row)
@@ -63,7 +61,7 @@ func scanAccount(row *sql.Row) (Account, error) {
 	var a Account
 	var isDefault int
 	var createdAt string
-	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &a.Token, &isDefault, &createdAt)
+	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &isDefault, &createdAt)
 	if err != nil {
 		return Account{}, fmt.Errorf("scanning account: %w", err)
 	}
