@@ -168,12 +168,17 @@ func (s *Store) normalizeAccountTokens() error {
 		if err := rows.Scan(&id, &serverURL, &username, &token); err != nil {
 			return fmt.Errorf("scanning account token: %w", err)
 		}
-		if secrets.IsObfuscatedToken(token) {
+		if secrets.IsCurrentToken(token) {
+			continue
+		}
+		decodedToken, err := secrets.DecodeToken(serverURL, username, token)
+		if err != nil {
+			logger.Warn("skipping account token normalization", "account", id, "err", err)
 			continue
 		}
 		updates = append(updates, tokenUpdate{
 			id:    id,
-			token: secrets.EncodeToken(serverURL, username, token),
+			token: secrets.EncodeToken(serverURL, username, decodedToken),
 		})
 	}
 	if err := rows.Err(); err != nil {

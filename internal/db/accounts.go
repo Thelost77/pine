@@ -61,6 +61,14 @@ func (s *Store) GetDefaultAccount() (Account, error) {
 	return scanAccount(row)
 }
 
+// ClearDefaultAccountToken removes the stored auth token for the default account.
+func (s *Store) ClearDefaultAccountToken() error {
+	if _, err := s.DB.Exec(`UPDATE accounts SET token = '' WHERE is_default = 1`); err != nil {
+		return fmt.Errorf("clearing default account token: %w", err)
+	}
+	return nil
+}
+
 // scanAccount scans a single account from a *sql.Row.
 func scanAccount(row *sql.Row) (Account, error) {
 	var a Account

@@ -119,6 +119,9 @@ func TestOpen_MigratesLegacyAccountTokenToObfuscatedColumn(t *testing.T) {
 	if !secrets.IsObfuscatedToken(storedToken) {
 		t.Fatalf("expected obfuscated token prefix, got %q", storedToken)
 	}
+	if !secrets.IsCurrentToken(storedToken) {
+		t.Fatalf("expected current token prefix, got %q", storedToken)
+	}
 	token, err := secrets.DecodeToken("https://abs.example.com", "alice", storedToken)
 	if err != nil {
 		t.Fatalf("DecodeToken() error: %v", err)

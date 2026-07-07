@@ -67,6 +67,9 @@ func TestSaveAccount_Insert(t *testing.T) {
 	if !secrets.IsObfuscatedToken(storedToken) {
 		t.Fatalf("expected obfuscated token prefix, got %q", storedToken)
 	}
+	if !secrets.IsCurrentToken(storedToken) {
+		t.Fatalf("expected current token prefix, got %q", storedToken)
+	}
 }
 
 func TestSaveAccount_Upsert(t *testing.T) {
@@ -120,5 +123,31 @@ func TestSaveAccount_FirstAccountBecomesDefault(t *testing.T) {
 	}
 	if got.ID != "a1" {
 		t.Errorf("default ID = %q, want %q", got.ID, "a1")
+	}
+}
+
+func TestClearDefaultAccountToken(t *testing.T) {
+	s := openTestStore(t)
+
+	acc := Account{
+		ID:        "acc-1",
+		ServerURL: "http://localhost:13378",
+		Username:  "admin",
+		Token:     "tok-1",
+		IsDefault: true,
+	}
+	if err := s.SaveAccount(acc); err != nil {
+		t.Fatalf("SaveAccount() error: %v", err)
+	}
+	if err := s.ClearDefaultAccountToken(); err != nil {
+		t.Fatalf("ClearDefaultAccountToken() error: %v", err)
+	}
+
+	var storedToken string
+	if err := s.DB.QueryRow(`SELECT token FROM accounts WHERE id = ?`, acc.ID).Scan(&storedToken); err != nil {
+		t.Fatalf("select stored token: %v", err)
+	}
+	if storedToken != "" {
+		t.Fatalf("stored token = %q, want empty", storedToken)
 	}
 }
