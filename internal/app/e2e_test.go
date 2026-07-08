@@ -954,13 +954,9 @@ func TestE2E_SessionPersistence(t *testing.T) {
 		Username:  "alice",
 	})
 
-	// Verify account and token saved
-	acct, err := store.GetDefaultAccount()
-	if err != nil {
+	// Verify account saved
+	if _, err := store.GetDefaultAccount(); err != nil {
 		t.Errorf("expected default account to be saved after login: %v", err)
-	}
-	if acct.Token != "jwt-token-e2e" {
-		t.Errorf("account token = %q, want jwt-token-e2e", acct.Token)
 	}
 }
 

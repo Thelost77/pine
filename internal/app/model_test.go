@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
-	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/home"
@@ -1783,44 +1781,6 @@ func TestUnauthorizedPlaybackErrorRedirectsToLogin(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected login init command after 401 redirect")
-	}
-}
-
-func TestUnauthorizedPlaybackErrorClearsStoredToken(t *testing.T) {
-	store, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open() error: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-
-	if err := store.SaveAccount(db.Account{
-		ID:        "acc-1",
-		ServerURL: "https://abs.example.com",
-		Username:  "alice",
-		Token:     "tok-1",
-		IsDefault: true,
-	}); err != nil {
-		t.Fatalf("SaveAccount() error: %v", err)
-	}
-
-	m := newTestModelAuthenticated()
-	m.db = store
-	m.screen = ScreenHome
-
-	result, _ := m.Update(PlaybackErrorMsg{
-		Err: fmt.Errorf("unexpected status 401: unauthorized"),
-	})
-	rm := result.(Model)
-	if rm.screen != ScreenLogin {
-		t.Errorf("screen = %v, want ScreenLogin after 401 playback error", rm.screen)
-	}
-
-	var storedToken string
-	if err := store.DB.QueryRow(`SELECT token FROM accounts WHERE id = 'acc-1'`).Scan(&storedToken); err != nil {
-		t.Fatalf("select stored token: %v", err)
-	}
-	if storedToken != "" {
-		t.Fatalf("stored token = %q, want empty after 401", storedToken)
 	}
 }
 

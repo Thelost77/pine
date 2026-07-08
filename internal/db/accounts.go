@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	"github.com/Thelost77/pine/internal/secrets"
 )
 
 // Account represents a stored Audiobookshelf server account.
@@ -34,7 +32,6 @@ func (s *Store) SaveAccount(a Account) error {
 	if a.IsDefault {
 		isDefault = 1
 	}
-	storedToken := secrets.EncodeToken(a.ServerURL, a.Username, a.Token)
 
 	_, err := s.DB.Exec(`
 		INSERT INTO accounts (id, server_url, username, token, is_default, created_at)
@@ -42,9 +39,9 @@ func (s *Store) SaveAccount(a Account) error {
 		ON CONFLICT(id) DO UPDATE SET
 			server_url = excluded.server_url,
 			username   = excluded.username,
-			token      = CASE WHEN excluded.token <> '' THEN excluded.token ELSE accounts.token END,
+			token      = excluded.token,
 			is_default = excluded.is_default
-	`, a.ID, a.ServerURL, a.Username, storedToken, isDefault, a.ID)
+	`, a.ID, a.ServerURL, a.Username, a.Token, isDefault, a.ID)
 	if err != nil {
 		return fmt.Errorf("saving account: %w", err)
 	}
@@ -61,27 +58,14 @@ func (s *Store) GetDefaultAccount() (Account, error) {
 	return scanAccount(row)
 }
 
-// ClearDefaultAccountToken removes the stored auth token for the default account.
-func (s *Store) ClearDefaultAccountToken() error {
-	if _, err := s.DB.Exec(`UPDATE accounts SET token = '' WHERE is_default = 1`); err != nil {
-		return fmt.Errorf("clearing default account token: %w", err)
-	}
-	return nil
-}
-
 // scanAccount scans a single account from a *sql.Row.
 func scanAccount(row *sql.Row) (Account, error) {
 	var a Account
 	var isDefault int
 	var createdAt string
-	var storedToken string
-	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &storedToken, &isDefault, &createdAt)
+	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &a.Token, &isDefault, &createdAt)
 	if err != nil {
 		return Account{}, fmt.Errorf("scanning account: %w", err)
-	}
-	a.Token, err = secrets.DecodeToken(a.ServerURL, a.Username, storedToken)
-	if err != nil {
-		return Account{}, fmt.Errorf("decoding account token: %w", err)
 	}
 	a.IsDefault = isDefault == 1
 	a.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)

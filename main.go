@@ -37,14 +37,12 @@ func main() {
 	defer func() { _ = store.Close() }()
 
 	var absClient *abs.Client
-	if acct, err := store.GetDefaultAccount(); err == nil {
+	if acct, err := store.GetDefaultAccount(); err == nil && acct.Token != "" {
 		serverURL := acct.ServerURL
 		if serverURL == "" {
 			serverURL = cfg.Server.Address
 		}
-		if acct.Token != "" {
-			absClient = abs.NewClient(serverURL, acct.Token)
-		}
+		absClient = abs.NewClient(serverURL, acct.Token)
 	}
 	cacheStore := cache.NewStore(store)
 	var cachedClient *cache.Client

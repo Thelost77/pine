@@ -306,11 +306,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Error("app error", "err", msg.Err, "screen", m.screen)
 		if components.IsUnauthorized(msg.Err) {
 			logger.Warn("401 unauthorized, redirecting to login")
-			if m.db != nil {
-				if err := m.db.ClearDefaultAccountToken(); err != nil {
-					logger.Warn("failed to clear stored account token", "err", err)
-				}
-			}
 			m.client = nil
 			m.searchCache = search.NewCache(nil, nil)
 			m.screen = ScreenLogin
@@ -997,11 +992,6 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	logger.Warn("401 unauthorized, redirecting to login")
-	if m.db != nil {
-		if err := m.db.ClearDefaultAccountToken(); err != nil {
-			logger.Warn("failed to clear stored account token", "err", err)
-		}
-	}
 	m.client = nil
 	m.searchCache = search.NewCache(nil, nil)
 	m.screen = ScreenLogin

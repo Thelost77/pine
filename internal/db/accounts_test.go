@@ -2,10 +2,7 @@ package db
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/Thelost77/pine/internal/secrets"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -26,7 +23,7 @@ func TestSaveAccount_Insert(t *testing.T) {
 		ID:        "acc-1",
 		ServerURL: "http://localhost:13378",
 		Username:  "admin",
-		Token:     "tok-1",
+		Token:     "tok-abc",
 		IsDefault: true,
 	}
 
@@ -56,20 +53,6 @@ func TestSaveAccount_Insert(t *testing.T) {
 	if got.CreatedAt.IsZero() {
 		t.Error("CreatedAt should not be zero")
 	}
-
-	var storedToken string
-	if err := s.DB.QueryRow(`SELECT token FROM accounts WHERE id = ?`, acc.ID).Scan(&storedToken); err != nil {
-		t.Fatalf("select stored token: %v", err)
-	}
-	if storedToken == acc.Token || strings.Contains(storedToken, acc.Token) {
-		t.Fatalf("expected obfuscated stored token, got %q", storedToken)
-	}
-	if !secrets.IsObfuscatedToken(storedToken) {
-		t.Fatalf("expected obfuscated token prefix, got %q", storedToken)
-	}
-	if !secrets.IsCurrentToken(storedToken) {
-		t.Fatalf("expected current token prefix, got %q", storedToken)
-	}
 }
 
 func TestSaveAccount_Upsert(t *testing.T) {
@@ -79,6 +62,7 @@ func TestSaveAccount_Upsert(t *testing.T) {
 		ID:        "acc-1",
 		ServerURL: "http://old.server",
 		Username:  "admin",
+		Token:     "tok-old",
 		IsDefault: true,
 	}
 	if err := s.SaveAccount(acc); err != nil {
@@ -86,6 +70,7 @@ func TestSaveAccount_Upsert(t *testing.T) {
 	}
 
 	acc.ServerURL = "http://new.server"
+	acc.Token = "tok-new"
 	if err := s.SaveAccount(acc); err != nil {
 		t.Fatalf("second SaveAccount() error: %v", err)
 	}
@@ -96,6 +81,9 @@ func TestSaveAccount_Upsert(t *testing.T) {
 	}
 	if got.ServerURL != "http://new.server" {
 		t.Errorf("ServerURL = %q, want %q", got.ServerURL, "http://new.server")
+	}
+	if got.Token != "tok-new" {
+		t.Errorf("Token = %q, want %q", got.Token, "tok-new")
 	}
 }
 
@@ -112,7 +100,7 @@ func TestSaveAccount_FirstAccountBecomesDefault(t *testing.T) {
 	s := openTestStore(t)
 
 	// Save without explicitly setting IsDefault
-	acc := Account{ID: "a1", ServerURL: "http://s", Username: "u"}
+	acc := Account{ID: "a1", ServerURL: "http://s", Username: "u", Token: "t"}
 	if err := s.SaveAccount(acc); err != nil {
 		t.Fatal(err)
 	}
@@ -123,31 +111,5 @@ func TestSaveAccount_FirstAccountBecomesDefault(t *testing.T) {
 	}
 	if got.ID != "a1" {
 		t.Errorf("default ID = %q, want %q", got.ID, "a1")
-	}
-}
-
-func TestClearDefaultAccountToken(t *testing.T) {
-	s := openTestStore(t)
-
-	acc := Account{
-		ID:        "acc-1",
-		ServerURL: "http://localhost:13378",
-		Username:  "admin",
-		Token:     "tok-1",
-		IsDefault: true,
-	}
-	if err := s.SaveAccount(acc); err != nil {
-		t.Fatalf("SaveAccount() error: %v", err)
-	}
-	if err := s.ClearDefaultAccountToken(); err != nil {
-		t.Fatalf("ClearDefaultAccountToken() error: %v", err)
-	}
-
-	var storedToken string
-	if err := s.DB.QueryRow(`SELECT token FROM accounts WHERE id = ?`, acc.ID).Scan(&storedToken); err != nil {
-		t.Fatalf("select stored token: %v", err)
-	}
-	if storedToken != "" {
-		t.Fatalf("stored token = %q, want empty", storedToken)
 	}
 }

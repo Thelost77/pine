@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/Thelost77/pine/internal/logger"
-	"github.com/Thelost77/pine/internal/secrets"
 	_ "modernc.org/sqlite"
 )
 
@@ -66,7 +65,7 @@ func (s *Store) migrate() error {
 			id         TEXT PRIMARY KEY,
 			server_url TEXT NOT NULL,
 			username   TEXT NOT NULL,
-			token      TEXT NOT NULL DEFAULT '',
+			token      TEXT NOT NULL,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL
 		)`,
@@ -105,14 +104,9 @@ func (s *Store) migrate() error {
 		logger.Debug("database migration applied", "migration", m.name)
 	}
 
-	if err := s.ensureAccountTokenColumn(); err != nil {
-		return err
-	}
-	if err := s.migrateTokenEncryptedColumn(); err != nil {
-		return err
-	}
-	if err := s.normalizeAccountTokens(); err != nil {
-		return err
+	// Rename legacy column; ignore error if already renamed or column doesn't exist.
+	if _, err := s.DB.Exec(`ALTER TABLE accounts RENAME COLUMN token_encrypted TO token`); err == nil {
+		logger.Info("database migration applied", "migration", "rename token_encrypted column")
 	}
 
 	// Add episode_id column if it doesn't exist (SQLite doesn't support IF NOT EXISTS for ALTER TABLE)
@@ -127,76 +121,4 @@ func (s *Store) migrate() error {
 	}
 
 	return nil
-}
-
-func (s *Store) ensureAccountTokenColumn() error {
-	if s.hasColumn("accounts", "token") {
-		return nil
-	}
-	if _, err := s.DB.Exec(`ALTER TABLE accounts ADD COLUMN token TEXT NOT NULL DEFAULT ''`); err != nil {
-		return fmt.Errorf("adding account token column: %w", err)
-	}
-	logger.Info("database migration applied", "migration", "add account token column")
-	return nil
-}
-
-func (s *Store) migrateTokenEncryptedColumn() error {
-	if !s.hasColumn("accounts", "token_encrypted") {
-		return nil
-	}
-	if _, err := s.DB.Exec(`UPDATE accounts SET token = token_encrypted WHERE token = '' AND token_encrypted <> ''`); err != nil {
-		return fmt.Errorf("copying legacy encrypted account tokens: %w", err)
-	}
-	logger.Info("database migration applied", "migration", "copy legacy token_encrypted column")
-	return nil
-}
-
-func (s *Store) normalizeAccountTokens() error {
-	rows, err := s.DB.Query(`SELECT id, server_url, username, token FROM accounts WHERE token <> ''`)
-	if err != nil {
-		return fmt.Errorf("querying account tokens: %w", err)
-	}
-	defer rows.Close()
-
-	type tokenUpdate struct {
-		id    string
-		token string
-	}
-	var updates []tokenUpdate
-	for rows.Next() {
-		var id, serverURL, username, token string
-		if err := rows.Scan(&id, &serverURL, &username, &token); err != nil {
-			return fmt.Errorf("scanning account token: %w", err)
-		}
-		if secrets.IsCurrentToken(token) {
-			continue
-		}
-		decodedToken, err := secrets.DecodeToken(serverURL, username, token)
-		if err != nil {
-			logger.Warn("skipping account token normalization", "account", id, "err", err)
-			continue
-		}
-		updates = append(updates, tokenUpdate{
-			id:    id,
-			token: secrets.EncodeToken(serverURL, username, decodedToken),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating account tokens: %w", err)
-	}
-	for _, update := range updates {
-		if _, err := s.DB.Exec(`UPDATE accounts SET token = ? WHERE id = ?`, update.token, update.id); err != nil {
-			return fmt.Errorf("normalizing account token: %w", err)
-		}
-	}
-	if len(updates) > 0 {
-		logger.Info("database migration applied", "migration", "obfuscate account tokens", "count", len(updates))
-	}
-	return nil
-}
-
-func (s *Store) hasColumn(table, column string) bool {
-	var count int
-	row := s.DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column)
-	return row.Scan(&count) == nil && count > 0
 }
