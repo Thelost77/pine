@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,11 +11,6 @@ func TestLoadEmptyPathReturnsDefaults(t *testing.T) {
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load('') returned error: %v", err)
-	}
-
-	// Server defaults
-	if cfg.Server.Address != "" {
-		t.Errorf("expected empty server address, got %q", cfg.Server.Address)
 	}
 
 	// Player defaults
@@ -70,9 +66,6 @@ func TestLoadPartialTOMLMergesWithDefaults(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	toml := `
-[server]
-address = "https://my-abs.example.com"
-
 [player]
 speed = 1.5
 `
@@ -85,10 +78,6 @@ speed = 1.5
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	// Overridden values
-	if cfg.Server.Address != "https://my-abs.example.com" {
-		t.Errorf("expected overridden address, got %q", cfg.Server.Address)
-	}
 	if cfg.Player.Speed != 1.5 {
 		t.Errorf("expected overridden speed 1.5, got %f", cfg.Player.Speed)
 	}
@@ -110,9 +99,6 @@ func TestLoadFullTOMLOverridesAll(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	toml := `
-[server]
-address = "https://custom.example.com"
-
 [player]
 speed = 2.0
 seek_seconds = 30
@@ -137,9 +123,6 @@ info = "#00ffff"
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if cfg.Server.Address != "https://custom.example.com" {
-		t.Errorf("expected custom address, got %q", cfg.Server.Address)
-	}
 	if cfg.Player.Speed != 2.0 {
 		t.Errorf("expected speed 2.0, got %f", cfg.Player.Speed)
 	}
@@ -165,6 +148,73 @@ func TestLoadInvalidTOMLReturnsError(t *testing.T) {
 	_, err := Load(path)
 	if err == nil {
 		t.Error("expected error for invalid TOML, got nil")
+	}
+}
+
+func TestEnsureExistsCreatesDefaultConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	cfg := Default()
+	if err := EnsureExists(path, cfg); err != nil {
+		t.Fatalf("EnsureExists returned error: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("expected config file: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("expected mode 0600, got %o", info.Mode().Perm())
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Theme.Accent != cfg.Theme.Accent {
+		t.Fatalf("expected default accent %q, got %q", cfg.Theme.Accent, loaded.Theme.Accent)
+	}
+}
+
+func TestEnsureExistsDoesNotOverwriteExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	data := []byte("[player]\nspeed = 1.5\n")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	if err := EnsureExists(path, Default()); err != nil {
+		t.Fatalf("EnsureExists returned error: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	if string(got) != string(data) {
+		t.Fatalf("existing config was overwritten: %q", string(got))
+	}
+}
+
+func TestSaveOmitsLegacyServerConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := Save(path, Default()); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	if string(got) == "" || filepath.Base(path) != "config.toml" {
+		t.Fatalf("unexpected empty config output")
+	}
+	if strings.Contains(string(got), "[server]") || strings.Contains(string(got), "address") {
+		t.Fatalf("expected no legacy server config, got:\n%s", string(got))
 	}
 }
 

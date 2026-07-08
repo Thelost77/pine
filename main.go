@@ -22,9 +22,14 @@ func main() {
 	logger.Info("log file", "path", logger.Path())
 
 	cfgDir := config.ConfigDir()
-	cfg, err := config.Load(filepath.Join(cfgDir, "config.toml"))
+	cfgPath := filepath.Join(cfgDir, "config.toml")
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := config.EnsureExists(cfgPath, cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error creating config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -38,11 +43,7 @@ func main() {
 
 	var absClient *abs.Client
 	if acct, err := store.GetDefaultAccount(); err == nil && acct.Token != "" {
-		serverURL := acct.ServerURL
-		if serverURL == "" {
-			serverURL = cfg.Server.Address
-		}
-		absClient = abs.NewClient(serverURL, acct.Token)
+		absClient = abs.NewClient(acct.ServerURL, acct.Token)
 	}
 	cacheStore := cache.NewStore(store)
 	var cachedClient *cache.Client

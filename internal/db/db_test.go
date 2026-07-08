@@ -71,6 +71,37 @@ func TestOpen_Idempotent(t *testing.T) {
 	}
 }
 
+func TestOpen_ClearsObfuscatedAccountTokens(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error: %v", err)
+	}
+	_, err = store.DB.Exec(`INSERT INTO accounts (id, server_url, username, token, is_default, created_at) VALUES ('a1', 'http://localhost', 'user', 'pine:v2:bad', 1, datetime('now'))`)
+	if err != nil {
+		t.Fatalf("insert obfuscated token failed: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	store, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	var token string
+	if err := store.DB.QueryRow(`SELECT token FROM accounts WHERE id = 'a1'`).Scan(&token); err != nil {
+		t.Fatalf("select token: %v", err)
+	}
+	if token != "" {
+		t.Fatalf("token = %q, want empty", token)
+	}
+}
+
 func TestOpen_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "test.db")

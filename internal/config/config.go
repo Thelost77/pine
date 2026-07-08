@@ -1,16 +1,13 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
-
-type ServerConfig struct {
-	Address string `toml:"address"`
-}
 
 type PlayerConfig struct {
 	Speed       float64 `toml:"speed"`
@@ -46,7 +43,6 @@ type KeybindsConfig struct {
 }
 
 type Config struct {
-	Server   ServerConfig   `toml:"server"`
 	Player   PlayerConfig   `toml:"player"`
 	Theme    ThemeConfig    `toml:"theme"`
 	Keybinds KeybindsConfig `toml:"keybinds"`
@@ -109,6 +105,32 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// Save writes a Config struct to path in TOML format.
+func Save(path string, cfg Config) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0600)
+}
+
+// EnsureExists creates a default config file when path does not exist.
+func EnsureExists(path string, cfg Config) error {
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return Save(path, cfg)
 }
 
 // ConfigDir returns the abs-cli configuration directory path.

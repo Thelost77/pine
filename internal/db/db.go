@@ -109,6 +109,11 @@ func (s *Store) migrate() error {
 		logger.Info("database migration applied", "migration", "rename token_encrypted column")
 	}
 
+	if _, err := s.DB.Exec(`UPDATE accounts SET token = '' WHERE token LIKE 'pine:%'`); err != nil {
+		logger.Error("database migration failed", "migration", "clear obfuscated account tokens", "err", err)
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
 	// Add episode_id column if it doesn't exist (SQLite doesn't support IF NOT EXISTS for ALTER TABLE)
 	var hasEpisodeID bool
 	row := s.DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'episode_id'`)
