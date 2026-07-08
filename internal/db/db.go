@@ -32,6 +32,11 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("restricting database file permissions: %w", err)
+	}
+
 	// Enable WAL mode for better concurrent access
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
 		_ = db.Close()

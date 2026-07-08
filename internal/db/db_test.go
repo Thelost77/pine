@@ -112,7 +112,14 @@ func TestOpen_CreatesFile(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
 		t.Fatal("database file was not created")
+	}
+	if err != nil {
+		t.Fatalf("os.Stat() error: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("database file mode = %o, want 0600", mode)
 	}
 }
