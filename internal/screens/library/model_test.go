@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -300,6 +301,28 @@ func TestLibraryListItemFilterValue(t *testing.T) {
 	}}
 	if item.FilterValue() != "My Book" {
 		t.Errorf("FilterValue() = %q, want 'My Book'", item.FilterValue())
+	}
+}
+
+func TestLibraryListItemFilterValue_PodcastEpisode(t *testing.T) {
+	item := libraryListItem{
+		kind: rowKindItem,
+		Item: abs.LibraryItem{
+			MediaType: "podcast",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{Title: "Daily News"},
+			},
+			RecentEpisode: &abs.PodcastEpisode{
+				Title: "Charlie",
+			},
+		},
+	}
+	fv := item.FilterValue()
+	if !strings.Contains(strings.ToLower(fv), "charlie") {
+		t.Errorf("FilterValue() = %q, want it to contain 'charlie'", fv)
+	}
+	if !strings.Contains(strings.ToLower(fv), "daily news") {
+		t.Errorf("FilterValue() = %q, want it to contain 'daily news'", fv)
 	}
 }
 

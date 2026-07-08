@@ -92,6 +92,7 @@ func TestPlayerInterfaceCompliance(t *testing.T) {
 func TestConnect(t *testing.T) {
 	mc := newMockConn()
 	m := newTestMpv(mc)
+	m.cmd = &exec.Cmd{}
 
 	if err := m.Connect(); err != nil {
 		t.Fatalf("Connect() error: %v", err)
@@ -105,6 +106,7 @@ func TestConnectError(t *testing.T) {
 	mc := newMockConn()
 	mc.openErr = fmt.Errorf("socket not found")
 	m := newTestMpv(mc)
+	m.cmd = &exec.Cmd{}
 
 	if err := m.Connect(); err == nil {
 		t.Fatal("expected error from Connect()")
@@ -112,9 +114,43 @@ func TestConnectError(t *testing.T) {
 }
 
 func TestConnectNilConn(t *testing.T) {
-	m := &Mpv{}
+	m := &Mpv{cmd: &exec.Cmd{}}
 	if err := m.Connect(); err == nil {
 		t.Fatal("expected error when conn is nil")
+	}
+}
+
+func TestConnectNilCmd(t *testing.T) {
+	mc := newMockConn()
+	m := newTestMpv(mc)
+	m.cmd = nil
+
+	err := m.Connect()
+	if err == nil {
+		t.Fatal("expected error when cmd is nil")
+	}
+	if err.Error() != "mpv process is not running (exited early during launch)" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestConnectProcessExited(t *testing.T) {
+	mc := newMockConn()
+	m := newTestMpv(mc)
+	cmd := exec.Command("true")
+	_ = cmd.Run()
+	m.cmd = cmd
+
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		t.Skip("skipping because command did not exit as expected")
+	}
+
+	err := m.Connect()
+	if err == nil {
+		t.Fatal("expected error when cmd has exited")
+	}
+	if err.Error() != "mpv process is not running (exited early during launch)" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

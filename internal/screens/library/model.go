@@ -152,7 +152,7 @@ func New(styles ui.Styles, client *cache.Client, searchCache *search.Cache, libr
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = "Library"
 	l.SetShowStatusBar(true)
-	l.SetFilteringEnabled(false)
+	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
 	l.SetItems(buildSkeletonRows(styles))
@@ -334,6 +334,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, m.keys.Back):
+			if m.HasActiveFilter() {
+				m.list.ResetFilter()
+				return m, nil
+			}
 			return m, func() tea.Msg { return GoBackMsg{} }
 		case key.Matches(msg, m.keys.Series):
 			if m.SelectedLibraryMediaType() == "book" {
@@ -757,7 +761,23 @@ func (i libraryListItem) FilterValue() string {
 	if i.kind != rowKindItem {
 		return ""
 	}
-	return i.Item.Media.Metadata.Title
+	var parts []string
+	if title := i.Title(); title != "" {
+		parts = append(parts, title)
+	}
+	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil {
+		if show := i.Item.Media.Metadata.Title; show != "" && show != i.Title() {
+			parts = append(parts, show)
+		}
+	} else {
+		if author := i.Item.Media.Metadata.DisplayAuthor(); author != "" && author != "Unknown author" {
+			parts = append(parts, author)
+		}
+	}
+	if ps := i.Item.Media.Metadata.PrimarySeries(); ps != nil && ps.Name != "" {
+		parts = append(parts, ps.Name)
+	}
+	return strings.Join(parts, " ")
 }
 
 // Page returns the current page number.
@@ -791,4 +811,12 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 		)
 	}
 	return items
+}
+
+func (m Model) IsFiltering() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m Model) HasActiveFilter() bool {
+	return m.list.FilterValue() != "" || m.list.FilterState() == list.FilterApplied
 }

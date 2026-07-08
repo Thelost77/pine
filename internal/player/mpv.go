@@ -150,6 +150,15 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders
 
 // Connect opens the IPC connection to mpv.
 func (m *Mpv) Connect() error {
+	m.procMu.Lock()
+	cmd := m.cmd
+	m.procMu.Unlock()
+
+	// If process already exited or was never started, fail immediately without retrying
+	if cmd == nil || (cmd.ProcessState != nil && cmd.ProcessState.Exited()) {
+		return fmt.Errorf("mpv process is not running (exited early during launch)")
+	}
+
 	if m.conn == nil {
 		return fmt.Errorf("no connection: call Launch first")
 	}

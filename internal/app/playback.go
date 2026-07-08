@@ -26,6 +26,34 @@ func (m Model) isPlaying() bool {
 	return m.sessionID != ""
 }
 
+func (m Model) isFiltering() bool {
+	switch m.screen {
+	case ScreenHome:
+		return m.home.IsFiltering()
+	case ScreenLibrary:
+		return m.library.IsFiltering()
+	case ScreenSeries:
+		return m.series.IsFiltering()
+	case ScreenSeriesList:
+		return m.seriesList.IsFiltering()
+	}
+	return false
+}
+
+func (m Model) hasActiveFilter() bool {
+	switch m.screen {
+	case ScreenHome:
+		return m.home.HasActiveFilter()
+	case ScreenLibrary:
+		return m.library.HasActiveFilter()
+	case ScreenSeries:
+		return m.series.HasActiveFilter()
+	case ScreenSeriesList:
+		return m.seriesList.HasActiveFilter()
+	}
+	return false
+}
+
 // handlePlayCmd initiates a play session by calling the ABS API.
 // If the same item is already playing, toggles pause.
 // If a different item is playing, stops it first and starts the new one.

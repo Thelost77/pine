@@ -89,7 +89,7 @@ func New(styles ui.Styles, client *cache.Client, libraryID, libraryName string) 
 		l.Title = "Series — " + libraryName
 	}
 	l.SetShowStatusBar(true)
-	l.SetFilteringEnabled(false)
+	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
 
@@ -129,8 +129,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
 		switch {
 		case key.Matches(msg, m.keys.Back):
+			if m.HasActiveFilter() {
+				m.list.ResetFilter()
+				return m, nil
+			}
 			return m, func() tea.Msg { return BackMsg{} }
 		case key.Matches(msg, m.keys.Enter):
 			if sel, ok := m.list.SelectedItem().(seriesListItem); ok {
@@ -246,4 +253,12 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 		{Label: "Context Actions", IsHeader: true},
 		{Label: "Open Selected", Action: components.ActionOpenDetail, LibraryID: m.libraryID, ItemID: sel.series.ID, Payload: "series"},
 	}
+}
+
+func (m Model) IsFiltering() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m Model) HasActiveFilter() bool {
+	return m.list.FilterValue() != "" || m.list.FilterState() == list.FilterApplied
 }

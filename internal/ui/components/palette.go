@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -507,14 +508,10 @@ func filterPaletteItems(items []PaletteItem, query string) []PaletteItem {
 }
 
 func matchQuery(label, query string) bool {
-	label = strings.ToLower(label)
-	qi := 0
-	for _, r := range label {
-		if qi < len(query) && r == rune(query[qi]) {
-			qi++
-		}
+	if query == "" {
+		return true
 	}
-	return qi == len(query)
+	return len(fuzzy.Find(query, []string{label})) > 0
 }
 
 func ansiTruncate(s string, maxWidth int, ellipsis string) string {

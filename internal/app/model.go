@@ -731,7 +731,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if key.Matches(msg, m.keys.Help) {
+		if !m.isFiltering() && key.Matches(msg, m.keys.Help) {
 			m.help.Toggle()
 			return m, nil
 		}
@@ -794,18 +794,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.propagateSize()
 			return m, nil
 		}
-		if key.Matches(msg, m.keys.GlobalPalette) {
+		if !m.isFiltering() && key.Matches(msg, m.keys.GlobalPalette) {
 			m.openGlobalPalette()
 			return m, nil
 		}
-		if key.Matches(msg, m.keys.ChapterOverlay) {
+		if !m.isFiltering() && key.Matches(msg, m.keys.ChapterOverlay) {
 			if m.canOpenChapterOverlay() {
 				m.openChapterOverlay()
 			}
 			return m, nil
 		}
 		// Global quit: q always quits the app.
-		if m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
+		if !m.isFiltering() && m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
 			if m.isPlaying() {
 				m, stopCmd := m.stopPlayback()
 				return m, tea.Batch(stopCmd, tea.Quit)
@@ -813,7 +813,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		// Global back: esc/left goes back but never quits.
-		if m.screen != ScreenLogin {
+		if m.screen != ScreenLogin && !m.isFiltering() && !m.hasActiveFilter() {
 			isConfirmVisible := m.screen == ScreenDetail && m.detail.ConfirmOverlayVisible()
 			if !isConfirmVisible && key.Matches(msg, m.keys.Back) {
 				if len(m.backStack) > 0 {
@@ -823,7 +823,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// When playing, playback keys take priority over screen keys.
-		if m.isPlaying() {
+		if !m.isFiltering() && m.isPlaying() {
 			if key.Matches(msg, m.keys.NextInQueue) {
 				return m.skipToNextQueued()
 			}

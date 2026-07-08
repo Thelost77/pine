@@ -844,3 +844,25 @@ func TestFetchPersonalizedPodcastLibraryUsesRecentEpisodes(t *testing.T) {
 		t.Fatalf("expected podcast title 'My Podcast', got %q", pMsg.RecentlyAdded[0].Media.Metadata.Title)
 	}
 }
+
+func TestListItemFilterValue_PodcastEpisode(t *testing.T) {
+	item := listItem{
+		kind: rowKindItem,
+		item: abs.LibraryItem{
+			MediaType: "podcast",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{Title: "Daily News"},
+			},
+			RecentEpisode: &abs.PodcastEpisode{
+				Title: "Charlie",
+			},
+		},
+	}
+	fv := item.FilterValue()
+	if !strings.Contains(strings.ToLower(fv), "charlie") {
+		t.Errorf("FilterValue() = %q, want it to contain 'charlie'", fv)
+	}
+	if !strings.Contains(strings.ToLower(fv), "daily news") {
+		t.Errorf("FilterValue() = %q, want it to contain 'daily news'", fv)
+	}
+}

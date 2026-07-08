@@ -68,7 +68,23 @@ func (i listItem) FilterValue() string {
 	if i.kind != rowKindItem {
 		return ""
 	}
-	return i.item.Media.Metadata.Title
+	var parts []string
+	if title := i.Title(); title != "" {
+		parts = append(parts, title)
+	}
+	if i.item.MediaType == "podcast" && i.item.RecentEpisode != nil {
+		if show := i.item.Media.Metadata.Title; show != "" && show != i.Title() {
+			parts = append(parts, show)
+		}
+	} else {
+		if author := i.item.Media.Metadata.DisplayAuthor(); author != "" && author != "Unknown author" {
+			parts = append(parts, author)
+		}
+	}
+	if ps := i.item.Media.Metadata.PrimarySeries(); ps != nil && ps.Name != "" {
+		parts = append(parts, ps.Name)
+	}
+	return strings.Join(parts, " ")
 }
 
 // KeyMap defines keybindings for the home screen.
@@ -158,7 +174,7 @@ func New(styles ui.Styles, client *cache.Client) Model {
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = "Continue Listening"
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
+	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
 	l.SetItems(buildSkeletonRows(styles))
@@ -290,6 +306,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.pageUp()
 			return m, nil
 		case key.Matches(msg, m.keys.Back):
+			if m.HasActiveFilter() {
+				m.list.ResetFilter()
+				return m, nil
+			}
 			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
@@ -847,4 +867,12 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 		{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: PlayNextMsg{Item: targetItem, Episode: targetEpisode}},
 	}
 	return items
+}
+
+func (m Model) IsFiltering() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m Model) HasActiveFilter() bool {
+	return m.list.FilterValue() != "" || m.list.FilterState() == list.FilterApplied
 }

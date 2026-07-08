@@ -81,7 +81,7 @@ func New(styles ui.Styles, client *cache.Client, libraryID, seriesID, currentIte
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = "Series"
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
+	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
 	l.DisableQuitKeybindings()
 	l.SetItems(buildSkeletonRows(styles))
@@ -132,8 +132,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
 		switch {
 		case key.Matches(msg, m.keys.Back):
+			if m.HasActiveFilter() {
+				m.list.ResetFilter()
+				return m, nil
+			}
 			return m, func() tea.Msg { return BackMsg{} }
 		case key.Matches(msg, m.keys.Enter):
 			if sel, ok := m.list.SelectedItem().(seriesBookItem); ok {
@@ -272,7 +279,17 @@ func (i seriesBookItem) Description() string {
 }
 
 func (i seriesBookItem) FilterValue() string {
-	return i.item.Media.Metadata.Title
+	var parts []string
+	if title := i.item.Media.Metadata.Title; title != "" {
+		parts = append(parts, title)
+	}
+	if author := i.item.Media.Metadata.DisplayAuthor(); author != "" && author != "Unknown author" {
+		parts = append(parts, author)
+	}
+	if i.item.Media.Metadata.Series != nil && i.item.Media.Metadata.Series.Sequence != "" {
+		parts = append(parts, "#"+i.item.Media.Metadata.Series.Sequence)
+	}
+	return strings.Join(parts, " ")
 }
 
 type seriesSkeletonItem struct {
@@ -303,4 +320,12 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 		{Label: "Queue Item", Action: components.ActionQueueItem, LibraryID: m.libraryID, ItemID: sel.item.ID, Data: sel.item},
 		{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: m.libraryID, ItemID: sel.item.ID, Data: sel.item},
 	}
+}
+
+func (m Model) IsFiltering() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m Model) HasActiveFilter() bool {
+	return m.list.FilterValue() != "" || m.list.FilterState() == list.FilterApplied
 }

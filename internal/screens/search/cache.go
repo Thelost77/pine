@@ -45,6 +45,9 @@ type PersistedEntry struct {
 	SeriesID   string
 	SeriesName string
 
+	EpisodeID    string
+	EpisodeTitle string
+
 	PrimarySearchText   string
 	SecondarySearchText string
 	CombinedSearchText  string
@@ -63,6 +66,8 @@ func (e snapshotEntry) toPersisted() PersistedEntry {
 		Duration:            e.duration,
 		SeriesID:            e.seriesID,
 		SeriesName:          e.seriesName,
+		EpisodeID:           e.episodeID,
+		EpisodeTitle:        e.episodeTitle,
 		PrimarySearchText:   e.primarySearchText,
 		SecondarySearchText: e.secondarySearchText,
 		CombinedSearchText:  e.combinedSearchText,
@@ -84,6 +89,8 @@ func toSnapshotEntries(entries []PersistedEntry) []snapshotEntry {
 			duration:            e.Duration,
 			seriesID:            e.SeriesID,
 			seriesName:          e.SeriesName,
+			episodeID:           e.EpisodeID,
+			episodeTitle:        e.EpisodeTitle,
 			primarySearchText:   e.PrimarySearchText,
 			secondarySearchText: e.SecondarySearchText,
 			combinedSearchText:  e.CombinedSearchText,
@@ -137,6 +144,9 @@ type snapshotEntry struct {
 
 	seriesID   string
 	seriesName string
+
+	episodeID    string
+	episodeTitle string
 
 	primarySearchText   string
 	secondarySearchText string
@@ -548,6 +558,28 @@ func (c *Cache) buildPodcastSnapshot(ctx context.Context, libraryID string) (*li
 				primaryTokens:       tokenizeSearchText(normalizeSearchText(fullItem.Media.Metadata.Title)),
 				combinedTokens:      tokenizeSearchText(combineSearchText(fullItem.Media.Metadata.Title, author)),
 			})
+
+			for _, ep := range fullItem.Media.Episodes {
+				if strings.TrimSpace(ep.Title) == "" {
+					continue
+				}
+				entries = append(entries, snapshotEntry{
+					itemID:              fullItem.ID,
+					libraryID:           fullItem.LibraryID,
+					mediaType:           "podcast",
+					title:               fullItem.Media.Metadata.Title,
+					author:              author,
+					duration:            ep.Duration,
+					episodeID:           ep.ID,
+					episodeTitle:        ep.Title,
+					primarySearchText:   normalizeSearchText(ep.Title),
+					secondarySearchText: normalizeSearchText(fullItem.Media.Metadata.Title),
+					combinedSearchText:  combineSearchText(ep.Title, fullItem.Media.Metadata.Title),
+					fuzzySearchText:     compactNormalizedText(combineSearchText(ep.Title, fullItem.Media.Metadata.Title)),
+					primaryTokens:       tokenizeSearchText(normalizeSearchText(ep.Title)),
+					combinedTokens:      tokenizeSearchText(combineSearchText(ep.Title, fullItem.Media.Metadata.Title)),
+				})
+			}
 		}
 
 		if len(resp.Results) == 0 || len(resp.Results) < snapshotPageLimit {
@@ -750,7 +782,7 @@ func (e snapshotEntry) podcastResult() abs.LibraryItem {
 	if e.author != "" {
 		authorName = &e.author
 	}
-	return abs.LibraryItem{
+	item := abs.LibraryItem{
 		ID:        e.itemID,
 		LibraryID: e.libraryID,
 		MediaType: "podcast",
@@ -761,6 +793,16 @@ func (e snapshotEntry) podcastResult() abs.LibraryItem {
 			},
 		},
 	}
+	if e.episodeID != "" || e.episodeTitle != "" {
+		ep := abs.PodcastEpisode{
+			ID:       e.episodeID,
+			Title:    e.episodeTitle,
+			Duration: e.duration,
+		}
+		item.RecentEpisode = &ep
+		item.Media.Episodes = []abs.PodcastEpisode{ep}
+	}
+	return item
 }
 
 func (e snapshotEntry) seriesResult() abs.LibraryItem {

@@ -61,10 +61,10 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 		t.Fatalf("second Search() error: %v", err)
 	}
 
-	if len(first) != 1 || first[0].Media.Metadata.Title != "Joe Rogan" {
+	if len(first) < 1 || first[0].Media.Metadata.Title != "Joe Rogan" {
 		t.Fatalf("unexpected first results: %#v", first)
 	}
-	if len(second) != 1 || second[0].Media.Metadata.Title != "Joe Rogan" {
+	if len(second) < 1 || second[0].Media.Metadata.Title != "Joe Rogan" {
 		t.Fatalf("unexpected second results: %#v", second)
 	}
 	if listCalls != 1 {
@@ -72,6 +72,15 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 	}
 	if itemCalls != 1 {
 		t.Fatalf("item expansion calls = %d, want 1", itemCalls)
+	}
+
+	// Verify searching by episode title matches specific episode
+	epResults, err := cache.Search(context.Background(), "lib-pod", "podcast", "Jason")
+	if err != nil {
+		t.Fatalf("episode Search() error: %v", err)
+	}
+	if len(epResults) < 1 || epResults[0].RecentEpisode == nil || epResults[0].RecentEpisode.Title != "Jason..." {
+		t.Fatalf("unexpected episode results: %#v", epResults)
 	}
 }
 
