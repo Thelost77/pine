@@ -78,11 +78,16 @@ func SetVolumeCmd(p Player, vol int) tea.Cmd {
 }
 
 // PlayerReadyMsg signals that mpv has been launched and connected.
-type PlayerReadyMsg struct{}
+// Generation ties the ready event to the play session that started it so stale
+// launches (from a superseded session) can be ignored.
+type PlayerReadyMsg struct {
+	Generation uint64
+}
 
 // PlayerLaunchErrMsg signals that mpv failed to launch.
 type PlayerLaunchErrMsg struct {
-	Err error
+	Err        error
+	Generation uint64
 }
 
 // PlayerQuitMsg signals that mpv has been quit.
@@ -90,10 +95,13 @@ type PlayerQuitMsg struct{}
 
 // LaunchCmd spawns mpv and connects via IPC. If paused is true, mpv starts paused.
 // httpHeaders are passed to mpv via --http-header-fields.
+// The generation ties the resulting PlayerReadyMsg/PlayerLaunchErrMsg to the
+// play session that started the launch, so stale events from a superseded
+// session can be ignored by the root model.
 // Returns PlayerReadyMsg on success.
-func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string) tea.Cmd {
+func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, generation uint64) tea.Cmd {
 	return func() tea.Msg {
-		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir())
+		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir(), "generation", generation)
 		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("pine-mpv-%d.sock", os.Getpid()))
 		// Remove stale socket
 		_ = os.Remove(socketPath)
@@ -101,7 +109,7 @@ func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders
 		startStr := fmt.Sprintf("%f", startTime)
 		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders); err != nil {
 			logger.Error("mpv launch failed", "err", err)
-			return PlayerLaunchErrMsg{Err: err}
+			return PlayerLaunchErrMsg{Err: err, Generation: generation}
 		}
 
 		// Retry connection for up to 3 seconds (mpv takes a moment to create the socket)
@@ -110,11 +118,11 @@ func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders
 			time.Sleep(100 * time.Millisecond)
 			if connectErr = p.Connect(); connectErr == nil {
 				logger.Info("mpv connected via socket", "socket", socketPath)
-				return PlayerReadyMsg{}
+				return PlayerReadyMsg{Generation: generation}
 			}
 		}
 		logger.Error("mpv socket connect timeout", "socket", socketPath, "err", connectErr)
-		return PlayerLaunchErrMsg{Err: fmt.Errorf("connect to mpv: %w", connectErr)}
+		return PlayerLaunchErrMsg{Err: fmt.Errorf("connect to mpv: %w", connectErr), Generation: generation}
 	}
 }
 

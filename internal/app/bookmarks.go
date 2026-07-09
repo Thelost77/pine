@@ -243,11 +243,12 @@ func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 		logger.Debug("in-track seek", "bookPosition", bookPos, "trackStart", m.trackStartOffset, "trackEnd", trackEnd, "trackRelative", trackRelative)
 		m.player.Position = bookPos
 		m.seekPending = true
+		m.seekPendingSince = time.Now()
 		mpvPlayer := m.mpv
-		go func() {
+		return m, func() tea.Msg {
 			_ = mpvPlayer.Seek(trackRelative)
-		}()
-		return m, nil
+			return nil
+		}
 	}
 
 	// Cross-track seek: restart playback at the new book-global position.

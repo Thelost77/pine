@@ -68,6 +68,7 @@ type Model struct {
 	propertyUnavailableCount int
 	lastMprisEmit            time.Time
 	seekPending              bool
+	seekPendingSince         time.Time
 	lastEvict                time.Time
 
 	// Series auto-continue
@@ -304,14 +305,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		logger.Error("app error", "err", msg.Err, "screen", m.screen)
-		if components.IsUnauthorized(msg.Err) {
-			logger.Warn("401 unauthorized, redirecting to login")
-			m.client = nil
-			m.searchCache = search.NewCache(nil, nil)
-			m.screen = ScreenLogin
-			m.backStack = nil
-			m.login = login.New(m.styles)
-			return m, m.login.Init()
+		if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+			return m2, cmd
 		}
 		cmd := m.err.SetError(msg.Err)
 		m.propagateSize()
@@ -615,7 +610,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePlaySessionMsg(msg.PlaySessionMsg)
 
 	case player.PlayerReadyMsg:
-		return m.handlePlayerReady()
+		return m.handlePlayerReady(msg)
 
 	case player.PositionMsg:
 		return m.handlePositionMsg(msg)
@@ -629,6 +624,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case player.PlayerLaunchErrMsg:
+		if msg.Generation != m.playGeneration {
+			logger.Debug("ignoring stale player launch error", "msgGen", msg.Generation, "currentGen", m.playGeneration)
+			return m, nil
+		}
 		logger.Error("player launch failed", "err", msg.Err)
 		m.clearPlaybackSessionState()
 		errCmd := m.err.SetError(msg.Err)
@@ -985,21 +984,29 @@ func (m *Model) clearPlaybackSessionState() {
 }
 
 // checkUnauthorized checks if the error indicates a 401 response.
-// If so, it resets the client and redirects to login.
+// If so, it halts any active playback (stopping mpv, closing the session,
+// clearing the queue and sleep timer), resets the client, and redirects
+// to login.
 // Returns the updated model and init command plus true if 401 was handled.
 func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	if !components.IsUnauthorized(err) {
 		return m, nil, false
 	}
 	logger.Warn("401 unauthorized, redirecting to login")
+	var stopCmd tea.Cmd
+	if m.isPlaying() {
+		m, stopCmd = m.stopPlayback()
+	}
+	m.queue = nil
+	m.sleepDeadline = time.Time{}
 	m.client = nil
 	m.searchCache = search.NewCache(nil, nil)
 	m.screen = ScreenLogin
 	m.backStack = nil
 	m.login = login.New(m.styles)
-	cmd := m.login.Init()
+	initCmd := m.login.Init()
 	m.propagateSize()
-	return m, cmd, true
+	return m, tea.Batch(stopCmd, initCmd), true
 }
 
 func (m *Model) openGlobalPalette() {

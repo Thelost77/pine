@@ -214,11 +214,17 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	if msg.AuthToken != "" {
 		headers = []string{"Authorization: Bearer " + msg.AuthToken}
 	}
-	return m, tea.Batch(m.mprisPlaybackCmd(), player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers))
+	return m, tea.Batch(m.mprisPlaybackCmd(), player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers, m.playGeneration))
 }
 
 // handlePlayerReady starts the position tick and sync tick.
-func (m Model) handlePlayerReady() (Model, tea.Cmd) {
+// Stale PlayerReadyMsg events (from a superseded play session) are ignored so
+// duplicate polling ticks don't race with the active session.
+func (m Model) handlePlayerReady(msg player.PlayerReadyMsg) (Model, tea.Cmd) {
+	if msg.Generation != m.playGeneration {
+		logger.Debug("ignoring stale player ready", "msgGen", msg.Generation, "currentGen", m.playGeneration)
+		return m, nil
+	}
 	logger.Info("player ready, starting position ticks", "generation", m.playGeneration)
 	m.propertyUnavailableCount = 0
 	return m, tea.Batch(
@@ -273,9 +279,12 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
 
-	// If a seek is pending, wait for mpv to confirm the new position
+	// If a seek is pending, wait for mpv to confirm the new position.
+	// Clear it once mpv reports a position within ±2s of the target, or after
+	// a 3s timeout to avoid freezing tracking/seeking if the confirmation
+	// never arrives.
 	if m.seekPending {
-		if bookPos >= m.player.Position-2 && bookPos <= m.player.Position+2 {
+		if (bookPos >= m.player.Position-2 && bookPos <= m.player.Position+2) || time.Since(m.seekPendingSince) > 3*time.Second {
 			m.seekPending = false
 		}
 		// Still update playing state and emit MPRIS signals

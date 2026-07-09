@@ -203,7 +203,7 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	}
 
 	// --- Step 4: Inject PlayerReadyMsg → verify TickCmd + syncTickCmd batch ---
-	result, cmd = m.Update(player.PlayerReadyMsg{})
+	result, cmd = m.Update(player.PlayerReadyMsg{Generation: 1}) // matches playGeneration after PlaySessionMsg
 	m = result.(Model)
 
 	if cmd == nil {
@@ -1514,5 +1514,74 @@ func TestSessionRestoreSetsSeriesContext(t *testing.T) {
 	}
 	if m.playbackLibraryID != "lib-series-lib" {
 		t.Fatalf("playbackLibraryID = %q, want lib-series-lib", m.playbackLibraryID)
+	}
+}
+
+// TestSeekPendingClearedByPositionConfirmation verifies that seekPending is
+// cleared once mpv reports a position within the ±2s confirmation window.
+func TestSeekPendingClearedByPositionConfirmation(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.playGeneration = 1
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 0
+	m.trackDuration = 3600.0
+	m.seekPending = true
+	m.seekPendingSince = time.Now()
+
+	// Position within ±2s of player.Position (100) → clears seekPending.
+	result, _ := m.Update(player.PositionMsg{Position: 101.0, Duration: 3600.0, Paused: false, Generation: 1})
+	m = result.(Model)
+
+	if m.seekPending {
+		t.Fatal("seekPending should be cleared when confirmed position is within ±2s window")
+	}
+}
+
+// TestSeekPendingClearedByTimeout verifies that seekPending is cleared after
+// the 3-second freeze-resilience timeout even if mpv never confirms the seek.
+func TestSeekPendingClearedByTimeout(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.playGeneration = 1
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 0
+	m.trackDuration = 3600.0
+	m.seekPending = true
+	// Simulate the seek was issued more than 3s ago.
+	m.seekPendingSince = time.Now().Add(-4 * time.Second)
+
+	// mpv reports a position far from the target → would normally stay pending,
+	// but the timeout forces it to clear.
+	result, _ := m.Update(player.PositionMsg{Position: 10.0, Duration: 3600.0, Paused: false, Generation: 1})
+	m = result.(Model)
+
+	if m.seekPending {
+		t.Fatal("seekPending should be cleared after the 3s timeout even without confirmation")
+	}
+}
+
+// TestSeekPendingStaysPendingWithinTimeoutAndOutsideWindow verifies that
+// seekPending stays true when the confirmation window isn't met and the
+// timeout hasn't elapsed.
+func TestSeekPendingStaysPendingWithinTimeoutAndOutsideWindow(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.playGeneration = 1
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.trackStartOffset = 0
+	m.trackDuration = 3600.0
+	m.seekPending = true
+	m.seekPendingSince = time.Now()
+
+	// mpv reports a position far from the target → stays pending (within timeout).
+	result, _ := m.Update(player.PositionMsg{Position: 10.0, Duration: 3600.0, Paused: false, Generation: 1})
+	m = result.(Model)
+
+	if !m.seekPending {
+		t.Fatal("seekPending should remain true when far from target and within the timeout")
 	}
 }

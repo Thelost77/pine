@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
@@ -1906,6 +1907,75 @@ func TestHTTP401RedirectsToLogin(t *testing.T) {
 	}
 }
 
+// TestHTTP401ErrMsgHaltsPlayback verifies that a 401 received via ErrMsg while
+// playback is active halts playback, clears the queue and sleep timer, and
+// redirects to login.
+func TestHTTP401ErrMsgHaltsPlayback(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-active"
+	m.itemID = "item-active"
+	m.player.Playing = true
+	m.player.Position = 120
+	m.player.Duration = 3600
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "queued-1"}}}
+	m.sleepDeadline = time.Now().Add(15 * time.Minute)
+	m.sleepDuration = 15 * time.Minute
+
+	result, cmd := m.Update(components.ErrMsg{Err: fmt.Errorf("unexpected status 401: Unauthorized")})
+	rm := result.(Model)
+
+	if rm.screen != ScreenLogin {
+		t.Fatalf("screen = %v, want ScreenLogin after 401 during playback", rm.screen)
+	}
+	if rm.client != nil {
+		t.Error("client should be nil after 401")
+	}
+	if rm.isPlaying() {
+		t.Errorf("sessionID = %q, want playback halted", rm.sessionID)
+	}
+	if rm.player.Playing {
+		t.Error("player.Playing should be false after 401 halt")
+	}
+	if len(rm.queue) != 0 {
+		t.Errorf("queue len = %d, want cleared queue after 401 halt", len(rm.queue))
+	}
+	if !rm.sleepDeadline.IsZero() {
+		t.Error("sleepDeadline should be cleared after 401 halt")
+	}
+	if cmd == nil {
+		t.Error("expected login init command (batched with stop) after 401 halt")
+	}
+}
+
+// TestHTTP401PlaybackErrorHaltsPlayback verifies the same halt via the
+// PlaybackErrorMsg → checkUnauthorized path.
+func TestHTTP401PlaybackErrorHaltsPlayback(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-active"
+	m.itemID = "item-active"
+	m.player.Playing = true
+	m.player.Position = 120
+	m.player.Duration = 3600
+	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "queued-1"}}}
+	m.sleepDeadline = time.Now().Add(20 * time.Minute)
+
+	result, _ := m.Update(PlaybackErrorMsg{Err: fmt.Errorf("status 401: unauthorized")})
+	rm := result.(Model)
+
+	if rm.screen != ScreenLogin {
+		t.Fatalf("screen = %v, want ScreenLogin after 401 playback error", rm.screen)
+	}
+	if rm.isPlaying() {
+		t.Errorf("sessionID = %q, want playback halted", rm.sessionID)
+	}
+	if len(rm.queue) != 0 {
+		t.Errorf("queue len = %d, want cleared queue after 401 halt", len(rm.queue))
+	}
+	if !rm.sleepDeadline.IsZero() {
+		t.Error("sleepDeadline should be cleared after 401 halt")
+	}
+}
+
 func TestPlaybackErrorMsgShowsBanner(t *testing.T) {
 	m := newPlaybackTestModel()
 	result, cmd := m.Update(PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")})
@@ -2002,5 +2072,85 @@ func TestBuildContextPaletteItemsFiltersAddBookmark(t *testing.T) {
 	}
 	if !hasAddBookmark {
 		t.Fatal("expected 'Add Bookmark' to be present when playing the same item")
+	}
+}
+
+// TestStalePlayerReadyMsgIgnored verifies that a PlayerReadyMsg carrying a
+// generation that doesn't match the current playGeneration is dropped, so
+// duplicate polling ticks don't race with the active session.
+func TestStalePlayerReadyMsgIgnored(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.playGeneration = 5
+
+	// Stale ready event from a superseded session (generation 4).
+	result, cmd := m.Update(player.PlayerReadyMsg{Generation: 4})
+	rm := result.(Model)
+
+	if rm.playGeneration != 5 {
+		t.Errorf("playGeneration = %d, want unchanged at 5", rm.playGeneration)
+	}
+	if cmd != nil {
+		t.Errorf("stale PlayerReadyMsg should produce nil cmd, got %v", cmd)
+	}
+}
+
+// TestCurrentPlayerReadyMsgStartsTicking verifies a generation-matched
+// PlayerReadyMsg starts ticks.
+func TestCurrentPlayerReadyMsgStartsTicking(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.playGeneration = 5
+
+	result, cmd := m.Update(player.PlayerReadyMsg{Generation: 5})
+	_ = result.(Model)
+
+	if cmd == nil {
+		t.Fatal("current PlayerReadyMsg should start TickCmd + syncTickCmd batch")
+	}
+}
+
+// TestStalePlayerLaunchErrMsgIgnored verifies that a PlayerLaunchErrMsg
+// carrying a stale generation is ignored, so a superseded session's launch
+// failure doesn't wipe the active session's state.
+func TestStalePlayerLaunchErrMsgIgnored(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.itemID = "item-current"
+	m.player.Playing = true
+	m.player.Title = "Active Book"
+	m.playGeneration = 5
+
+	// Stale launch error from the previous session (generation 4).
+	result, cmd := m.Update(player.PlayerLaunchErrMsg{Err: fmt.Errorf("mpv boom"), Generation: 4})
+	rm := result.(Model)
+
+	if rm.sessionID != "sess-current" {
+		t.Errorf("sessionID = %q, want preserved active session", rm.sessionID)
+	}
+	if rm.err.HasError() {
+		t.Error("stale launch error should not show an error banner")
+	}
+	if cmd != nil {
+		t.Errorf("stale PlayerLaunchErrMsg should produce nil cmd, got %v", cmd)
+	}
+}
+
+// TestCurrentPlayerLaunchErrMsgCleansUp verifies a generation-matched
+// PlayerLaunchErrMsg clears the session state.
+func TestCurrentPlayerLaunchErrMsgCleansUp(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-current"
+	m.player.Playing = true
+	m.playGeneration = 5
+
+	result, _ := m.Update(player.PlayerLaunchErrMsg{Err: fmt.Errorf("mpv boom"), Generation: 5})
+	rm := result.(Model)
+
+	if rm.sessionID != "" {
+		t.Errorf("sessionID = %q, want cleared on current-gen launch error", rm.sessionID)
+	}
+	if !rm.err.HasError() {
+		t.Error("current launch error should show an error banner")
 	}
 }
