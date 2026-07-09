@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,6 +150,61 @@ func TestClient_ConcurrentDeduplication(t *testing.T) {
 	mu.Unlock()
 	if count != 1 {
 		t.Fatalf("expected 1 request for 5 concurrent calls, got %d", count)
+	}
+}
+
+func TestGetOrFetch_RetryOnLeaderCancellation(t *testing.T) {
+	inner := abs.NewClient("http://127.0.0.1:0", "tok")
+	client := NewClient(inner, nil)
+
+	var calls atomic.Int32
+	leaderInflight := make(chan struct{})
+	releaseLeader := make(chan struct{})
+
+	fetch := func() error {
+		n := calls.Add(1)
+		if n == 1 {
+			// Leader: announce we're in flight, then block until released.
+			close(leaderInflight)
+			<-releaseLeader
+			return context.Canceled
+		}
+		// Retry leader: succeed.
+		return nil
+	}
+
+	ctx := context.Background()
+
+	leaderDone := make(chan error, 1)
+	go func() {
+		leaderDone <- client.getOrFetch(ctx, "retry-key", fetch)
+	}()
+
+	// Wait until the leader is actually in flight so the follower observes the
+	// existing inflight call rather than becoming a fresh leader.
+	<-leaderInflight
+
+	followerDone := make(chan error, 1)
+	go func() {
+		followerDone <- client.getOrFetch(ctx, "retry-key", fetch)
+	}()
+
+	// Give the follower time to park on the leader's call.done channel.
+	time.Sleep(20 * time.Millisecond)
+
+	// Release the leader: it returns context.Canceled. Its defer deletes the
+	// inflight entry before closing call.done, so the follower's retry becomes a
+	// new leader instead of re-joining a stale call.
+	close(releaseLeader)
+
+	if err := <-leaderDone; err != context.Canceled {
+		t.Fatalf("leader getOrFetch err = %v, want context.Canceled", err)
+	}
+	if err := <-followerDone; err != nil {
+		t.Fatalf("follower getOrFetch err = %v, want nil after retry", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("fetch invoked %d times, want 2 (leader + one retry)", got)
 	}
 }
 

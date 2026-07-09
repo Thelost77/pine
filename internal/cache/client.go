@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -30,6 +31,7 @@ type Client struct {
 	store         *Store
 	inflightMutex sync.Mutex
 	inflight      map[string]*inflightCall
+	OnInvalidate  func()
 }
 
 type inflightCall struct {
@@ -49,12 +51,35 @@ func NewClient(inner *abs.Client, store *Store) *Client {
 	}
 }
 
+// ClearAll wipes the entire persistent cache and notifies registered
+// in-memory caches (e.g. the search cache) to drop their snapshots.
+func (c *Client) ClearAll() error {
+	if c.store == nil {
+		if c.OnInvalidate != nil {
+			c.OnInvalidate()
+		}
+		return nil
+	}
+	if err := c.store.ClearAll(); err != nil {
+		return err
+	}
+	if c.OnInvalidate != nil {
+		c.OnInvalidate()
+	}
+	return nil
+}
+
 func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() error) error {
 	c.inflightMutex.Lock()
 	if call, ok := c.inflight[key]; ok {
 		c.inflightMutex.Unlock()
 		select {
 		case <-call.done:
+			if call.err != nil &&
+				(errors.Is(call.err, context.Canceled) || errors.Is(call.err, context.DeadlineExceeded)) &&
+				ctx.Err() == nil {
+				return c.getOrFetch(ctx, key, fetch)
+			}
 			return call.err
 		case <-ctx.Done():
 			return ctx.Err()
@@ -493,6 +518,9 @@ func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool)
 		// Ideally we would invalidate items, recently-added, etc.
 		// But for now, we just wipe the entire cache to be safe since delete is rare.
 		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+		if c.OnInvalidate != nil {
+			c.OnInvalidate()
+		}
 	}
 	return nil
 }
@@ -507,6 +535,9 @@ func (c *Client) DeleteEpisode(ctx context.Context, podcastID string, episodeID 
 		_ = c.store.Delete("item:" + podcastID)
 		// Wipe entire cache to be safe since delete is rare.
 		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+		if c.OnInvalidate != nil {
+			c.OnInvalidate()
+		}
 	}
 	return nil
 }
@@ -519,6 +550,9 @@ func (c *Client) UpdateLibraryItemMedia(ctx context.Context, itemID string, req 
 	}
 	if c.store != nil {
 		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+		if c.OnInvalidate != nil {
+			c.OnInvalidate()
+		}
 	}
 	return updated, nil
 }
@@ -531,6 +565,9 @@ func (c *Client) UpdatePodcastEpisode(ctx context.Context, itemID, episodeID str
 	}
 	if c.store != nil {
 		_, _ = c.store.db.DB.Exec(`DELETE FROM api_cache`)
+		if c.OnInvalidate != nil {
+			c.OnInvalidate()
+		}
 	}
 	return updated, nil
 }

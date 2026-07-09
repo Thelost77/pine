@@ -662,6 +662,58 @@ func TestSearchPodcastEpisodesHTTP_FindsEpisodeWhenShowSearchWouldMiss(t *testin
 	}
 }
 
+func TestSortSeriesItems_MultipleSeriesInSeriesList(t *testing.T) {
+	// Each item belongs to two series (s1, s2) with independent sequences.
+	// SeriesByID must select the sequence for the requested series rather than
+	// the primary Series field, which only contains the first series entry.
+	mkItem := func(id, title string, s1Seq, s2Seq string) LibraryItem {
+		return LibraryItem{
+			ID: id,
+			Media: Media{
+				Metadata: MediaMetadata{
+					Title: title,
+					SeriesList: []SeriesSequence{
+						{ID: "s1", Name: "Series One", Sequence: s1Seq},
+						{ID: "s2", Name: "Series Two", Sequence: s2Seq},
+					},
+				},
+			},
+		}
+	}
+
+	// Titles are deliberately ordered opposite to the s2 sequence so that
+	// title-sort fallback (the buggy behaviour) produces a different order.
+	items := []LibraryItem{
+		mkItem("A", "ZZZ", "2", "1"),
+		mkItem("B", "AAA", "1", "3"),
+	}
+
+	// Sort by series s1: B (seq 1) before A (seq 2).
+	byS1 := make([]LibraryItem, len(items))
+	copy(byS1, items)
+	sortSeriesItems(byS1, "s1")
+	if byS1[0].ID != "B" || byS1[1].ID != "A" {
+		t.Fatalf("sort by s1 = [%s, %s], want [B, A]", byS1[0].ID, byS1[1].ID)
+	}
+
+	// Sort by series s2: A (seq 1) before B (seq 3). A title-sort fallback would
+	// order these [B (AAA), A (ZZZ)], so this asserts the per-series sequence wins.
+	byS2 := make([]LibraryItem, len(items))
+	copy(byS2, items)
+	sortSeriesItems(byS2, "s2")
+	if byS2[0].ID != "A" || byS2[1].ID != "B" {
+		t.Fatalf("sort by s2 = [%s, %s], want [A, B]", byS2[0].ID, byS2[1].ID)
+	}
+
+	// Unknown series ID: no item has a sequence, so it falls back to title sort.
+	byUnknown := make([]LibraryItem, len(items))
+	copy(byUnknown, items)
+	sortSeriesItems(byUnknown, "nope")
+	if byUnknown[0].ID != "B" || byUnknown[1].ID != "A" {
+		t.Fatalf("sort by unknown series = [%s, %s], want [B, A] (title fallback)", byUnknown[0].ID, byUnknown[1].ID)
+	}
+}
+
 func TestGetRecentEpisodesHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/libraries/lib-pod/recent-episodes" {

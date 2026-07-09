@@ -436,10 +436,11 @@ func sortSeriesItems(items []LibraryItem, seriesID string) {
 }
 
 func seriesSequenceValue(item LibraryItem, seriesID string) (float64, bool) {
-	if item.Media.Metadata.Series == nil || item.Media.Metadata.Series.ID != seriesID {
+	seq := item.Media.Metadata.SeriesByID(seriesID)
+	if seq == nil {
 		return 0, false
 	}
-	sequence := strings.TrimSpace(item.Media.Metadata.Series.Sequence)
+	sequence := strings.TrimSpace(seq.Sequence)
 	if sequence == "" {
 		return 0, false
 	}
