@@ -221,8 +221,9 @@ func TestMetadataSavedUpdatesDetailQueueAndPlayer(t *testing.T) {
 	if got := m.player.Title; got != "New Title" {
 		t.Fatalf("player title = %q, want New Title", got)
 	}
-	if len(m.mprisState.Authors) != 1 || m.mprisState.Authors[0] != newAuthor {
-		t.Fatalf("mpris authors = %#v, want %q", m.mprisState.Authors, newAuthor)
+	authors := m.mprisState.CurrentAuthors()
+	if len(authors) != 1 || authors[0] != newAuthor {
+		t.Fatalf("mpris authors = %#v, want %q", authors, newAuthor)
 	}
 }
 

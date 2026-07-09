@@ -154,25 +154,10 @@ func (m *Model) SetProgram(p *tea.Program) {
 	m.mprisBridge = mpris.NewBridge(p)
 	state := m.mprisState
 	m.mprisBridge.Bind(func() mpris.ModelAccessor {
-		return mprisStateAccessor{state}
+		return state
 	}, float64(m.config.Player.SeekSeconds))
 	m.mprisBridge.Start()
 }
-
-// mprisStateAccessor implements mpris.ModelAccessor by reading from shared MprisState.
-type mprisStateAccessor struct{ s *MprisState }
-
-func (a mprisStateAccessor) IsPlaying() bool          { return a.s.IsPlaying }
-func (a mprisStateAccessor) IsPaused() bool           { return a.s.IsPaused }
-func (a mprisStateAccessor) HasActiveItem() bool      { return a.s.HasActiveItem }
-func (a mprisStateAccessor) CurrentTitle() string     { return a.s.Title }
-func (a mprisStateAccessor) CurrentAuthors() []string { return a.s.Authors }
-func (a mprisStateAccessor) CurrentItemID() string    { return a.s.ItemID }
-func (a mprisStateAccessor) PlayerPosition() float64  { return a.s.Position }
-func (a mprisStateAccessor) PlayerDuration() float64  { return a.s.Duration }
-func (a mprisStateAccessor) PlayerVolume() int        { return a.s.Volume }
-func (a mprisStateAccessor) PlayerSpeed() float64     { return a.s.Speed }
-func (a mprisStateAccessor) QueueLength() int         { return a.s.QueueLength }
 
 func (m *Model) mprisPlaybackCmd() tea.Cmd {
 	if m.mprisBridge == nil {
@@ -247,26 +232,32 @@ func (m *Model) mprisVolumeCmd() tea.Cmd {
 }
 
 func (m *Model) syncMprisState() {
-	m.mprisState.IsPlaying = m.isPlaying() && m.player.Playing
-	m.mprisState.IsPaused = m.isPlaying() && !m.player.Playing
-	m.mprisState.HasActiveItem = m.isPlaying()
-	m.mprisState.ItemID = m.itemID
-	if m.itemID == "" {
-		m.mprisState.ItemID = m.lastPlayedItemID
-	}
-	m.mprisState.Title = m.player.Title
+	authors := m.currentAuthors
 	if m.player.Title == "" {
-		m.mprisState.Title = m.lastPlayedTitle
+		authors = m.lastPlayedAuthors
 	}
-	m.mprisState.Authors = m.currentAuthors
-	if m.player.Title == "" {
-		m.mprisState.Authors = m.lastPlayedAuthors
+	title := m.player.Title
+	if title == "" {
+		title = m.lastPlayedTitle
 	}
-	m.mprisState.Position = m.player.Position
-	m.mprisState.Duration = m.player.Duration
-	m.mprisState.Volume = m.player.Volume
-	m.mprisState.Speed = m.player.Speed
-	m.mprisState.QueueLength = len(m.queue)
+	itemID := m.itemID
+	if itemID == "" {
+		itemID = m.lastPlayedItemID
+	}
+	playing := m.isPlaying()
+	m.mprisState.Update(func(s *MprisState) {
+		s.playing = playing && m.player.Playing
+		s.paused = playing && !m.player.Playing
+		s.hasActiveItem = playing
+		s.itemID = itemID
+		s.title = title
+		s.authors = authors
+		s.position = m.player.Position
+		s.duration = m.player.Duration
+		s.volume = m.player.Volume
+		s.speed = m.player.Speed
+		s.queueLength = len(m.queue)
+	})
 }
 
 // Init returns the initial command for the active screen.
