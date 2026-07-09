@@ -113,3 +113,41 @@ func TestSaveAccount_FirstAccountBecomesDefault(t *testing.T) {
 		t.Errorf("default ID = %q, want %q", got.ID, "a1")
 	}
 }
+
+func TestSaveAccount_UnsetsOtherDefault(t *testing.T) {
+	s := openTestStore(t)
+
+	acc1 := Account{ID: "a1", ServerURL: "http://s1", Username: "u1", Token: "t1", IsDefault: true}
+	if err := s.SaveAccount(acc1); err != nil {
+		t.Fatalf("first SaveAccount() error: %v", err)
+	}
+
+	acc2 := Account{ID: "a2", ServerURL: "http://s2", Username: "u2", Token: "t2", IsDefault: true}
+	if err := s.SaveAccount(acc2); err != nil {
+		t.Fatalf("second SaveAccount() error: %v", err)
+	}
+
+	var isDefault1 int
+	if err := s.DB.QueryRow(`SELECT is_default FROM accounts WHERE id = ?`, "a1").Scan(&isDefault1); err != nil {
+		t.Fatalf("querying a1: %v", err)
+	}
+	if isDefault1 != 0 {
+		t.Errorf("a1 is_default = %d, want 0", isDefault1)
+	}
+
+	var isDefault2 int
+	if err := s.DB.QueryRow(`SELECT is_default FROM accounts WHERE id = ?`, "a2").Scan(&isDefault2); err != nil {
+		t.Fatalf("querying a2: %v", err)
+	}
+	if isDefault2 != 1 {
+		t.Errorf("a2 is_default = %d, want 1", isDefault2)
+	}
+
+	got, err := s.GetDefaultAccount()
+	if err != nil {
+		t.Fatalf("GetDefaultAccount() error: %v", err)
+	}
+	if got.ID != "a2" {
+		t.Errorf("default ID = %q, want %q", got.ID, "a2")
+	}
+}

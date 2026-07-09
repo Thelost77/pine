@@ -17,11 +17,19 @@ type Account struct {
 }
 
 // SaveAccount inserts or updates an account. If it's the first account, it
-// becomes the default automatically.
+// becomes the default automatically. When the saved account is (or becomes)
+// the default, any other accounts are unset as default atomically within a
+// transaction so that only one default can exist at a time.
 func (s *Store) SaveAccount(a Account) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// If no accounts exist yet, make this one the default.
 	var count int
-	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM accounts`).Scan(&count); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM accounts`).Scan(&count); err != nil {
 		return fmt.Errorf("counting accounts: %w", err)
 	}
 	if count == 0 {
@@ -33,7 +41,14 @@ func (s *Store) SaveAccount(a Account) error {
 		isDefault = 1
 	}
 
-	_, err := s.DB.Exec(`
+	// Unset the default flag on all other accounts before upserting this one.
+	if a.IsDefault {
+		if _, err := tx.Exec(`UPDATE accounts SET is_default = 0 WHERE id != ?`, a.ID); err != nil {
+			return fmt.Errorf("unsetting other defaults: %w", err)
+		}
+	}
+
+	_, err = tx.Exec(`
 		INSERT INTO accounts (id, server_url, username, token, is_default, created_at)
 		VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
 		ON CONFLICT(id) DO UPDATE SET
@@ -44,6 +59,10 @@ func (s *Store) SaveAccount(a Account) error {
 	`, a.ID, a.ServerURL, a.Username, a.Token, isDefault, a.ID)
 	if err != nil {
 		return fmt.Errorf("saving account: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing account save: %w", err)
 	}
 	return nil
 }

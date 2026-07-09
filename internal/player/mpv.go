@@ -23,7 +23,9 @@ var (
 
 // MpvSocketDir returns the directory where mpv can create IPC sockets.
 // For snap-packaged mpv, this is ~/snap/mpv/common/ since snap's /tmp is isolated.
-// For native mpv, this is os.TempDir().
+// For native mpv, this is a user-private directory under os.TempDir() with 0700
+// permissions, so that the IPC socket (which may expose the stream URL and its
+// secret token) cannot be opened by other local users.
 func MpvSocketDir() string {
 	mpvSocketDirOnce.Do(func() {
 		mpvPath, err := exec.LookPath("mpv")
@@ -33,14 +35,16 @@ func MpvSocketDir() string {
 				home, err := os.UserHomeDir()
 				if err == nil {
 					snapDir := filepath.Join(home, "snap", "mpv", "common")
-					if info, err := os.Stat(snapDir); err == nil && info.IsDir() {
+					if err := os.MkdirAll(snapDir, 0o700); err == nil {
 						mpvSocketDir = snapDir
 						return
 					}
 				}
 			}
 		}
-		mpvSocketDir = os.TempDir()
+		dir := filepath.Join(os.TempDir(), fmt.Sprintf("pine-%d", os.Getuid()))
+		_ = os.MkdirAll(dir, 0o700)
+		mpvSocketDir = dir
 	})
 	return mpvSocketDir
 }
