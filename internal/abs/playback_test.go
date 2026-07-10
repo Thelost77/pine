@@ -60,8 +60,11 @@ func TestStartPlaySessionRequestBody(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	_, err := c.StartPlaySession(context.Background(), "li-001", DeviceInfo{
-		DeviceID:   "dev-1",
-		ClientName: "pine",
+		DeviceID:      "dev-1",
+		Manufacturer:  "Pine",
+		Model:         "Desk",
+		ClientName:    "pine",
+		ClientVersion: "dev",
 	})
 	if err != nil {
 		t.Fatalf("StartPlaySession() error: %v", err)
@@ -79,6 +82,15 @@ func TestStartPlaySessionRequestBody(t *testing.T) {
 	}
 	if body.DeviceInfo.ClientName != "pine" {
 		t.Errorf("clientName = %q, want %q", body.DeviceInfo.ClientName, "pine")
+	}
+	if body.DeviceInfo.Manufacturer != "Pine" {
+		t.Errorf("manufacturer = %q, want %q", body.DeviceInfo.Manufacturer, "Pine")
+	}
+	if body.DeviceInfo.Model != "Desk" {
+		t.Errorf("model = %q, want %q", body.DeviceInfo.Model, "Desk")
+	}
+	if body.DeviceInfo.ClientVersion != "dev" {
+		t.Errorf("clientVersion = %q, want %q", body.DeviceInfo.ClientVersion, "dev")
 	}
 	if body.ForceDirectPlay != true {
 		t.Error("forceDirectPlay should be true")

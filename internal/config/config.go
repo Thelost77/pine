@@ -2,9 +2,14 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 )
@@ -43,9 +48,11 @@ type KeybindsConfig struct {
 }
 
 type Config struct {
-	Player   PlayerConfig   `toml:"player"`
-	Theme    ThemeConfig    `toml:"theme"`
-	Keybinds KeybindsConfig `toml:"keybinds"`
+	Player     PlayerConfig   `toml:"player"`
+	Theme      ThemeConfig    `toml:"theme"`
+	Keybinds   KeybindsConfig `toml:"keybinds"`
+	DeviceName string         `toml:"device_name"`
+	DeviceID   string         `toml:"device_id"`
 }
 
 func Default() Config {
@@ -80,6 +87,7 @@ func Default() Config {
 			SleepTimer:   "S",
 			Back:         "esc",
 		},
+		DeviceName: defaultDeviceName(),
 	}
 }
 
@@ -95,16 +103,146 @@ func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if _, err := ensurePlaybackIdentity(&cfg); err != nil {
+				return Config{}, fmt.Errorf("generate playback device identity: %w", err)
+			}
 			return cfg, nil
 		}
 		return cfg, err
 	}
 
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	metadata, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return Config{}, err
+	}
+	changed, err := ensurePlaybackIdentity(&cfg)
+	if err != nil {
+		return Config{}, fmt.Errorf("generate playback device identity: %w", err)
+	}
+	if changed || !metadata.IsDefined("device_name") || !metadata.IsDefined("device_id") {
+		if err := saveMigratedPlaybackIdentity(path, data, cfg); err != nil {
+			return Config{}, fmt.Errorf("persist playback device identity: %w", err)
+		}
 	}
 
 	return cfg, nil
+}
+
+func saveMigratedPlaybackIdentity(path string, data []byte, cfg Config) error {
+	var identity bytes.Buffer
+	if err := toml.NewEncoder(&identity).Encode(struct {
+		DeviceName string `toml:"device_name"`
+		DeviceID   string `toml:"device_id"`
+	}{cfg.DeviceName, cfg.DeviceID}); err != nil {
+		return err
+	}
+
+	insertAt := len(data)
+	for offset, line := 0, data; len(line) > 0; {
+		next := bytes.IndexByte(line, '\n')
+		lineEnd := len(line)
+		if next >= 0 {
+			lineEnd = next + 1
+		}
+		if bytes.HasPrefix(bytes.TrimSpace(line[:lineEnd]), []byte("[")) {
+			insertAt = offset
+			break
+		}
+		offset += lineEnd
+		if next < 0 {
+			break
+		}
+		line = line[lineEnd:]
+	}
+
+	prefix := withoutTopLevelIdentity(data[:insertAt])
+	migrated := make([]byte, 0, len(data)+identity.Len())
+	migrated = append(migrated, identity.Bytes()...)
+	migrated = append(migrated, prefix...)
+	migrated = append(migrated, data[insertAt:]...)
+	return os.WriteFile(path, migrated, 0600)
+}
+
+func withoutTopLevelIdentity(data []byte) []byte {
+	var result bytes.Buffer
+	for rest := data; len(rest) > 0; {
+		next := bytes.IndexByte(rest, '\n')
+		lineEnd := len(rest)
+		if next >= 0 {
+			lineEnd = next
+		}
+		line := rest[:lineEnd]
+		newline := []byte(nil)
+		if next >= 0 {
+			newline = []byte("\n")
+		}
+		if !isIdentityAssignment(line, "device_name") && !isIdentityAssignment(line, "device_id") {
+			result.Write(line)
+			result.Write(newline)
+		}
+		if next < 0 {
+			break
+		}
+		rest = rest[next+1:]
+	}
+	return result.Bytes()
+}
+
+func isIdentityAssignment(line []byte, key string) bool {
+	line = bytes.TrimLeft(line, " \t")
+	if !bytes.HasPrefix(line, []byte(key)) {
+		return false
+	}
+	line = bytes.TrimLeft(line[len(key):], " \t")
+	return len(line) > 0 && line[0] == '='
+}
+
+func defaultDeviceName() string {
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "Pine"
+	}
+	return hostname + " (Pine)"
+}
+
+func ensurePlaybackIdentity(cfg *Config) (bool, error) {
+	changed := false
+	if cfg.DeviceName == "" {
+		cfg.DeviceName = defaultDeviceName()
+		changed = true
+	}
+	if cfg.DeviceID != "" {
+		return changed, nil
+	}
+
+	suffix := make([]byte, 4)
+	if _, err := rand.Read(suffix); err != nil {
+		return false, err
+	}
+	cfg.DeviceID = "pine-" + normalizedHostname() + "-" + hex.EncodeToString(suffix)
+	return true, nil
+}
+
+func normalizedHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "host"
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(hostname) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	if normalized := strings.Trim(b.String(), "-"); normalized != "" {
+		return normalized
+	}
+	return "host"
 }
 
 // Save writes a Config struct to path in TOML format.

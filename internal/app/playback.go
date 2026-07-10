@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -20,6 +21,30 @@ const (
 	trackEndRolloverSlack         = 2.0
 	maxPropertyUnavailableRetries = 4
 )
+
+func pineVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return buildVersion(info.Main.Version)
+	}
+	return "dev"
+}
+
+func buildVersion(version string) string {
+	if version == "" || version == "(devel)" {
+		return "dev"
+	}
+	return version
+}
+
+func (m Model) playbackDevice() abs.DeviceInfo {
+	return abs.DeviceInfo{
+		DeviceID:      m.config.DeviceID,
+		Manufacturer:  "Pine",
+		Model:         strings.TrimSuffix(m.config.DeviceName, " (Pine)"),
+		ClientName:    "pine",
+		ClientVersion: pineVersion(),
+	}
+}
 
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
@@ -85,10 +110,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 	item := msg.Item
 	client := m.client
 	startCmd := func() tea.Msg {
-		device := abs.DeviceInfo{
-			DeviceID:   "pine",
-			ClientName: "pine",
-		}
+		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), item.ID, device)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
@@ -145,10 +167,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 	episode := msg.Episode
 	client := m.client
 	startCmd := func() tea.Msg {
-		device := abs.DeviceInfo{
-			DeviceID:   "pine",
-			ClientName: "pine",
-		}
+		device := m.playbackDevice()
 		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
@@ -392,7 +411,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 			_ = mpvPlayer.Quit()
 		}
 
-		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), itemID, device)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
@@ -408,7 +427,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos float64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), item.ID, device)
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
@@ -451,7 +470,7 @@ func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 	client := m.client
 	store := m.db
 	return func() tea.Msg {
-		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), item.ID, device)
 		if err != nil {
 			if abs.IsHTTPStatus(err, http.StatusNotFound) {
@@ -496,7 +515,7 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 	client := m.client
 	store := m.db
 	return func() tea.Msg {
-		device := abs.DeviceInfo{DeviceID: "pine", ClientName: "pine"}
+		device := m.playbackDevice()
 		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
 		if err != nil {
 			if abs.IsHTTPStatus(err, http.StatusNotFound) {

@@ -11,8 +11,11 @@ import (
 
 // DeviceInfo identifies the client device for a play session.
 type DeviceInfo struct {
-	DeviceID   string `json:"deviceId"`
-	ClientName string `json:"clientName"`
+	DeviceID      string `json:"deviceId"`
+	Manufacturer  string `json:"manufacturer"`
+	Model         string `json:"model"`
+	ClientName    string `json:"clientName"`
+	ClientVersion string `json:"clientVersion"`
 }
 
 // startPlayRequest is the body for POST /api/items/{id}/play.

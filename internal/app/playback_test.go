@@ -1585,3 +1585,43 @@ func TestSeekPendingStaysPendingWithinTimeoutAndOutsideWindow(t *testing.T) {
 		t.Fatal("seekPending should remain true when far from target and within the timeout")
 	}
 }
+
+func TestPlaybackDeviceUsesConfiguredIdentity(t *testing.T) {
+	cfg := config.Default()
+	cfg.DeviceID = "pine-workstation-a1b2c3d4"
+	cfg.DeviceName = "Workstation (Pine)"
+	m := NewWithPlayer(cfg, nil, nil, nil, &mockPlayer{})
+
+	got := m.playbackDevice()
+	if got.DeviceID != cfg.DeviceID || got.Manufacturer != "Pine" || got.Model != "Workstation" {
+		t.Fatalf("configured identity not used: %#v", got)
+	}
+	if got.ClientName != "pine" || got.ClientVersion != pineVersion() {
+		t.Fatalf("Pine client metadata incorrect: %#v", got)
+	}
+}
+
+func TestPlaybackDeviceKeepsManualName(t *testing.T) {
+	cfg := config.Default()
+	cfg.DeviceName = "Desk Pine"
+	m := NewWithPlayer(cfg, nil, nil, nil, &mockPlayer{})
+
+	if got := m.playbackDevice().Model; got != "Desk Pine" {
+		t.Fatalf("manual device name changed: %q", got)
+	}
+}
+
+func TestBuildVersion(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{"", "dev"},
+		{"(devel)", "dev"},
+		{"v0.4.0", "v0.4.0"},
+	} {
+		if got := buildVersion(test.input); got != test.want {
+			t.Errorf("buildVersion(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}

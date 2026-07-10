@@ -79,7 +79,22 @@ Some keys are context-specific.
 
 Optional config file: `~/.config/pine/config.toml`
 
-See `internal/config/config.go` for the current fields and defaults.
+Pine creates a stable playback identity on first run:
+
+```toml
+device_name = "my-host (Pine)"
+device_id = "pine-my-host-a41c29ef"
+```
+
+Audiobookshelf uses `device_id` to distinguish playback devices. Keep it stable
+for one Pine installation. If you copy `config.toml` to another machine, delete
+or replace its `device_id` there so Pine generates a new one. `device_name` is
+display-only and can be changed without changing `device_id`.
+Audiobookshelf displays this as `Pine <device_name>` (without Pine's default
+`(Pine)` suffix), for example `Pine my-host`.
+
+Pine sends its Go module build version as `clientVersion` to Audiobookshelf.
+Local development builds report `dev`.
 
 ## Releases
 
