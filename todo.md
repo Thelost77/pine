@@ -1,1 +1,0 @@
-- [ ] Test how the metadata edit dialog handles the case when we edit the series into serie that doesn't exist yet. For example we have audiobook sherlock holmes #1 and we want to make it into sherlock holmes adventure serie, what will happen
