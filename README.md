@@ -12,7 +12,8 @@ Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](htt
 - Play audiobooks with chapter navigation and multi-track support
 - Play podcast episodes with progress tracking
 - Persistent local API cache for instant startup and near-instant library switching
-- Command palette (`Ctrl+P`) for global search and quick actions from anywhere
+- Fuzzy command-palette search (`Ctrl+P`) across books, podcasts, episodes, and series
+- In-place filtering (`/`) on home, library, and series lists
 - Metadata editor for books and episodes
 - MPRIS media-key support
 - Bookmarks — create, edit, navigate to, and delete
@@ -56,6 +57,7 @@ Some keys are context-specific.
 | `esc` / `←` | Go back |
 | `enter` / `→` | Open / select |
 | `j` / `k` | Navigate down / up |
+| `/` | Filter current list |
 | `h` / `l` | Seek backward / forward |
 | `space` / `p` | Play / pause |
 | `a` / `A` | Add to queue / play next |
@@ -101,8 +103,8 @@ Local development builds report `dev`.
 Create SemVer tags with a leading `v` so Go can resolve `@latest` and versioned installs correctly. Keep release notes in `docs/releases/` and publish the tag plus the GitHub Release together.
 
 ```sh
-${EDITOR:-vi} docs/releases/v0.4.0.md
-./scripts/release.sh v0.4.0
+${EDITOR:-vi} docs/releases/v0.5.0.md
+./scripts/release.sh v0.5.0
 ```
 
 ## Known issues

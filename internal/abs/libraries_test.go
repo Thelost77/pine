@@ -386,6 +386,7 @@ func TestGetLibrarySeriesHTTP(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected response")
+		return
 	}
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 series, got %d", len(resp.Results))
@@ -466,6 +467,7 @@ func TestGetSeriesContentsHTTP(t *testing.T) {
 	}
 	if contents == nil {
 		t.Fatal("expected series contents")
+		return
 	}
 	if contents.Series.Name != "The Expanse" {
 		t.Fatalf("series name = %q, want The Expanse", contents.Series.Name)
