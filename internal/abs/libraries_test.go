@@ -190,6 +190,9 @@ func TestGetLibraryItemHTTP(t *testing.T) {
 		if r.URL.Query().Get("expanded") != "1" {
 			t.Error("expected expanded=1 query param")
 		}
+		if r.URL.Query().Get("include") != "progress" {
+			t.Error("expected include=progress query param")
+		}
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
@@ -454,6 +457,26 @@ func TestGetSeriesContentsHTTP(t *testing.T) {
 				"limit": 50,
 				"page": 0
 			}`))
+		case "/api/me":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"mediaProgress": [
+					{
+						"libraryItemId": "li-book-001",
+						"episodeId": null,
+						"currentTime": 6000.0,
+						"progress": 1.0,
+						"isFinished": true
+					},
+					{
+						"libraryItemId": "li-book-002",
+						"episodeId": "ep-ignored",
+						"currentTime": 10.0,
+						"progress": 0.5,
+						"isFinished": false
+					}
+				]
+			}`))
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -480,6 +503,13 @@ func TestGetSeriesContentsHTTP(t *testing.T) {
 	}
 	if contents.Items[1].ID != "li-book-002" {
 		t.Fatalf("second item ID = %q, want li-book-002", contents.Items[1].ID)
+	}
+	p := contents.Items[0].UserMediaProgress
+	if p == nil || !p.IsFinished {
+		t.Fatalf("expected finished progress merged into li-book-001, got %+v", p)
+	}
+	if contents.Items[1].UserMediaProgress != nil {
+		t.Fatalf("episode-level progress must not merge into items, got %+v", contents.Items[1].UserMediaProgress)
 	}
 	if requests != 1 {
 		t.Fatalf("expected 1 item request, got %d", requests)

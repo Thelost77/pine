@@ -121,6 +121,22 @@ func TestView_ShowsSeriesNameAndBooks(t *testing.T) {
 	}
 }
 
+func TestViewShowsFinishedMarkerOnlyForFinishedBooks(t *testing.T) {
+	contents := sampleSeriesContents()
+	contents.Items[0].UserMediaProgress = &abs.UserMediaProgress{Progress: 1.0, IsFinished: true}
+
+	m := newTestModel()
+	m, _ = m.Update(LoadedMsg{Contents: contents})
+
+	v := m.View()
+	if !strings.Contains(v, "✓ Leviathan Wakes") {
+		t.Fatalf("expected finished marker before finished book title\n%s", v)
+	}
+	if strings.Contains(v, "✓ Caliban's War") {
+		t.Fatalf("unfinished book should not have finished marker\n%s", v)
+	}
+}
+
 func TestViewDoesNotShowLoadingMessage(t *testing.T) {
 	m := newTestModel()
 

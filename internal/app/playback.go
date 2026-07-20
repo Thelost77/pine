@@ -722,6 +722,22 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// evictProgressCaches drops cached data that embeds user progress for an item:
+// the progress record, the library item, the home shelves, and the series view.
+func evictProgressCaches(store *cache.Store, itemID, libraryID, seriesID string) {
+	if store == nil || itemID == "" {
+		return
+	}
+	_ = store.Delete("progress:" + itemID)
+	_ = store.Delete("item:" + itemID)
+	if libraryID != "" {
+		_ = store.Delete("personalized:" + libraryID)
+	}
+	if seriesID != "" {
+		_ = store.Delete("series-contents:" + seriesID)
+	}
+}
+
 func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
@@ -732,6 +748,10 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	cacheStore := m.cacheStore
 	itemID := item.ID
 	libraryID := item.LibraryID
+	seriesID := ""
+	if item.Media.Metadata.Series != nil {
+		seriesID = item.Media.Metadata.Series.ID
+	}
 	return m, func() tea.Msg {
 		var err error
 		if msg.Undo {
@@ -744,12 +764,7 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 				logger.Warn("failed to unmark finished", "err", err)
 				return PlaybackErrorMsg{Err: err}
 			}
-			if cacheStore != nil && itemID != "" {
-				_ = cacheStore.Delete("progress:" + itemID)
-				if libraryID != "" {
-					_ = cacheStore.Delete("personalized:" + libraryID)
-				}
-			}
+			evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 			return detail.MarkFinishedMsg{Progress: &abs.UserMediaProgress{
 				IsFinished: false,
 			}}
@@ -767,12 +782,7 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 			logger.Warn("failed to mark as finished", "err", err)
 			return PlaybackErrorMsg{Err: err}
 		}
-		if cacheStore != nil && itemID != "" {
-			_ = cacheStore.Delete("progress:" + itemID)
-			if libraryID != "" {
-				_ = cacheStore.Delete("personalized:" + libraryID)
-			}
-		}
+		evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 		progress := &abs.UserMediaProgress{
 			CurrentTime: duration,
 			Progress:    1.0,
@@ -796,6 +806,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	mpvPlayer := m.mpv
 	cacheStore := m.cacheStore
 	libraryID := m.playbackLibraryID
+	seriesID := m.playbackSeriesID
 
 	// Cache last played item for MPRIS metadata after stop
 	m.lastPlayedTitle = m.player.Title
@@ -813,12 +824,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	}
 
 	invalidateCache := func() {
-		if cacheStore != nil && itemID != "" {
-			_ = cacheStore.Delete("progress:" + itemID)
-			if libraryID != "" {
-				_ = cacheStore.Delete("personalized:" + libraryID)
-			}
-		}
+		evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 	}
 
 	cmds := []tea.Cmd{

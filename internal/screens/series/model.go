@@ -265,6 +265,9 @@ type seriesBookItem struct {
 
 func (i seriesBookItem) Title() string {
 	title := i.item.Media.Metadata.Title
+	if i.item.UserMediaProgress != nil && i.item.UserMediaProgress.IsFinished {
+		title = "✓ " + title
+	}
 	if i.current {
 		return title + "  (current)"
 	}

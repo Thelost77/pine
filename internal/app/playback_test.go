@@ -13,6 +13,7 @@ import (
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
+	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	tea "github.com/charmbracelet/bubbletea"
@@ -936,6 +937,64 @@ func TestMarkFinishedUsesEpisodeDurationForPodcasts(t *testing.T) {
 
 	if got, ok := req.Body["currentTime"].(float64); !ok || got != episodeDuration {
 		t.Fatalf("currentTime = %#v, want %v", req.Body["currentTime"], episodeDuration)
+	}
+}
+
+func TestMarkFinishedEvictsProgressCaches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/book-001" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	dbStore, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer func() { _ = dbStore.Close() }()
+
+	client := abs.NewClient(srv.URL, "tok")
+	cacheStore := cache.NewStore(dbStore)
+
+	item := &abs.LibraryItem{ID: "book-001", LibraryID: "lib-001", MediaType: "book"}
+	if err := cacheStore.PutLibraryItem("book-001", item, time.Minute); err != nil {
+		t.Fatalf("seed item cache: %v", err)
+	}
+	if err := cacheStore.PutSeriesContents("series-001", []abs.LibraryItem{*item}, time.Minute); err != nil {
+		t.Fatalf("seed series cache: %v", err)
+	}
+
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, cacheStore), cacheStore, &mockPlayer{})
+	_, cmd := m.handleMarkFinished(detail.MarkFinishedCmd{
+		Item: abs.LibraryItem{
+			ID:        "book-001",
+			LibraryID: "lib-001",
+			MediaType: "book",
+			Media: abs.Media{
+				Metadata: abs.MediaMetadata{
+					Title:  "A Book",
+					Series: &abs.SeriesSequence{ID: "series-001", Name: "A Series", Sequence: "1"},
+				},
+			},
+		},
+	})
+	if cmd == nil {
+		t.Fatal("expected command from handleMarkFinished")
+	}
+	if _, ok := cmd().(detail.MarkFinishedMsg); !ok {
+		t.Fatalf("expected MarkFinishedMsg, got %T", cmd())
+	}
+
+	if _, hit, _ := cacheStore.GetLibraryItem("book-001"); hit {
+		t.Fatal("expected item cache to be evicted after mark finished")
+	}
+	if _, hit, _ := cacheStore.GetSeriesContents("series-001"); hit {
+		t.Fatal("expected series contents cache to be evicted after mark finished")
 	}
 }
 

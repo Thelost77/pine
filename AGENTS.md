@@ -51,7 +51,7 @@ go vet ./...                        # type-check
 | `detail` | model.go, view.go | Viewport-scrollable content: description, series row, episodes list (podcasts), bookmarks list, inline bookmark editing, item deletion. Tab cycles focus between sections. |
 | `metadataedit` | model.go, view.go | Inline metadata editor for books and podcast episodes. |
 | `serieslist` | model.go | Paginated series browser (50/page), infinite scroll. |
-| `series` | model.go | Books within a series, sorted by sequence number. Highlights current item. |
+| `series` | model.go | Books within a series, sorted by sequence number. Highlights current item, prefixes finished books with ✓. |
 | `search` | cache.go | No longer a standalone screen. Fuzzy-search cache used by the command palette and shared with the library view. Builds full library snapshots (all items fetched, normalized, tokenized) with background pre-warm. |
 
 ### Cache (internal/cache/)
@@ -79,7 +79,7 @@ go vet ./...                        # type-check
 | `types.go` | All ABS data types. Custom UnmarshalJSON for MediaMetadata.Series (handles both object and array). |
 | `libraries.go` | GetLibraries, GetPersonalized, GetLibraryItems (paginated), GetLibraryItemsBatch (10 concurrent), GetLibrarySeries, GetSeriesContents, FilterAudioLibraries (sample-based audio detection) |
 | `playback.go` | StartPlaySession, StartEpisodePlaySession, SyncSession, CloseSession |
-| `progress.go` | UpdateProgress, GetMediaProgress (with bookmarks), UpdateEpisodeProgress |
+| `progress.go`, `me.go` | UpdateProgress, GetMediaProgress (with bookmarks), UpdateEpisodeProgress, GetMe (user + all media progress) |
 | `bookmarks.go` | CreateBookmark, UpdateBookmark, DeleteBookmark, GetBookmarks |
 
 ### Data (internal/db/)

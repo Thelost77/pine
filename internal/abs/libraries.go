@@ -289,8 +289,9 @@ func (c *Client) SearchPodcastEpisodes(ctx context.Context, libraryID, query str
 }
 
 // GetLibraryItem returns a single library item by ID with full details (including episodes for podcasts).
+// include=progress makes ABS embed userMediaProgress; expanded=1 is required for include to take effect.
 func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*LibraryItem, error) {
-	path := fmt.Sprintf("/api/items/%s?expanded=1", itemID)
+	path := fmt.Sprintf("/api/items/%s?expanded=1&include=progress", itemID)
 	logger.Debug("API request", "method", "GET", "path", path)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -395,6 +396,15 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 		}
 	}
 
+	// The items list endpoint never includes user progress (ABS merges it
+	// client-side from /api/me), so merge it here. Best-effort: progress is
+	// decorative for the series view and must not fail the whole load.
+	if me, err := c.GetMe(ctx); err == nil && me != nil {
+		mergeMediaProgress(items, me.MediaProgress)
+	} else if err != nil {
+		logger.Debug("series progress merge skipped", "seriesID", seriesID, "err", err)
+	}
+
 	sortSeriesItems(items, seriesID)
 	if series.Name == "" {
 		for _, item := range items {
@@ -406,6 +416,28 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 	}
 
 	return &SeriesContents{Series: *series, Items: items}, nil
+}
+
+// mergeMediaProgress attaches book-level user progress (no episode ID) to
+// matching library items.
+func mergeMediaProgress(items []LibraryItem, progress []MediaProgressEntry) {
+	byItem := make(map[string]MediaProgressEntry, len(progress))
+	for _, p := range progress {
+		if p.EpisodeID == "" {
+			byItem[p.LibraryItemID] = p
+		}
+	}
+	for i := range items {
+		p, ok := byItem[items[i].ID]
+		if !ok {
+			continue
+		}
+		items[i].UserMediaProgress = &UserMediaProgress{
+			CurrentTime: p.CurrentTime,
+			Progress:    p.Progress,
+			IsFinished:  p.IsFinished,
+		}
+	}
 }
 
 func sortSeriesItems(items []LibraryItem, seriesID string) {
