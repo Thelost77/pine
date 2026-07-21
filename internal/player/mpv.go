@@ -85,6 +85,7 @@ type Mpv struct {
 	newConn  func(socketPath string) IPCConnection
 	procMu   sync.Mutex
 	waitDone chan struct{}
+	hdrFile  string
 }
 
 // NewMpv creates an Mpv player with default process and connection factories.
@@ -114,9 +115,31 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 		fmt.Sprintf("--start=%s", startTime),
 	}
-	for _, h := range httpHeaders {
-		args = append(args, fmt.Sprintf("--http-header-fields=%s", h))
+	// Headers carry the auth token; keep them out of the process argument list
+	// (visible via ps or /proc) by writing them to a 0600 temp config file.
+	m.procMu.Lock()
+	if m.hdrFile != "" {
+		_ = os.Remove(m.hdrFile)
+		m.hdrFile = ""
 	}
+	if len(httpHeaders) > 0 {
+		hdrFile, err := os.CreateTemp("", "pine-mpv-headers-*.conf")
+		if err == nil {
+			_ = os.Chmod(hdrFile.Name(), 0600)
+			for _, h := range httpHeaders {
+				_, _ = hdrFile.WriteString(fmt.Sprintf("http-header-fields-append=%s\n", h))
+			}
+			_ = hdrFile.Close()
+			m.hdrFile = hdrFile.Name()
+			args = append(args, fmt.Sprintf("--include=%s", m.hdrFile))
+		} else {
+			logger.Warn("failed to create secure headers file, falling back to command line", "err", err)
+			for _, h := range httpHeaders {
+				args = append(args, fmt.Sprintf("--http-header-fields=%s", h))
+			}
+		}
+	}
+	m.procMu.Unlock()
 	args = append(args, url)
 	if paused {
 		args = append(args, "--pause")
@@ -299,6 +322,10 @@ func (m *Mpv) startProcessWatchers(cmd *exec.Cmd, stdout, stderr io.ReadCloser) 
 		if m.cmd == cmd {
 			m.cmd = nil
 			m.waitDone = nil
+			if m.hdrFile != "" {
+				_ = os.Remove(m.hdrFile)
+				m.hdrFile = ""
+			}
 		}
 		m.procMu.Unlock()
 
@@ -328,6 +355,10 @@ func (m *Mpv) stopProcess(reason string) {
 	if m.cmd == cmd {
 		m.cmd = nil
 		m.waitDone = nil
+		if m.hdrFile != "" {
+			_ = os.Remove(m.hdrFile)
+			m.hdrFile = ""
+		}
 	}
 	m.procMu.Unlock()
 }
