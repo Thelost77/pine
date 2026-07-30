@@ -62,6 +62,7 @@ func New(styles ui.Styles) Model {
 		l.SetShowHelp(false)
 		l.SetShowStatusBar(true)
 		l.SetFilteringEnabled(true)
+		l.Filter = components.UnicodeFilter
 		l.AdditionalFullHelpKeys = func() []key.Binding {
 			return []key.Binding{
 				key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc", "back")),

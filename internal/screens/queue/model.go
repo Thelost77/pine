@@ -3,6 +3,7 @@ package queue
 import (
 	"github.com/Thelost77/spruce/internal/jellyfin"
 	"github.com/Thelost77/spruce/internal/ui"
+	"github.com/Thelost77/spruce/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,6 +41,7 @@ func New(styles ui.Styles) Model {
 	l.SetShowStatusBar(true)
 	l.SetStatusBarItemName("queued", "queued")
 	l.SetFilteringEnabled(true)
+	l.Filter = components.UnicodeFilter
 	l.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "jump to")),
