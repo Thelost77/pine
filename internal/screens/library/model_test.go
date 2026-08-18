@@ -149,6 +149,9 @@ func TestLibraryModel_Actions(t *testing.T) {
 	if !ok || len(addMsg.Tracks) != 2 {
 		t.Fatalf("expected AddTracksToQueueMsg with 2 tracks, got %T %+v", cmd(), addMsg)
 	}
+	if addMsg.Confirmation.Origin != QueueOriginLibrary || !slices.Equal(addMsg.Confirmation.ItemIDs, []string{"alb-1"}) {
+		t.Fatalf("album confirmation = %+v, want album source row", addMsg.Confirmation)
+	}
 
 	// Move to LevelTracks
 	m, _ = m.Update(TracksLoadedMsg{Tracks: []jellyfin.Track{{ID: "t-1", Name: "Airbag"}, {ID: "t-2", Name: "Paranoid Android"}}})
@@ -582,6 +585,52 @@ func TestLibraryModel_FetchesAcrossMusicLibraries(t *testing.T) {
 	m, _ = m.Update(cmd())
 	if got := trackNames(m.AllTracks()); len(got) != 2 || got[0] != "One" || got[1] != "Two" {
 		t.Fatalf("tracks = %v, want [One Two]", got)
+	}
+}
+
+func TestLibraryModel_FlashItems(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m, _ = m.Update(AlbumsLoadedMsg{Albums: []jellyfin.Album{
+		{ID: "alb-1", Name: "OK Computer"},
+	}})
+
+	if cmd := m.FlashItems("alb-1"); cmd == nil {
+		t.Fatal("expected flash expiry command")
+	}
+	if !m.IsFlashing("alb-1") {
+		t.Fatal("expected album to flash after FlashItems")
+	}
+}
+
+func TestLibraryModel_QueueKeysSetVisibleConfirmations(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m.SetSize(80, 24)
+	m, _ = m.Update(AlbumsLoadedMsg{Albums: []jellyfin.Album{
+		{ID: "alb-1", Name: "OK Computer"},
+	}})
+	m, _ = m.Update(TracksLoadedMsg{
+		Tracks: []jellyfin.Track{
+			{ID: "t-1", Name: "Airbag"},
+			{ID: "t-2", Name: "Paranoid Android"},
+		},
+	})
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	addOne := cmd().(AddTrackToQueueMsg)
+	if addOne.Confirmation.Origin != QueueOriginLibrary || !slices.Equal(addOne.Confirmation.ItemIDs, []string{"t-1"}) {
+		t.Fatalf("a confirmation = %+v, want library track t-1", addOne.Confirmation)
+	}
+
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	addAll := cmd().(AddTracksToQueueMsg)
+	if addAll.Confirmation.Origin != QueueOriginLibrary || !slices.Equal(addAll.Confirmation.ItemIDs, []string{"t-1", "t-2"}) {
+		t.Fatalf("A confirmation = %+v, want both visible tracks", addAll.Confirmation)
+	}
+
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	addShuffled := cmd().(AddShuffledTracksToQueueMsg)
+	if addShuffled.Confirmation.Origin != QueueOriginLibrary || !slices.Equal(addShuffled.Confirmation.ItemIDs, []string{"t-1", "t-2"}) {
+		t.Fatalf("S confirmation = %+v, want both visible tracks", addShuffled.Confirmation)
 	}
 }
 

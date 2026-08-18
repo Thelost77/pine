@@ -40,6 +40,7 @@ func (i albumItem) Description() string {
 	return artist + year
 }
 func (i albumItem) FilterValue() string { return i.Album.Name }
+func (i albumItem) FlashID() string     { return i.Album.ID }
 
 // trackItem wraps jellyfin.Track for bubbles list.
 type trackItem struct {
@@ -61,3 +62,4 @@ func (i trackItem) Description() string {
 	return fmt.Sprintf("%s • %s", i.Track.DisplayArtist(), dur)
 }
 func (i trackItem) FilterValue() string { return i.Track.Name }
+func (i trackItem) FlashID() string     { return i.Track.ID }

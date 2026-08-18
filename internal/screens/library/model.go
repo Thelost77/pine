@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -60,12 +61,12 @@ type Model struct {
 	width   int
 	height  int
 	styles  ui.Styles
+	flash   *components.ItemFlash
 }
 
 func New(styles ui.Styles) Model {
-	del := list.NewDefaultDelegate()
-	del.Styles.SelectedTitle = del.Styles.SelectedTitle.Foreground(styles.Accent.GetForeground()).BorderForeground(styles.Accent.GetForeground())
-	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
+	flash := components.NewItemFlash()
+	del := components.NewFlashDelegate(styles, flash)
 
 	initList := func(title string, includeSortKey bool) list.Model {
 		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
@@ -99,6 +100,7 @@ func New(styles ui.Styles) Model {
 		albumList:  initList("Albums", false),
 		trackList:  initList("Tracks", true),
 		styles:     styles,
+		flash:      flash,
 		loading:    true,
 	}
 }
@@ -188,37 +190,41 @@ func (m Model) fetchTracksCmd(albumID string) tea.Cmd {
 	}
 }
 
-type AddShuffledTracksToQueueMsg struct {
-	Tracks []jellyfin.Track
-}
-
 func (m Model) fetchAlbumTracksForQueueCmd(albumID string) tea.Cmd {
 	client := m.client
+	confirmation := QueueConfirmation{Origin: QueueOriginLibrary, ItemIDs: []string{albumID}}
 	return func() tea.Msg {
 		logger.Info("fetching tracks for queue", "albumID", albumID)
 		if client == nil {
-			return nil
+			return AddTracksToQueueMsg{Err: errors.New("cannot queue album without a Jellyfin client")}
 		}
 		tracks, err := client.GetTracks(context.Background(), albumID)
-		if err != nil || len(tracks) == 0 {
-			return nil
+		if err != nil {
+			return AddTracksToQueueMsg{Err: fmt.Errorf("queue album: %w", err)}
 		}
-		return AddTracksToQueueMsg{Tracks: tracks}
+		if len(tracks) == 0 {
+			return AddTracksToQueueMsg{Err: errors.New("album has no tracks to queue")}
+		}
+		return AddTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 	}
 }
 
 func (m Model) fetchAlbumTracksForShuffledQueueCmd(albumID string) tea.Cmd {
 	client := m.client
+	confirmation := QueueConfirmation{Origin: QueueOriginLibrary, ItemIDs: []string{albumID}}
 	return func() tea.Msg {
 		logger.Info("fetching shuffled tracks for queue", "albumID", albumID)
 		if client == nil {
-			return nil
+			return AddShuffledTracksToQueueMsg{Err: errors.New("cannot queue album without a Jellyfin client")}
 		}
 		tracks, err := client.GetTracks(context.Background(), albumID)
-		if err != nil || len(tracks) == 0 {
-			return nil
+		if err != nil {
+			return AddShuffledTracksToQueueMsg{Err: fmt.Errorf("queue shuffled album: %w", err)}
 		}
-		return AddShuffledTracksToQueueMsg{Tracks: tracks}
+		if len(tracks) == 0 {
+			return AddShuffledTracksToQueueMsg{Err: errors.New("album has no tracks to queue")}
+		}
+		return AddShuffledTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 	}
 }
 
@@ -294,6 +300,10 @@ func (m *Model) PatchTrack(id, name string, artists []string, album string) {
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case components.ItemFlashExpiredMsg:
+		m.flash.HandleExpired(msg)
+		return m, nil
+
 	case RefilterMsg:
 		return m.Update(msg.Msg)
 
@@ -446,18 +456,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if msg.String() == "a" && m.level == LevelTracks {
 				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
 					track := sel.Track
+					confirmation := QueueConfirmation{
+						Origin:  QueueOriginLibrary,
+						ItemIDs: []string{track.ID},
+					}
 					return m, func() tea.Msg {
-						return AddTrackToQueueMsg{Track: track}
+						return AddTrackToQueueMsg{Track: track, Confirmation: confirmation}
 					}
 				}
 			}
 			if (msg.String() == "A" || msg.String() == "S") && m.level == LevelTracks && len(m.tracks) > 0 {
 				tracks := m.tracks
+				confirmation := QueueConfirmation{
+					Origin:  QueueOriginLibrary,
+					ItemIDs: components.VisibleFlashIDs(m.trackList),
+				}
 				return m, func() tea.Msg {
 					if msg.String() == "S" {
-						return AddShuffledTracksToQueueMsg{Tracks: tracks}
+						return AddShuffledTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 					}
-					return AddTracksToQueueMsg{Tracks: tracks}
+					return AddTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 				}
 			}
 		case "L":
@@ -606,6 +624,19 @@ func (m Model) SelectedTrack() (jellyfin.Track, bool) {
 		return sel.Track, true
 	}
 	return jellyfin.Track{}, false
+}
+
+// FlashItems highlights the given item IDs briefly to confirm a queue action.
+func (m *Model) FlashItems(ids ...string) tea.Cmd {
+	if m.flash == nil {
+		return nil
+	}
+	return m.flash.Start(ids...)
+}
+
+// IsFlashing reports whether id is currently highlighted.
+func (m Model) IsFlashing(id string) bool {
+	return m.flash != nil && m.flash.Active(id)
 }
 
 func (m Model) AllTracks() []jellyfin.Track {

@@ -19,6 +19,7 @@ func (i playlistItem) Description() string {
 	return "Playlist"
 }
 func (i playlistItem) FilterValue() string { return i.Playlist.Name }
+func (i playlistItem) FlashID() string     { return i.Playlist.ID }
 
 type trackItem struct {
 	Track jellyfin.Track
@@ -38,3 +39,4 @@ func (i trackItem) Description() string {
 	return fmt.Sprintf("%s • %s", i.Track.DisplayArtist(), ui.FormatDuration(i.Track.Duration()))
 }
 func (i trackItem) FilterValue() string { return i.Track.Name }
+func (i trackItem) FlashID() string     { return i.Track.ID }

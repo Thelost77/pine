@@ -3,6 +3,7 @@ package components
 import (
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -66,7 +67,7 @@ func (b ErrorBanner) View() string {
 		return ""
 	}
 
-	msg := enrichMessage(b.err.Error())
+	msg := enrichMessage(sanitizeTerminalText(b.err.Error()))
 
 	w := b.width
 	if w < 4 {
@@ -78,6 +79,21 @@ func (b ErrorBanner) View() string {
 	content := ansi.Truncate("⚠ "+msg, contentWidth, "…")
 
 	return style.Width(w).Render(content)
+}
+
+// sanitizeTerminalText removes escape sequences and controls before terminal rendering.
+func sanitizeTerminalText(msg string) string {
+	msg = ansi.Strip(msg)
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, msg)
 }
 
 // enrichMessage adds contextual hints for known error patterns.

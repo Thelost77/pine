@@ -249,6 +249,11 @@ func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(components.ItemFlashExpiredMsg); ok {
+		msg.Owner.HandleExpired(msg)
+		return m, nil
+	}
+
 	if m.palette.Visible() {
 		cmd, handled := m.palette.Update(msg)
 		if handled {
@@ -575,24 +580,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Info("adding track to queue", "title", msg.Track.Name)
 		wasEmpty := !m.IsPlaying()
 		m.tracks = append(m.tracks, msg.Track)
+		flashCmd := m.flashQueuedItems(msg.Confirmation)
 		if wasEmpty {
-			return m.startPlaybackAt(len(m.tracks) - 1)
+			newM, cmd := m.startPlaybackAt(len(m.tracks) - 1)
+			return newM, tea.Batch(cmd, flashCmd)
 		}
 		m.syncQueueScreen()
-		return m, nil
+		return m, flashCmd
 
 	case library.AddTracksToQueueMsg:
+		if msg.Err != nil {
+			if jellyfin.IsHTTPStatus(msg.Err, 401) {
+				return m.handleAuthReset(msg.Err)
+			}
+			return m, m.err.SetError(msg.Err)
+		}
+		if len(msg.Tracks) == 0 {
+			return m, nil
+		}
 		logger.Info("adding tracks to queue", "count", len(msg.Tracks))
 		wasEmpty := !m.IsPlaying()
 		firstIdx := len(m.tracks)
 		m.tracks = append(m.tracks, msg.Tracks...)
-		if wasEmpty && len(m.tracks) > 0 {
-			return m.startPlaybackAt(firstIdx)
+		flashCmd := m.flashQueuedItems(msg.Confirmation)
+		if wasEmpty {
+			newM, cmd := m.startPlaybackAt(firstIdx)
+			return newM, tea.Batch(cmd, flashCmd)
 		}
 		m.syncQueueScreen()
-		return m, nil
+		return m, flashCmd
 
 	case library.AddShuffledTracksToQueueMsg:
+		if msg.Err != nil {
+			if jellyfin.IsHTTPStatus(msg.Err, 401) {
+				return m.handleAuthReset(msg.Err)
+			}
+			return m, m.err.SetError(msg.Err)
+		}
+		if len(msg.Tracks) == 0 {
+			return m, nil
+		}
 		logger.Info("adding shuffled tracks to queue", "count", len(msg.Tracks))
 		wasEmpty := !m.IsPlaying()
 		firstIdx := len(m.tracks)
@@ -602,11 +629,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 		})
 		m.tracks = append(m.tracks, shuffled...)
-		if wasEmpty && len(m.tracks) > 0 {
-			return m.startPlaybackAt(firstIdx)
+		flashCmd := m.flashQueuedItems(msg.Confirmation)
+		if wasEmpty {
+			newM, cmd := m.startPlaybackAt(firstIdx)
+			return newM, tea.Batch(cmd, flashCmd)
 		}
 		m.syncQueueScreen()
-		return m, nil
+		return m, flashCmd
 
 	case library.EditMetadataMsg:
 		m.metadataEditScreen = metadataedit.New(m.styles, m.client, msg.ItemID, msg.ItemType, msg.Track, msg.Album)
@@ -810,6 +839,21 @@ func (m *Model) IsPaused() bool {
 
 func (m *Model) HasActiveItem() bool {
 	return m.IsPlaying()
+}
+
+// flashQueuedItems briefly highlights source rows after a successful queue action.
+func (m *Model) flashQueuedItems(confirmation library.QueueConfirmation) tea.Cmd {
+	if len(confirmation.ItemIDs) == 0 {
+		return nil
+	}
+	switch confirmation.Origin {
+	case library.QueueOriginLibrary:
+		return m.libraryScreen.FlashItems(confirmation.ItemIDs...)
+	case library.QueueOriginPlaylists:
+		return m.playlistsScreen.FlashItems(confirmation.ItemIDs...)
+	default:
+		return nil
+	}
 }
 
 func (m *Model) CurrentTitle() string {

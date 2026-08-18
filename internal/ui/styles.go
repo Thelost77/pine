@@ -13,6 +13,7 @@ type Styles struct {
 	Selected  lipgloss.Style
 	Error     lipgloss.Style
 	Accent    lipgloss.Style
+	Info      lipgloss.Style
 	Border    lipgloss.Style
 	PlayerBar lipgloss.Style
 	StatusBar lipgloss.Style
@@ -54,6 +55,9 @@ func NewStyles(theme config.ThemeConfig) Styles {
 
 		Accent: lipgloss.NewStyle().
 			Foreground(accent),
+
+		Info: lipgloss.NewStyle().
+			Foreground(info),
 
 		Border: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

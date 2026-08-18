@@ -55,6 +55,12 @@ func TestPlaylistsModel_NavigationAndQueueActions(t *testing.T) {
 		t.Fatalf("unexpected playlists: %+v", m.Playlists())
 	}
 
+	_, queueCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	queuedPlaylist := queueCmd().(library.AddTracksToQueueMsg)
+	if queuedPlaylist.Confirmation.Origin != library.QueueOriginPlaylists || !slices.Equal(queuedPlaylist.Confirmation.ItemIDs, []string{"pl-1"}) {
+		t.Fatalf("playlist confirmation = %+v, want playlist source row", queuedPlaylist.Confirmation)
+	}
+
 	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected playlist tracks cmd")
@@ -76,6 +82,9 @@ func TestPlaylistsModel_NavigationAndQueueActions(t *testing.T) {
 	if !ok || addOne.Track.ID != "t-1" {
 		t.Fatalf("a returned %T %+v, want AddTrackToQueueMsg t-1", msg, addOne)
 	}
+	if addOne.Confirmation.Origin != library.QueueOriginPlaylists || !slices.Equal(addOne.Confirmation.ItemIDs, []string{"t-1"}) {
+		t.Fatalf("a confirmation = %+v, want playlist track t-1", addOne.Confirmation)
+	}
 
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	msg = cmd()
@@ -83,12 +92,18 @@ func TestPlaylistsModel_NavigationAndQueueActions(t *testing.T) {
 	if !ok || len(addAll.Tracks) != 2 {
 		t.Fatalf("A returned %T %+v, want AddTracksToQueueMsg with 2 tracks", msg, addAll)
 	}
+	if addAll.Confirmation.Origin != library.QueueOriginPlaylists || !slices.Equal(addAll.Confirmation.ItemIDs, []string{"t-1", "t-2"}) {
+		t.Fatalf("A confirmation = %+v, want both visible playlist tracks", addAll.Confirmation)
+	}
 
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	msg = cmd()
 	addShuffled, ok := msg.(library.AddShuffledTracksToQueueMsg)
 	if !ok || len(addShuffled.Tracks) != 2 {
 		t.Fatalf("S returned %T %+v, want AddShuffledTracksToQueueMsg with 2 tracks", msg, addShuffled)
+	}
+	if addShuffled.Confirmation.Origin != library.QueueOriginPlaylists || !slices.Equal(addShuffled.Confirmation.ItemIDs, []string{"t-1", "t-2"}) {
+		t.Fatalf("S confirmation = %+v, want both visible playlist tracks", addShuffled.Confirmation)
 	}
 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})

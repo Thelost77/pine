@@ -2,6 +2,7 @@ package playlists
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -45,12 +46,12 @@ type Model struct {
 	width   int
 	height  int
 	styles  ui.Styles
+	flash   *components.ItemFlash
 }
 
 func New(styles ui.Styles) Model {
-	del := list.NewDefaultDelegate()
-	del.Styles.SelectedTitle = del.Styles.SelectedTitle.Foreground(styles.Accent.GetForeground()).BorderForeground(styles.Accent.GetForeground())
-	del.Styles.SelectedDesc = del.Styles.SelectedDesc.Foreground(styles.Muted.GetForeground()).BorderForeground(styles.Accent.GetForeground())
+	flash := components.NewItemFlash()
+	del := components.NewFlashDelegate(styles, flash)
 
 	initList := func(title string) list.Model {
 		l := list.New(components.BuildSkeletonRows(styles), del, 0, 0)
@@ -79,6 +80,7 @@ func New(styles ui.Styles) Model {
 		playlistList: initList("Playlists"),
 		trackList:    initList("Playlist Tracks"),
 		styles:       styles,
+		flash:        flash,
 		loading:      true,
 	}
 }
@@ -121,21 +123,41 @@ func (m Model) fetchPlaylistTracksCmd(playlistID string) tea.Cmd {
 
 func (m Model) fetchPlaylistTracksForQueueCmd(playlistID string, shuffled bool) tea.Cmd {
 	client := m.client
+	confirmation := library.QueueConfirmation{
+		Origin:  library.QueueOriginPlaylists,
+		ItemIDs: []string{playlistID},
+	}
+	failed := func(err error) tea.Msg {
+		if shuffled {
+			return library.AddShuffledTracksToQueueMsg{Err: err}
+		}
+		return library.AddTracksToQueueMsg{Err: err}
+	}
 	return func() tea.Msg {
 		logger.Info("fetching playlist tracks for queue", "playlistID", playlistID, "shuffled", shuffled)
+		if client == nil {
+			return failed(errors.New("cannot queue playlist without a Jellyfin client"))
+		}
 		tracks, err := client.GetPlaylistTracks(context.Background(), playlistID)
-		if err != nil || len(tracks) == 0 {
-			return nil
+		if err != nil {
+			return failed(fmt.Errorf("queue playlist: %w", err))
+		}
+		if len(tracks) == 0 {
+			return failed(errors.New("playlist has no tracks to queue"))
 		}
 		if shuffled {
-			return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
+			return library.AddShuffledTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 		}
-		return library.AddTracksToQueueMsg{Tracks: tracks}
+		return library.AddTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 	}
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case components.ItemFlashExpiredMsg:
+		m.flash.HandleExpired(msg)
+		return m, nil
+
 	case RefilterMsg:
 		return m.Update(msg.Msg)
 
@@ -222,16 +244,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if msg.String() == "a" && m.level == LevelTracks {
 				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
 					track := sel.Track
-					return m, func() tea.Msg { return library.AddTrackToQueueMsg{Track: track} }
+					confirmation := library.QueueConfirmation{
+						Origin:  library.QueueOriginPlaylists,
+						ItemIDs: []string{track.ID},
+					}
+					return m, func() tea.Msg {
+						return library.AddTrackToQueueMsg{Track: track, Confirmation: confirmation}
+					}
 				}
 			}
 			if (msg.String() == "A" || msg.String() == "S") && m.level == LevelTracks && len(m.tracks) > 0 {
 				tracks := m.tracks
+				confirmation := library.QueueConfirmation{
+					Origin:  library.QueueOriginPlaylists,
+					ItemIDs: components.VisibleFlashIDs(m.trackList),
+				}
 				return m, func() tea.Msg {
 					if msg.String() == "S" {
-						return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
+						return library.AddShuffledTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 					}
-					return library.AddTracksToQueueMsg{Tracks: tracks}
+					return library.AddTracksToQueueMsg{Tracks: tracks, Confirmation: confirmation}
 				}
 			}
 		case "L":
@@ -343,6 +375,19 @@ func (m Model) SelectedTrack() (jellyfin.Track, bool) {
 		return sel.Track, true
 	}
 	return jellyfin.Track{}, false
+}
+
+// FlashItems highlights the given item IDs briefly to confirm a queue action.
+func (m *Model) FlashItems(ids ...string) tea.Cmd {
+	if m.flash == nil {
+		return nil
+	}
+	return m.flash.Start(ids...)
+}
+
+// IsFlashing reports whether id is currently highlighted.
+func (m Model) IsFlashing(id string) bool {
+	return m.flash != nil && m.flash.Active(id)
 }
 
 func (m *Model) SelectPlaylist(playlist jellyfin.Playlist) tea.Cmd {

@@ -286,25 +286,31 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 			return newM, cmd
 		case jellyfin.Album:
 			if m.client == nil {
-				return m, nil
+				return m, m.err.SetError(fmt.Errorf("cannot queue album without a Jellyfin client"))
 			}
 			client := m.client
 			return m, func() tea.Msg {
 				tracks, err := client.GetTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
+				if err != nil {
+					return library.AddTracksToQueueMsg{Err: fmt.Errorf("queue album: %w", err)}
+				}
+				if len(tracks) == 0 {
+					return library.AddTracksToQueueMsg{Err: fmt.Errorf("album %q has no tracks to queue", item.Name)}
 				}
 				return library.AddTracksToQueueMsg{Tracks: tracks}
 			}
 		case jellyfin.Playlist:
 			if m.client == nil {
-				return m, nil
+				return m, m.err.SetError(fmt.Errorf("cannot queue playlist without a Jellyfin client"))
 			}
 			client := m.client
 			return m, func() tea.Msg {
 				tracks, err := client.GetPlaylistTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
+				if err != nil {
+					return library.AddTracksToQueueMsg{Err: fmt.Errorf("queue playlist: %w", err)}
+				}
+				if len(tracks) == 0 {
+					return library.AddTracksToQueueMsg{Err: fmt.Errorf("playlist %q has no tracks to queue", item.Name)}
 				}
 				return library.AddTracksToQueueMsg{Tracks: tracks}
 			}
@@ -317,25 +323,31 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 			return newM, cmd
 		case jellyfin.Album:
 			if m.client == nil {
-				return m, nil
+				return m, m.err.SetError(fmt.Errorf("cannot queue album without a Jellyfin client"))
 			}
 			client := m.client
 			return m, func() tea.Msg {
 				tracks, err := client.GetTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
+				if err != nil {
+					return library.AddShuffledTracksToQueueMsg{Err: fmt.Errorf("queue shuffled album: %w", err)}
+				}
+				if len(tracks) == 0 {
+					return library.AddShuffledTracksToQueueMsg{Err: fmt.Errorf("album %q has no tracks to queue", item.Name)}
 				}
 				return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
 			}
 		case jellyfin.Playlist:
 			if m.client == nil {
-				return m, nil
+				return m, m.err.SetError(fmt.Errorf("cannot queue playlist without a Jellyfin client"))
 			}
 			client := m.client
 			return m, func() tea.Msg {
 				tracks, err := client.GetPlaylistTracks(context.Background(), item.ID)
-				if err != nil || len(tracks) == 0 {
-					return nil
+				if err != nil {
+					return library.AddShuffledTracksToQueueMsg{Err: fmt.Errorf("queue shuffled playlist: %w", err)}
+				}
+				if len(tracks) == 0 {
+					return library.AddShuffledTracksToQueueMsg{Err: fmt.Errorf("playlist %q has no tracks to queue", item.Name)}
 				}
 				return library.AddShuffledTracksToQueueMsg{Tracks: tracks}
 			}

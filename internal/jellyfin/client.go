@@ -26,7 +26,7 @@ type HTTPStatusError struct {
 }
 
 func (e *HTTPStatusError) Error() string {
-	return fmt.Sprintf("unexpected status %d: %s", e.StatusCode, e.Body)
+	return fmt.Sprintf("unexpected HTTP status %d", e.StatusCode)
 }
 
 // IsHTTPStatus reports whether err or one of its wrapped errors is an HTTPStatusError

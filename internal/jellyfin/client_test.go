@@ -11,6 +11,16 @@ import (
 	"github.com/Thelost77/spruce/internal/buildinfo"
 )
 
+func TestHTTPStatusErrorDoesNotExposeResponseBody(t *testing.T) {
+	err := (&HTTPStatusError{StatusCode: http.StatusInternalServerError, Body: "secret server body"}).Error()
+	if strings.Contains(err, "secret server body") {
+		t.Fatalf("HTTPStatusError exposed response body: %q", err)
+	}
+	if !strings.Contains(err, "500") {
+		t.Fatalf("HTTPStatusError omitted status code: %q", err)
+	}
+}
+
 func TestClient_Login(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/Users/AuthenticateByName" {

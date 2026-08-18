@@ -11,14 +11,39 @@ type PlayTracksMsg struct {
 	StartIndex int
 }
 
+// QueueOrigin identifies the screen that initiated a queue action.
+type QueueOrigin int
+
+const (
+	QueueOriginNone QueueOrigin = iota
+	QueueOriginLibrary
+	QueueOriginPlaylists
+)
+
+// QueueConfirmation identifies source rows to flash after a successful queue action.
+type QueueConfirmation struct {
+	Origin  QueueOrigin
+	ItemIDs []string
+}
+
 // AddTrackToQueueMsg signals that a single track should be appended to the queue.
 type AddTrackToQueueMsg struct {
-	Track jellyfin.Track
+	Track        jellyfin.Track
+	Confirmation QueueConfirmation
 }
 
 // AddTracksToQueueMsg signals that multiple tracks should be appended to the queue.
 type AddTracksToQueueMsg struct {
-	Tracks []jellyfin.Track
+	Tracks       []jellyfin.Track
+	Confirmation QueueConfirmation
+	Err          error
+}
+
+// AddShuffledTracksToQueueMsg signals that multiple tracks should be shuffled and appended.
+type AddShuffledTracksToQueueMsg struct {
+	Tracks       []jellyfin.Track
+	Confirmation QueueConfirmation
+	Err          error
 }
 
 // AlbumsLoadedMsg is received when albums are loaded from Jellyfin.

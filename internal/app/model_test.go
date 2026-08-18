@@ -857,3 +857,144 @@ func TestAppModel_QueueHintsDoNotDuplicatePlayerControls(t *testing.T) {
 		t.Fatalf("expected global player speed/vol hints, got %q", hints)
 	}
 }
+
+func TestAppModel_QueueAddFlashesOnlyOriginScreen(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+	m.libraryScreen, _ = m.libraryScreen.Update(library.TracksLoadedMsg{
+		Tracks: []jellyfin.Track{{ID: "t-1", Name: "Airbag"}},
+	})
+	m.playlistsScreen, _ = m.playlistsScreen.Update(playlists.PlaylistTracksLoadedMsg{
+		Tracks: []jellyfin.Track{{ID: "t-1", Name: "Airbag"}},
+	})
+
+	// Keep playback already active so add-to-queue does not start a new launch path.
+	m.tracks = []jellyfin.Track{{ID: "playing", Name: "Now"}}
+	m.currentIndex = 0
+	m.playerState.Title = "Now"
+	m.playerState.Playing = true
+
+	newM, cmd := m.Update(library.AddTrackToQueueMsg{
+		Track: jellyfin.Track{ID: "t-1", Name: "Airbag"},
+		Confirmation: library.QueueConfirmation{
+			Origin:  library.QueueOriginLibrary,
+			ItemIDs: []string{"t-1"},
+		},
+	})
+	m = newM.(*Model)
+	if len(m.tracks) != 2 {
+		t.Fatalf("queue length = %d, want 2", len(m.tracks))
+	}
+	if !m.libraryScreen.IsFlashing("t-1") {
+		t.Fatal("expected queued library track to flash")
+	}
+	if m.playlistsScreen.IsFlashing("t-1") {
+		t.Fatal("playlist track must not flash for a library action")
+	}
+	if cmd == nil {
+		t.Fatal("expected flash expiry command")
+	}
+}
+
+func TestAppModel_FlashExpiresWhileCommandPaletteIsOpen(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.tracks = []jellyfin.Track{{ID: "playing", Name: "Now"}}
+	m.currentIndex = 0
+	m.playerState.Playing = true
+
+	newM, expiryCmd := m.Update(library.AddTrackToQueueMsg{
+		Track: jellyfin.Track{ID: "t-1", Name: "Airbag"},
+		Confirmation: library.QueueConfirmation{
+			Origin:  library.QueueOriginLibrary,
+			ItemIDs: []string{"t-1"},
+		},
+	})
+	m = newM.(*Model)
+	if !m.libraryScreen.IsFlashing("t-1") || expiryCmd == nil {
+		t.Fatal("expected active flash and expiry command")
+	}
+
+	m.openCommandPalette()
+	if !m.palette.Visible() {
+		t.Fatal("expected command palette to be visible")
+	}
+	newM, _ = m.Update(expiryCmd())
+	m = newM.(*Model)
+	if m.libraryScreen.IsFlashing("t-1") {
+		t.Fatal("command palette consumed flash expiration")
+	}
+	if !m.palette.Visible() {
+		t.Fatal("flash expiration should not close the command palette")
+	}
+}
+
+func TestAppModel_MultiTrackQueueAddFlashesAllConfirmedItems(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.libraryScreen, _ = m.libraryScreen.Update(library.TracksLoadedMsg{
+		Tracks: []jellyfin.Track{
+			{ID: "t-1", Name: "Airbag"},
+			{ID: "t-2", Name: "Paranoid Android"},
+		},
+	})
+	m.tracks = []jellyfin.Track{{ID: "playing", Name: "Now"}}
+	m.currentIndex = 0
+	m.playerState.Playing = true
+
+	newM, cmd := m.Update(library.AddTracksToQueueMsg{
+		Tracks: []jellyfin.Track{
+			{ID: "t-1", Name: "Airbag"},
+			{ID: "t-2", Name: "Paranoid Android"},
+		},
+		Confirmation: library.QueueConfirmation{
+			Origin:  library.QueueOriginLibrary,
+			ItemIDs: []string{"t-1", "t-2"},
+		},
+	})
+	m = newM.(*Model)
+	if !m.libraryScreen.IsFlashing("t-1") || !m.libraryScreen.IsFlashing("t-2") {
+		t.Fatal("expected every confirmed track to flash")
+	}
+	if cmd == nil {
+		t.Fatal("expected flash expiry command")
+	}
+}
+
+func TestAppModel_EmptyAndFailedQueueAddsDoNotConfirmSuccess(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		m := New(nil, nil)
+		newM, cmd := m.Update(library.AddTracksToQueueMsg{
+			Confirmation: library.QueueConfirmation{
+				Origin:  library.QueueOriginLibrary,
+				ItemIDs: []string{"t-1"},
+			},
+		})
+		m = newM.(*Model)
+		if len(m.tracks) != 0 || m.libraryScreen.IsFlashing("t-1") {
+			t.Fatal("empty add must not mutate the queue or flash success")
+		}
+		if cmd != nil {
+			t.Fatal("empty add should not return a command")
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		m := New(nil, nil)
+		newM, cmd := m.Update(library.AddTracksToQueueMsg{
+			Err: errors.New("queue album: request failed"),
+			Confirmation: library.QueueConfirmation{
+				Origin:  library.QueueOriginLibrary,
+				ItemIDs: []string{"alb-1"},
+			},
+		})
+		m = newM.(*Model)
+		if len(m.tracks) != 0 || m.libraryScreen.IsFlashing("alb-1") {
+			t.Fatal("failed add must not mutate the queue or flash success")
+		}
+		if !m.err.HasError() || cmd == nil {
+			t.Fatal("failed add must display the error banner")
+		}
+	})
+}

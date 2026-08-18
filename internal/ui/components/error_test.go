@@ -39,6 +39,20 @@ func TestSetErrorAndView(t *testing.T) {
 	}
 }
 
+func TestErrorBannerSanitizesTerminalControls(t *testing.T) {
+	b := NewErrorBanner(defaultTestStyle())
+	b.SetWidth(120)
+	b.SetError(errors.New("server said \x1b]52;c;payload\a\x1b[31mred\x1b[0m\nnext\tline\x00"))
+
+	view := b.View()
+	if strings.ContainsAny(view, "\x1b\a\x00\n\r\t") {
+		t.Fatalf("view contains terminal controls: %q", view)
+	}
+	if !strings.Contains(view, "red next line") {
+		t.Fatalf("view lost sanitized message text: %q", view)
+	}
+}
+
 func TestErrorBannerStaysSingleLine(t *testing.T) {
 	b := NewErrorBanner(defaultTestStyle())
 	b.SetWidth(20)
