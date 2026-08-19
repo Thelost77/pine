@@ -7,8 +7,9 @@ import (
 
 // PlayTracksMsg signals to the parent app that playback of tracks should begin.
 type PlayTracksMsg struct {
-	Tracks     []jellyfin.Track
-	StartIndex int
+	Tracks       []jellyfin.Track
+	StartIndex   int
+	Confirmation QueueConfirmation
 }
 
 // QueueOrigin identifies the screen that initiated a queue action.

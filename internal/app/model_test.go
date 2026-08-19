@@ -858,6 +858,34 @@ func TestAppModel_QueueHintsDoNotDuplicatePlayerControls(t *testing.T) {
 	}
 }
 
+func TestAppModel_PlayFromLibraryFlashesSourceItem(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenLibrary
+	m.libraryScreen, _ = m.libraryScreen.Update(library.TracksLoadedMsg{
+		Tracks: []jellyfin.Track{{ID: "t-1", Name: "Airbag"}},
+	})
+
+	newM, cmd := m.Update(library.PlayTracksMsg{
+		Tracks:     []jellyfin.Track{{ID: "t-1", Name: "Airbag"}},
+		StartIndex: 0,
+		Confirmation: library.QueueConfirmation{
+			Origin:  library.QueueOriginLibrary,
+			ItemIDs: []string{"t-1"},
+		},
+	})
+	m = newM.(*Model)
+	if !m.IsPlaying() || m.CurrentItemID() != "t-1" {
+		t.Fatalf("expected entered track to play, playing=%v item=%q", m.IsPlaying(), m.CurrentItemID())
+	}
+	if !m.libraryScreen.IsFlashing("t-1") {
+		t.Fatal("expected entered library track to flash")
+	}
+	if cmd == nil {
+		t.Fatal("expected flash expiry command")
+	}
+}
+
 func TestAppModel_QueueAddFlashesOnlyOriginScreen(t *testing.T) {
 	m := New(nil, nil)
 	m.SetSize(80, 24)

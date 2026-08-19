@@ -436,10 +436,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
 					track := sel.Track
 					m.trackList.ResetFilter()
+					confirmation := QueueConfirmation{
+						Origin:  QueueOriginLibrary,
+						ItemIDs: []string{track.ID},
+					}
 					return m, func() tea.Msg {
 						return PlayTracksMsg{
-							Tracks:     []jellyfin.Track{track},
-							StartIndex: 0,
+							Tracks:       []jellyfin.Track{track},
+							StartIndex:   0,
+							Confirmation: confirmation,
 						}
 					}
 				}

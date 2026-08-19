@@ -570,11 +570,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case library.PlayTracksMsg:
 		logger.Info("received PlayTracksMsg", "count", len(msg.Tracks), "start", msg.StartIndex)
+		var flashCmd tea.Cmd
 		if len(msg.Tracks) > 0 {
 			m.tracks = append(msg.Tracks, m.tracks...)
+			flashCmd = m.flashQueuedItems(msg.Confirmation)
 		}
 		newM, cmd := m.startPlaybackAt(msg.StartIndex)
-		return newM, cmd
+		return newM, tea.Batch(cmd, flashCmd)
 
 	case library.AddTrackToQueueMsg:
 		logger.Info("adding track to queue", "title", msg.Track.Name)

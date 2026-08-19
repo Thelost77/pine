@@ -88,6 +88,9 @@ func TestLibraryModel_NavigationAndPlayback(t *testing.T) {
 	if len(ptm.Tracks) != 1 || ptm.StartIndex != 0 {
 		t.Errorf("unexpected PlayTracksMsg: %+v", ptm)
 	}
+	if ptm.Confirmation.Origin != QueueOriginLibrary || !slices.Equal(ptm.Confirmation.ItemIDs, []string{"t-1"}) {
+		t.Fatalf("enter confirmation = %+v, want library track t-1", ptm.Confirmation)
+	}
 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.CurrentLevel() != LevelAlbums {

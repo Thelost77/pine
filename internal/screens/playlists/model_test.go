@@ -75,6 +75,9 @@ func TestPlaylistsModel_NavigationAndQueueActions(t *testing.T) {
 	if !ok || len(playOne.Tracks) != 1 || playOne.Tracks[0].ID != "t-1" {
 		t.Fatalf("enter returned %#v, want PlayTracksMsg t-1", playOne)
 	}
+	if playOne.Confirmation.Origin != library.QueueOriginPlaylists || !slices.Equal(playOne.Confirmation.ItemIDs, []string{"t-1"}) {
+		t.Fatalf("enter confirmation = %+v, want playlist track t-1", playOne.Confirmation)
+	}
 
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	msg := cmd()
