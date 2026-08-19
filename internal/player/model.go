@@ -17,14 +17,15 @@ type StartPlayMsg struct {
 
 // Model is the bubbletea sub-model for the player footer bar.
 type Model struct {
-	Playing        bool
-	Title          string
-	Position       float64
-	Duration       float64
-	Speed          float64
-	Volume         int
-	SleepRemaining string
-	RepeatStatus   string
+	Playing         bool
+	Title           string
+	Position        float64
+	Duration        float64
+	Speed           float64
+	Volume          int
+	SleepRemaining  string
+	RepeatStatus    string
+	SubliminalCount int
 
 	player Player
 	config config.PlayerConfig
@@ -95,11 +96,20 @@ func (m *Model) SetWidth(w int) {
 	m.width = w
 }
 
+// PlayPauseKey returns the play/pause key binding.
+func (m Model) PlayPauseKey() key.Binding { return m.keys.PlayPause }
+
 // SeekForwardKey returns the seek forward key binding.
 func (m Model) SeekForwardKey() key.Binding { return m.keys.SeekForward }
 
 // SeekBackKey returns the seek backward key binding.
 func (m Model) SeekBackKey() key.Binding { return m.keys.SeekBack }
+
+// VolumeUpKey returns the volume-up key binding.
+func (m Model) VolumeUpKey() key.Binding { return m.keys.VolumeUp }
+
+// VolumeDownKey returns the volume-down key binding.
+func (m Model) VolumeDownKey() key.Binding { return m.keys.VolumeDown }
 
 // HandlesKey reports whether the player should consume the key while a session is active.
 func (m Model) HandlesKey(msg tea.KeyMsg) bool {

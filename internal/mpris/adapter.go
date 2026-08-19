@@ -129,13 +129,13 @@ func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) Play
 		OnPosition: func() (int64, error) {
 			return int64(accessor().PlayerPosition() * 1_000_000), nil
 		},
-		OnMinimumRate:   func() (float64, error) { return 0.5, nil },
-		OnMaximumRate:   func() (float64, error) { return 4.0, nil },
-		OnCanGoNext:     func() (bool, error) { return accessor().QueueLength() > 0, nil },
-		OnCanGoPrevious: func() (bool, error) { return true, nil },
+		OnMinimumRate:   func() (float64, error) { return accessor().PlayerMinimumRate(), nil },
+		OnMaximumRate:   func() (float64, error) { return accessor().PlayerMaximumRate(), nil },
+		OnCanGoNext:     func() (bool, error) { return accessor().CanGoNext(), nil },
+		OnCanGoPrevious: func() (bool, error) { return accessor().CanGoPrevious(), nil },
 		OnCanPlay:       func() (bool, error) { return true, nil },
 		OnCanPause:      func() (bool, error) { return true, nil },
-		OnCanSeek:       func() (bool, error) { return true, nil },
+		OnCanSeek:       func() (bool, error) { return accessor().CanSeek(), nil },
 		OnCanControl:    func() (bool, error) { return true, nil },
 	}
 }

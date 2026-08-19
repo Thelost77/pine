@@ -88,11 +88,14 @@ func SetVolumeCmd(p Player, vol int) tea.Cmd {
 }
 
 // PlayerReadyMsg signals that mpv has been launched and connected.
-type PlayerReadyMsg struct{}
+type PlayerReadyMsg struct {
+	Generation uint64
+}
 
 // PlayerLaunchErrMsg signals that mpv failed to launch.
 type PlayerLaunchErrMsg struct {
-	Err error
+	Generation uint64
+	Err        error
 }
 
 // PlayerQuitMsg signals that mpv has been quit.
@@ -101,12 +104,12 @@ type PlayerQuitMsg struct{}
 // LaunchCmd spawns mpv and connects via IPC. If paused is true, mpv starts paused.
 // httpHeaders are passed to mpv via --http-header-fields.
 // Returns PlayerReadyMsg on success.
-func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, volume int) tea.Cmd {
+func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, volume int, generation uint64) tea.Cmd {
 	return func() tea.Msg {
 		socketDir, err := MpvSocketDir()
 		if err != nil {
 			logger.Error("failed to prepare mpv socket directory", "err", err)
-			return PlayerLaunchErrMsg{Err: err}
+			return PlayerLaunchErrMsg{Generation: generation, Err: err}
 		}
 		logger.Info("launching mpv", "startTime", startTime, "socketDir", socketDir)
 		socketPath := filepath.Join(socketDir, fmt.Sprintf("spruce-mpv-%d.sock", os.Getpid()))
@@ -116,7 +119,7 @@ func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders
 		startStr := fmt.Sprintf("%f", startTime)
 		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders, volume); err != nil {
 			logger.Error("mpv launch failed", "err", err)
-			return PlayerLaunchErrMsg{Err: err}
+			return PlayerLaunchErrMsg{Generation: generation, Err: err}
 		}
 
 		// Retry connection for up to 3 seconds (mpv takes a moment to create the socket)
@@ -125,11 +128,11 @@ func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders
 			time.Sleep(100 * time.Millisecond)
 			if connectErr = p.Connect(); connectErr == nil {
 				logger.Info("mpv connected via socket", "socket", socketPath)
-				return PlayerReadyMsg{}
+				return PlayerReadyMsg{Generation: generation}
 			}
 		}
 		logger.Error("mpv socket connect timeout", "socket", socketPath, "err", connectErr)
-		return PlayerLaunchErrMsg{Err: fmt.Errorf("connect to mpv: %w", connectErr)}
+		return PlayerLaunchErrMsg{Generation: generation, Err: fmt.Errorf("connect to mpv: %w", connectErr)}
 	}
 }
 

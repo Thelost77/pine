@@ -162,6 +162,7 @@ func (m *Model) viewHints() string {
 			key("</>", "prev/next"),
 			key("s", "shuffle"),
 			key("r/R", "repeat"),
+			key("b", "subliminal"),
 			key("m", "edit meta"),
 			key("d", "remove"),
 			key("/", "search"),
@@ -184,7 +185,7 @@ func (m *Model) viewHints() string {
 	}
 
 	if m.screen != ScreenLogin && m.screen != ScreenMetadataEdit {
-		if m.IsPlaying() {
+		if m.IsPlaying() || m.isSubliminalRunning() {
 			if m.screen != ScreenQueue {
 				parts = append(parts, key("</>", "prev/next"))
 			}

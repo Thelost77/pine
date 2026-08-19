@@ -155,7 +155,7 @@ func TestLaunchCmdDoesNotStartMpvWhenSocketDirectoryFails(t *testing.T) {
 	}
 
 	p := &launchSpy{}
-	msg := LaunchCmd(p, "https://example.com/audio.mp3", 0, false, nil, 100)()
+	msg := LaunchCmd(p, "https://example.com/audio.mp3", 0, false, nil, 100, 7)()
 	if _, ok := msg.(PlayerLaunchErrMsg); !ok {
 		t.Fatalf("message = %T, want PlayerLaunchErrMsg", msg)
 	}
@@ -507,6 +507,34 @@ func TestLaunch(t *testing.T) {
 	}
 	if !launched {
 		t.Fatal("expected startFn to be called")
+	}
+}
+
+func TestLaunchLoopUsesInfiniteLoopAndPerTrackVolume(t *testing.T) {
+	mc := newMockConn()
+	var gotArgs []string
+	m := &Mpv{
+		startFn: func(name string, args ...string) *exec.Cmd {
+			gotArgs = args
+			return exec.Command("true")
+		},
+		newConn: func(socketPath string) IPCConnection { return mc },
+	}
+
+	if err := m.LaunchLoop("/tmp/track.media", "/tmp/test.sock", true, 20); err != nil {
+		t.Fatalf("LaunchLoop() error: %v", err)
+	}
+	for _, want := range []string{"--loop-file=inf", "--volume=20", "/tmp/track.media", "--pause"} {
+		found := false
+		for _, arg := range gotArgs {
+			if arg == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("LaunchLoop() args %v do not contain %q", gotArgs, want)
+		}
 	}
 }
 

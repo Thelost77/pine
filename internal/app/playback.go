@@ -20,12 +20,15 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 	}
 
 	m.currentIndex = index
+	m.pendingRepeatIndex = -1
+	m.pendingRepeatItemID = ""
 	m.playGeneration++
 	track := m.tracks[index]
 	m.playerState.Title = track.Name
 	m.playerState.Position = 0
 	m.playerState.Duration = track.Duration()
 	m.playerState.Playing = true
+	m.playerState.SubliminalCount = 0
 	m.lastHeartbeat = time.Now()
 
 	logger.Info("starting track playback", "index", index, "id", track.ID, "title", track.Name)
@@ -36,8 +39,14 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 	if m.client != nil {
 		playSessionID := strconv.FormatInt(time.Now().UnixNano(), 16)
 		m.playSessionID = playSessionID
-		url := m.client.StreamURL(track.ID, playSessionID)
+		source := m.client.StreamURL(track.ID, playSessionID)
 		streamHeaders := m.client.StreamHeaders()
+		if m.mediaCache != nil {
+			if path, ok := m.mediaCache.Path(track.ID); ok {
+				source = path
+				streamHeaders = nil
+			}
+		}
 		client := m.client
 		itemID := track.ID
 
@@ -48,8 +57,13 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		cmds = append(cmds, startReqCmd)
 
 		if m.mpv != nil {
-			cmds = append(cmds, player.LaunchCmd(m.mpv, url, 0, false, streamHeaders, m.playerState.Volume))
+			cmds = append(cmds, player.LaunchCmd(m.mpv, source, 0, false, streamHeaders, m.playerState.Volume, m.playGeneration))
 		}
+	}
+	if m.repeatQueue {
+		cmds = append(cmds, m.prefetchRepeatQueue(index))
+	} else if m.repeatTrackID == track.ID {
+		cmds = append(cmds, m.prefetchRepeatTrack(index))
 	}
 
 	return m, tea.Batch(cmds...)
@@ -57,10 +71,13 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 
 func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	logger.Info("stopping playback")
+	position := m.playerState.Position
 	m.playGeneration++
 	m.playerState.Title = ""
 	m.playerState.Playing = false
 	m.playerState.Position = 0
+	m.pendingRepeatIndex = -1
+	m.pendingRepeatItemID = ""
 	m.sleepDeadline = time.Time{}
 	m.sleepDuration = 0
 	m.playerState.SleepRemaining = ""
@@ -69,10 +86,9 @@ func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	if m.client != nil && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		client := m.client
 		itemID := m.tracks[m.currentIndex].ID
-		pos := m.playerState.Position
 		playSessionID := m.playSessionID
 		stopReqCmd := func() tea.Msg {
-			_ = client.ReportPlaybackStopped(context.Background(), itemID, pos, playSessionID)
+			_ = client.ReportPlaybackStopped(context.Background(), itemID, position, playSessionID)
 			return nil
 		}
 		cmds = append(cmds, stopReqCmd)
@@ -195,6 +211,12 @@ func (m *Model) syncQueueScreen() {
 		m.playerState.Position,
 		m.playerState.Duration,
 	)
+	status, complete, total := m.subliminalStatus()
+	modeVolume := subliminalVolume
+	if m.subliminalState == subliminalStarting || m.subliminalState == subliminalPlaying {
+		modeVolume = m.playerState.Volume
+	}
+	m.queueScreen.SetSubliminalState(status, complete, total, modeVolume)
 	if m.mprisState != nil {
 		var oldState, newState mprisStateSnapshot
 		m.mprisState.Update(func(s *MprisState) {
@@ -208,10 +230,21 @@ func (m *Model) syncQueueScreen() {
 				speed:    s.speed,
 				volume:   s.volume,
 			}
-			s.playing = m.IsPlaying()
-			s.paused = m.IsPaused()
-			s.hasActiveItem = m.IsPlaying()
-			if m.IsPlaying() && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+			normalActive := m.IsPlaying()
+			subliminalActive := m.isSubliminalRunning()
+			active := normalActive || subliminalActive
+			s.playing = active && m.playerState.Playing
+			s.paused = active && !m.playerState.Playing
+			s.hasActiveItem = active
+			s.canSeek = normalActive
+			s.canGoNext = normalActive && len(m.tracks) > 0
+			s.canGoPrevious = normalActive
+			if subliminalActive {
+				s.title = m.playerState.Title
+				s.authors = nil
+				s.itemID = "subliminal_mix"
+				s.duration = 0
+			} else if normalActive && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 				s.title = m.tracks[m.currentIndex].Name
 				s.authors = m.tracks[m.currentIndex].Artists
 				s.itemID = m.tracks[m.currentIndex].ID
@@ -227,7 +260,15 @@ func (m *Model) syncQueueScreen() {
 				s.duration = 0
 			}
 			s.position = m.playerState.Position
-			s.speed = m.playerState.Speed
+			if subliminalActive {
+				s.speed = 1.0
+				s.minimumRate = 1.0
+				s.maximumRate = 1.0
+			} else {
+				s.speed = m.playerState.Speed
+				s.minimumRate = 0.5
+				s.maximumRate = 4.0
+			}
 			s.volume = m.playerState.Volume
 			s.queueLength = len(m.tracks)
 			newState = mprisStateSnapshot{
@@ -401,11 +442,15 @@ func (m *Model) mprisVolumeCmd() tea.Cmd {
 func (m *Model) handlePlayerEvent(msg tea.Msg) (*Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case SleepTimerExpiredMsg:
-		if m.IsPlaying() && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
+		if (m.IsPlaying() || m.isSubliminalRunning()) && !m.sleepDeadline.IsZero() && msg.Generation == m.sleepGeneration {
 			logger.Info("sleep timer expired, stopping playback")
 			m.sleepDeadline = time.Time{}
 			m.sleepDuration = 0
 			m.playerState.SleepRemaining = ""
+			if m.isSubliminalRunning() {
+				newM, cmd := m.stopSubliminalMode()
+				return newM, cmd, true
+			}
 			newM, cmd := m.stopPlayback()
 			return newM, cmd, true
 		}
@@ -416,6 +461,12 @@ func (m *Model) handlePlayerEvent(msg tea.Msg) (*Model, tea.Cmd, bool) {
 		return newM, cmd, true
 
 	case player.PlayerReadyMsg:
+		if msg.Generation != m.playGeneration {
+			if m.mpv != nil && (m.isSubliminalActive() || !m.IsPlaying()) {
+				return m, player.QuitCmd(m.mpv), true
+			}
+			return m, nil, true
+		}
 		var cmds []tea.Cmd
 		if m.mpv != nil {
 			cmds = append(cmds, player.TickCmd(m.mpv, m.playGeneration))
@@ -433,18 +484,21 @@ func (m *Model) handlePlayerEvent(msg tea.Msg) (*Model, tea.Cmd, bool) {
 			if m.repeatTrackID != "" {
 				for idx, t := range m.tracks {
 					if t.ID == m.repeatTrackID {
-						newM, cmd := m.startPlaybackAt(idx)
+						newM, cmd := m.startRepeatedPlaybackAt(idx)
 						return newM, cmd, true
 					}
 				}
 			}
 			nextIdx := m.currentIndex + 1
-			if nextIdx < len(m.tracks) {
-				newM, cmd := m.startPlaybackAt(nextIdx)
+			if m.repeatQueue && len(m.tracks) > 0 {
+				if nextIdx >= len(m.tracks) {
+					nextIdx = 0
+				}
+				newM, cmd := m.startRepeatedPlaybackAt(nextIdx)
 				return newM, cmd, true
 			}
-			if m.repeatQueue && len(m.tracks) > 0 {
-				newM, cmd := m.startPlaybackAt(0)
+			if nextIdx < len(m.tracks) {
+				newM, cmd := m.startPlaybackAt(nextIdx)
 				return newM, cmd, true
 			}
 			newM, cmd := m.stopPlayback()
@@ -459,6 +513,12 @@ func (m *Model) handlePlayerEvent(msg tea.Msg) (*Model, tea.Cmd, bool) {
 		return newM, cmd, true
 
 	case player.PlayerLaunchErrMsg:
+		if msg.Generation != m.playGeneration {
+			if m.mpv != nil && (m.isSubliminalActive() || !m.IsPlaying()) {
+				return m, player.QuitCmd(m.mpv), true
+			}
+			return m, nil, true
+		}
 		logger.Error("player failed to launch", "err", msg.Err)
 		newM, cmd := m.stopPlayback()
 		errCmd := newM.err.SetError(msg.Err)

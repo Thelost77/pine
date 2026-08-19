@@ -34,20 +34,40 @@ type Model struct {
 	backStack []Screen
 	keys      KeyMap
 
-	loginScreen        login.Model
-	libraryScreen      library.Model
-	playlistsScreen    playlists.Model
-	queueScreen        queue.Model
-	metadataEditScreen metadataedit.Model
-	palette            components.Palette
-	help               components.HelpOverlay
-	err                components.ErrorBanner
-	repeatTrackID      string
-	repeatQueue        bool
+	loginScreen         login.Model
+	libraryScreen       library.Model
+	playlistsScreen     playlists.Model
+	queueScreen         queue.Model
+	metadataEditScreen  metadataedit.Model
+	palette             components.Palette
+	help                components.HelpOverlay
+	err                 components.ErrorBanner
+	repeatTrackID       string
+	repeatQueue         bool
+	repeatGeneration    uint64
+	pendingRepeatIndex  int
+	pendingRepeatItemID string
+	repeatContext       context.Context
+	repeatCancel        context.CancelFunc
+	mediaCache          *player.SessionCache
+	mediaContext        context.Context
+	mediaCancel         context.CancelFunc
 
 	client *jellyfin.Client
 	cfg    *config.Config
 	mpv    *player.Mpv
+
+	subliminalGroup        *player.Group
+	subliminalGroupFactory func() *player.Group
+	subliminalRetired      []*player.Group
+	subliminalState        subliminalState
+	subliminalGeneration   uint64
+	subliminalCancel       context.CancelFunc
+	subliminalContext      context.Context
+	subliminalSnapshot     []jellyfin.Track
+	subliminalCacheTracks  []jellyfin.Track
+	subliminalCachedCount  int
+	normalVolume           int
 
 	program     *tea.Program
 	mprisBridge *mpris.Bridge
@@ -140,23 +160,35 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 		playlistsScreen.SetClient(client)
 		initialScreen = ScreenLibrary
 	}
+	var subliminalGroupFactory func() *player.Group
+	if mpv != nil {
+		subliminalGroupFactory = player.NewGroup
+	}
 	return &Model{
-		screen:          initialScreen,
-		keys:            DefaultKeyMap(actualCfg.Keybinds),
-		loginScreen:     loginScreen,
-		libraryScreen:   library.New(styles),
-		playlistsScreen: playlistsScreen,
-		queueScreen:     queue.New(styles),
-		palette:         pal,
-		help:            components.NewHelpOverlay(styles),
-		client:          client,
-		cfg:             cfg,
-		mpv:             mpv,
-		mprisState:      &MprisState{},
-		playerState:     player.NewModel(p, actualCfg, styles),
-		err:             components.NewErrorBanner(styles.Error),
-		currentIndex:    -1,
-		styles:          styles,
+		screen:                 initialScreen,
+		keys:                   DefaultKeyMap(actualCfg.Keybinds),
+		loginScreen:            loginScreen,
+		libraryScreen:          library.New(styles),
+		playlistsScreen:        playlistsScreen,
+		queueScreen:            queue.New(styles),
+		palette:                pal,
+		help:                   components.NewHelpOverlay(styles),
+		client:                 client,
+		cfg:                    cfg,
+		mpv:                    mpv,
+		subliminalGroupFactory: subliminalGroupFactory,
+		mprisState: &MprisState{
+			speed:       actualCfg.Player.Speed,
+			minimumRate: 0.5,
+			maximumRate: 4.0,
+			volume:      100,
+		},
+		playerState:        player.NewModel(p, actualCfg, styles),
+		err:                components.NewErrorBanner(styles.Error),
+		currentIndex:       -1,
+		pendingRepeatIndex: -1,
+		normalVolume:       100,
+		styles:             styles,
 	}
 }
 
@@ -175,11 +207,29 @@ func (m *Model) SetProgram(p *tea.Program) {
 }
 
 func (m *Model) Cleanup() {
+	if m.subliminalCancel != nil {
+		m.subliminalCancel()
+	}
+	if m.repeatCancel != nil {
+		m.repeatCancel()
+	}
+	if m.mediaCancel != nil {
+		m.mediaCancel()
+	}
 	if m.mprisBridge != nil {
 		_ = m.mprisBridge.Stop()
 	}
+	if m.subliminalGroup != nil {
+		_ = m.subliminalGroup.Quit()
+	}
+	for _, group := range m.subliminalRetired {
+		_ = group.Quit()
+	}
 	if m.mpv != nil {
 		_ = m.mpv.Quit()
+	}
+	if m.mediaCache != nil {
+		_ = m.mediaCache.Close()
 	}
 }
 
@@ -233,14 +283,30 @@ func (m *Model) fetchMusicLibrariesCmd() tea.Cmd {
 func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
 	logger.Warn("resetting session to login screen due to error or unauthorized status", "err", err)
 	var stopCmd tea.Cmd
+	if m.isSubliminalActive() {
+		var subliminalStop tea.Cmd
+		m, subliminalStop = m.stopSubliminalMode()
+		stopCmd = tea.Batch(stopCmd, subliminalStop)
+	}
 	if m.IsPlaying() {
-		m, stopCmd = m.stopPlayback()
+		var normalStop tea.Cmd
+		m, normalStop = m.stopPlayback()
+		stopCmd = tea.Batch(stopCmd, normalStop)
 	}
 	m.tracks = nil
 	m.currentIndex = -1
 	m.repeatTrackID = ""
 	m.repeatQueue = false
+	m.cancelRepeatWork()
+	m.repeatGeneration++
+	m.pendingRepeatIndex = -1
+	m.pendingRepeatItemID = ""
 	m.playerState.RepeatStatus = ""
+	if m.mediaCancel != nil {
+		m.mediaCancel()
+		m.mediaCancel = nil
+		m.mediaContext = nil
+	}
 	m.syncQueueScreen()
 	m.client = nil
 	m.playlistsScreen.SetClient(nil)
@@ -267,6 +333,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	switch typed := msg.(type) {
+	case repeatCacheMsg:
+		return m.handleRepeatCacheMsg(typed)
+	case subliminalCacheMsg:
+		return m.handleSubliminalCacheMsg(typed)
+	case player.GroupReadyMsg:
+		return m.handleGroupReadyMsg(typed)
+	case player.GroupControlMsg:
+		return m.handleGroupControlMsg(typed)
+	case player.GroupEndedMsg:
+		return m.handleGroupEndedMsg(typed)
+	case player.GroupStoppedMsg:
+		m.handleGroupStoppedMsg(typed)
+		return m, nil
+	}
+
 	if newM, cmd, handled := m.handlePlayerEvent(msg); handled {
 		return newM, cmd
 	}
@@ -278,11 +360,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
-			if m.currentIndex >= 0 && m.client != nil {
-				newM, stopCmd := m.stopPlayback()
-				return newM, tea.Batch(stopCmd, tea.Quit)
-			}
-			return m, tea.Quit
+			newM, stopCmd := m.stopAllPlayback()
+			return newM, tea.Batch(stopCmd, tea.Quit)
 		}
 		if m.screen == ScreenMetadataEdit {
 			var cmd tea.Cmd
@@ -317,11 +396,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.navigate(ScreenPlaylists)
 				}
 				if key.Matches(msg, m.keys.Quit) {
-					if m.currentIndex >= 0 && m.client != nil {
-						newM, stopCmd := m.stopPlayback()
-						return newM, tea.Batch(stopCmd, tea.Quit)
+					newM, stopCmd := m.stopAllPlayback()
+					return newM, tea.Batch(stopCmd, tea.Quit)
+				}
+				if m.isSubliminalRunning() {
+					if key.Matches(msg, m.keys.SleepTimer) {
+						return m.cycleSleepTimer()
 					}
-					return m, tea.Quit
+					if key.Matches(msg, m.playerState.VolumeUpKey()) {
+						return m.setSubliminalVolume(m.playerState.Volume + 5)
+					}
+					if key.Matches(msg, m.playerState.VolumeDownKey()) {
+						return m.setSubliminalVolume(m.playerState.Volume - 5)
+					}
+					if key.Matches(msg, m.playerState.PlayPauseKey()) {
+						return m.setSubliminalPaused(m.playerState.Playing)
+					}
 				}
 				if m.IsPlaying() {
 					if key.Matches(msg, m.keys.SleepTimer) {
@@ -451,6 +541,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case login.LoginSuccessMsg:
 		logger.Info("login succeeded, setting client", "user", msg.Username)
+		if m.repeatCancel != nil {
+			m.cancelRepeatWork()
+		}
+		if m.mediaCancel != nil {
+			m.mediaCancel()
+			m.mediaCancel = nil
+			m.mediaContext = nil
+		}
+		if m.mediaCache != nil {
+			_ = m.mediaCache.Close()
+			m.mediaCache = nil
+		}
 		if m.cfg != nil {
 			m.cfg.Server.Address = msg.ServerURL
 			m.cfg.Server.Username = msg.Username
@@ -569,6 +671,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case library.PlayTracksMsg:
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(errors.New("stop subliminal mode before starting another track"))
+		}
 		logger.Info("received PlayTracksMsg", "count", len(msg.Tracks), "start", msg.StartIndex)
 		var flashCmd tea.Cmd
 		if len(msg.Tracks) > 0 {
@@ -579,6 +684,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return newM, tea.Batch(cmd, flashCmd)
 
 	case library.AddTrackToQueueMsg:
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(errors.New("stop subliminal mode before changing the queue"))
+		}
 		logger.Info("adding track to queue", "title", msg.Track.Name)
 		wasEmpty := !m.IsPlaying()
 		m.tracks = append(m.tracks, msg.Track)
@@ -599,6 +707,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.Tracks) == 0 {
 			return m, nil
+		}
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(errors.New("stop subliminal mode before changing the queue"))
 		}
 		logger.Info("adding tracks to queue", "count", len(msg.Tracks))
 		wasEmpty := !m.IsPlaying()
@@ -621,6 +732,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.Tracks) == 0 {
 			return m, nil
+		}
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(errors.New("stop subliminal mode before changing the queue"))
 		}
 		logger.Info("adding shuffled tracks to queue", "count", len(msg.Tracks))
 		wasEmpty := !m.IsPlaying()
@@ -649,14 +763,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case queue.JumpQueueMsg:
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(errors.New("stop subliminal mode before selecting a track"))
+		}
 		newM, cmd := m.startPlaybackAt(msg.Index)
 		return newM, cmd
 
 	case queue.RemoveQueueMsg:
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(errors.New("stop subliminal mode before changing the queue"))
+		}
 		if msg.Index >= 0 && msg.Index < len(m.tracks) {
+			removedPendingTarget := m.pendingRepeatItemID != "" && m.tracks[msg.Index].ID == m.pendingRepeatItemID
 			if m.tracks[msg.Index].ID == m.repeatTrackID {
 				m.repeatTrackID = ""
-				m.playerState.RepeatStatus = ""
+				m.cancelRepeatWork()
+				m.repeatGeneration++
+				m.pendingRepeatIndex = -1
+				m.pendingRepeatItemID = ""
+				m.updateRepeatStatus(false)
 			}
 			m.tracks = append(m.tracks[:msg.Index], m.tracks[msg.Index+1:]...)
 			if m.currentIndex == msg.Index {
@@ -672,11 +797,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.currentIndex > msg.Index {
 				m.currentIndex--
 			}
+			if removedPendingTarget && m.resolvePendingRepeatIndex() < 0 {
+				m.cancelRepeatWork()
+				m.repeatGeneration++
+				m.pendingRepeatIndex = -1
+				m.pendingRepeatItemID = ""
+				m.updateRepeatStatus(false)
+				if m.repeatQueue && len(m.tracks) > 0 {
+					next := m.currentIndex + 1
+					if next < 0 || next >= len(m.tracks) {
+						next = 0
+					}
+					return m.startRepeatedPlaybackAt(next)
+				}
+			}
 			m.syncQueueScreen()
 		}
 		return m, nil
 
 	case queue.QueueActionMsg:
+		if msg.Action == "subliminal" {
+			return m.toggleSubliminalMode()
+		}
+		if m.isSubliminalActive() && msg.Action != "edit_metadata" {
+			if msg.Action == "toggle_pause" && m.isSubliminalRunning() {
+				return m.setSubliminalPaused(m.playerState.Playing)
+			}
+			return m, m.err.SetError(errors.New("stop subliminal mode before using this queue action"))
+		}
 		switch msg.Action {
 		case "edit_metadata":
 			if msg.Index >= 0 && msg.Index < len(m.tracks) {
@@ -725,30 +873,60 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "repeat_track":
 			if msg.TrackID != "" {
+				pending := m.resolvePendingRepeatIndex()
+				m.cancelRepeatWork()
+				m.repeatGeneration++
+				m.pendingRepeatIndex = -1
+				m.pendingRepeatItemID = ""
 				if m.repeatTrackID == msg.TrackID {
 					m.repeatTrackID = ""
-					m.playerState.RepeatStatus = ""
 				} else {
 					m.repeatTrackID = msg.TrackID
 					m.repeatQueue = false
-					m.playerState.RepeatStatus = "🔂 Track"
 				}
+				m.updateRepeatStatus(false)
 				m.syncQueueScreen()
+				var cmds []tea.Cmd
+				if m.repeatTrackID != "" {
+					cmds = append(cmds, m.prefetchRepeatTrack(msg.Index))
+				}
+				if pending >= 0 && pending < len(m.tracks) {
+					newM, playCmd := m.startPlaybackAt(pending)
+					m = newM
+					cmds = append(cmds, playCmd)
+				}
+				return m, tea.Batch(cmds...)
 			}
 			return m, nil
 		case "repeat_queue":
+			pending := m.resolvePendingRepeatIndex()
+			m.cancelRepeatWork()
+			m.repeatGeneration++
+			m.pendingRepeatIndex = -1
+			m.pendingRepeatItemID = ""
 			m.repeatQueue = !m.repeatQueue
 			if m.repeatQueue {
 				m.repeatTrackID = ""
-				m.playerState.RepeatStatus = "🔁 Queue"
-			} else {
-				m.playerState.RepeatStatus = ""
 			}
+			m.updateRepeatStatus(false)
 			m.syncQueueScreen()
-			return m, nil
+			var cmds []tea.Cmd
+			if m.repeatQueue {
+				cmds = append(cmds, m.prefetchRepeatQueue(m.currentIndex))
+			}
+			if pending >= 0 && pending < len(m.tracks) {
+				newM, playCmd := m.startPlaybackAt(pending)
+				m = newM
+				cmds = append(cmds, playCmd)
+			}
+			return m, tea.Batch(cmds...)
 		case "clear":
 			m.repeatTrackID = ""
 			m.repeatQueue = false
+			m.cancelRepeatWork()
+			m.repeatGeneration++
+			m.pendingRepeatIndex = -1
+			m.pendingRepeatItemID = ""
 			m.playerState.RepeatStatus = ""
 			m.tracks = nil
 			m.currentIndex = -1
@@ -757,6 +935,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mpris.PlayPauseMsg:
+		if m.isSubliminalRunning() {
+			return m.setSubliminalPaused(m.playerState.Playing)
+		}
 		m.playerState.Playing = !m.playerState.Playing
 		m.syncQueueScreen()
 		if m.mpv != nil {
@@ -764,16 +945,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mpris.PauseMsg:
+		if m.isSubliminalRunning() {
+			return m.setSubliminalPaused(true)
+		}
 		return m.setPlaybackPaused(true)
 
 	case mpris.PlayMsg:
+		if m.isSubliminalRunning() {
+			return m.setSubliminalPaused(false)
+		}
 		return m.setPlaybackPaused(false)
 
 	case mpris.NextMsg:
+		if m.isSubliminalActive() {
+			return m, nil
+		}
 		newM, cmd := m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
 		return newM, cmd
 
 	case mpris.PreviousMsg:
+		if m.isSubliminalActive() {
+			return m, nil
+		}
 		if m.playerState.Position > 3.0 {
 			if m.mpv != nil {
 				return m, player.SeekCmd(m.mpv, 0)
@@ -796,6 +989,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSeekAbsolute(msg.PositionSeconds)
 
 	case mpris.SetVolumeMsg:
+		if m.isSubliminalRunning() {
+			return m.setSubliminalVolume(msg.Volume)
+		}
 		m.playerState.Volume = msg.Volume
 		m.syncQueueScreen()
 		if m.mpv != nil {
@@ -803,6 +999,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mpris.SetRateMsg:
+		if m.isSubliminalActive() {
+			return m, nil
+		}
 		m.playerState.Speed = msg.Rate
 		m.syncQueueScreen()
 		if m.mpv != nil {

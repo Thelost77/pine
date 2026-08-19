@@ -2,6 +2,7 @@ package queue
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Thelost77/spruce/internal/jellyfin"
@@ -18,6 +19,9 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 	m := New(ui.DefaultStyles())
 	if slices.Contains(m.list.KeyMap.NextPage.Keys(), "f") {
 		t.Fatal("f remains bound to next page")
+	}
+	if slices.Contains(m.list.KeyMap.PrevPage.Keys(), "b") {
+		t.Fatal("b remains bound to previous page")
 	}
 	m.SetSize(80, 24)
 
@@ -109,6 +113,21 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 	msg = cmd()
 	if qam, ok := msg.(QueueActionMsg); !ok || qam.Action != "next" {
 		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	// Test subliminal mode action.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	if cmd == nil {
+		t.Fatal("expected subliminal mode cmd")
+	}
+	msg = cmd()
+	if qam, ok := msg.(QueueActionMsg); !ok || qam.Action != "subliminal" {
+		t.Errorf("unexpected msg: %+v", msg)
+	}
+
+	m.SetSubliminalState(SubliminalPreparing, 1, 2, 20)
+	if view := m.View(); !strings.Contains(view, "1/2 cached") || !strings.Contains(view, "20% per track") {
+		t.Fatalf("unexpected subliminal view: %s", view)
 	}
 
 	// Test space (toggle pause)

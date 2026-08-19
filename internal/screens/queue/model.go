@@ -9,6 +9,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type SubliminalStatus uint8
+
+const (
+	SubliminalInactive SubliminalStatus = iota
+	SubliminalPreparing
+	SubliminalStarting
+	SubliminalPlaying
+	SubliminalPaused
+)
+
 type Model struct {
 	list list.Model
 
@@ -20,6 +30,11 @@ type Model struct {
 	positionSeconds float64
 	durationSeconds float64
 	isShuffle       bool
+
+	subliminalStatus   SubliminalStatus
+	subliminalComplete int
+	subliminalTotal    int
+	subliminalVolume   int
 
 	width  int
 	height int
@@ -33,7 +48,7 @@ func New(styles ui.Styles) Model {
 
 	l := list.New(nil, del, 0, 0)
 	l.KeyMap.Quit.SetKeys("q")
-	l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
+	l.KeyMap.PrevPage.SetKeys("pgup", "u")
 	l.KeyMap.NextPage.SetKeys("pgdown")
 	l.Title = "Queue / Now Playing"
 	l.SetShowTitle(false)
@@ -53,6 +68,7 @@ func New(styles ui.Styles) Model {
 			key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "shuffle")),
 			key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "repeat track")),
 			key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "repeat queue")),
+			key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "subliminal mode")),
 		}
 	}
 
@@ -64,7 +80,7 @@ func New(styles ui.Styles) Model {
 
 func (m *Model) updateListSize() {
 	listH := m.height
-	if m.isPlaying && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+	if m.subliminalStatus != SubliminalInactive || (m.isPlaying && m.currentIndex >= 0 && m.currentIndex < len(m.tracks)) {
 		listH -= 4
 	}
 	if listH < 1 {
@@ -145,6 +161,14 @@ func (m *Model) SetShuffle(isShuffle bool) {
 	m.isShuffle = isShuffle
 }
 
+func (m *Model) SetSubliminalState(status SubliminalStatus, complete, total, volume int) {
+	m.subliminalStatus = status
+	m.subliminalComplete = complete
+	m.subliminalTotal = total
+	m.subliminalVolume = volume
+	m.updateListSize()
+}
+
 func (m Model) Init() tea.Cmd {
 	return nil
 }
@@ -196,6 +220,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case "R":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "repeat_queue"} }
+		case "b":
+			return m, func() tea.Msg { return QueueActionMsg{Action: "subliminal"} }
 		case "L":
 			before := m.list.GlobalIndex()
 			m.list.NextPage()

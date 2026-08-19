@@ -21,17 +21,22 @@ type mockAccessor struct {
 	queueLen int
 }
 
-func (m *mockAccessor) IsPlaying() bool          { return m.playing }
-func (m *mockAccessor) IsPaused() bool           { return m.paused }
-func (m *mockAccessor) HasActiveItem() bool      { return m.hasItem }
-func (m *mockAccessor) CurrentTitle() string     { return m.title }
-func (m *mockAccessor) CurrentAuthors() []string { return m.authors }
-func (m *mockAccessor) CurrentItemID() string    { return m.itemID }
-func (m *mockAccessor) PlayerPosition() float64  { return m.position }
-func (m *mockAccessor) PlayerDuration() float64  { return m.duration }
-func (m *mockAccessor) PlayerVolume() int        { return m.volume }
-func (m *mockAccessor) PlayerSpeed() float64     { return m.speed }
-func (m *mockAccessor) QueueLength() int         { return m.queueLen }
+func (m *mockAccessor) IsPlaying() bool            { return m.playing }
+func (m *mockAccessor) IsPaused() bool             { return m.paused }
+func (m *mockAccessor) HasActiveItem() bool        { return m.hasItem }
+func (m *mockAccessor) CurrentTitle() string       { return m.title }
+func (m *mockAccessor) CurrentAuthors() []string   { return m.authors }
+func (m *mockAccessor) CurrentItemID() string      { return m.itemID }
+func (m *mockAccessor) PlayerPosition() float64    { return m.position }
+func (m *mockAccessor) PlayerDuration() float64    { return m.duration }
+func (m *mockAccessor) PlayerVolume() int          { return m.volume }
+func (m *mockAccessor) PlayerSpeed() float64       { return m.speed }
+func (m *mockAccessor) PlayerMinimumRate() float64 { return 0.5 }
+func (m *mockAccessor) PlayerMaximumRate() float64 { return 4.0 }
+func (m *mockAccessor) QueueLength() int           { return m.queueLen }
+func (m *mockAccessor) CanSeek() bool              { return true }
+func (m *mockAccessor) CanGoNext() bool            { return m.queueLen > 0 }
+func (m *mockAccessor) CanGoPrevious() bool        { return true }
 
 func accessorFn(a *mockAccessor) func() ModelAccessor {
 	return func() ModelAccessor { return a }

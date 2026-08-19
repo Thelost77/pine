@@ -17,6 +17,16 @@ func (m Model) View() string {
 	if !m.Playing {
 		icon = "⏸"
 	}
+	if m.SubliminalCount > 0 {
+		content := fmt.Sprintf(" %s  %s  ∞  Vol:%d%% per track ", icon, m.Title, m.Volume)
+		style := m.styles.PlayerBar
+		if m.width > 0 {
+			contentWidth := max(1, m.width-style.GetHorizontalFrameSize())
+			content = ansi.Truncate(content, contentWidth, "")
+			style = style.Width(m.width)
+		}
+		return lipgloss.PlaceVertical(1, lipgloss.Bottom, style.Render(content))
+	}
 
 	pos := formatTime(m.Position)
 	dur := formatTime(m.Duration)

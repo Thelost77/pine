@@ -310,7 +310,7 @@ func TestE2E(t *testing.T) {
 		m, _ = driveToPlayback(mj, tracks, 0)(t, m)
 		gen := m.playGeneration
 
-		m, _ = update(m, player.PlayerLaunchErrMsg{Err: errors.New("401 unauthorized")})
+		m, _ = update(m, player.PlayerLaunchErrMsg{Generation: m.playGeneration, Err: errors.New("401 unauthorized")})
 
 		if !m.err.HasError() {
 			t.Fatal("expected error banner after launch failure")
@@ -370,6 +370,7 @@ func TestE2E(t *testing.T) {
 		if m.currentIndex < 0 || m.client == nil {
 			t.Fatalf("precondition: playback not active, idx=%d client=%v", m.currentIndex, m.client)
 		}
+		m.playerState.Position = 42
 
 		m, cmd := update(m, keyMsg("q"))
 		m, _ = execCmd(m, cmd)
@@ -390,6 +391,9 @@ func TestE2E(t *testing.T) {
 		}
 		if req.ItemID != "trk-0" {
 			t.Errorf("ItemID = %q, want trk-0", req.ItemID)
+		}
+		if req.PositionTicks != 42*1e7 {
+			t.Errorf("PositionTicks = %d, want %d", req.PositionTicks, int64(42*1e7))
 		}
 	})
 

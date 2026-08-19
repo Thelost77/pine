@@ -156,6 +156,16 @@ func NewMpv() *Mpv {
 	}
 }
 
+// Done returns a channel that closes when the current mpv process exits.
+func (m *Mpv) Done() <-chan struct{} {
+	if m == nil {
+		return nil
+	}
+	m.procMu.Lock()
+	defer m.procMu.Unlock()
+	return m.waitDone
+}
+
 func (m *Mpv) getConn() IPCConnection {
 	if m == nil {
 		return nil
@@ -169,6 +179,15 @@ func (m *Mpv) getConn() IPCConnection {
 // If paused is true, mpv starts paused and the user must press play to resume.
 // If a previous mpv process is still running, it is killed first.
 func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error {
+	return m.launch(url, startTime, socketPath, paused, httpHeaders, volume, false)
+}
+
+// LaunchLoop spawns mpv for an indefinitely looping local media file.
+func (m *Mpv) LaunchLoop(path, socketPath string, paused bool, volume int) error {
+	return m.launch(path, "0", socketPath, paused, nil, volume, true)
+}
+
+func (m *Mpv) launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int, loop bool) error {
 	// Clean up any existing mpv process to avoid orphans
 	if m.cmd != nil && m.cmd.Process != nil {
 		m.stopProcess("killing previous mpv process")
@@ -208,10 +227,13 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders
 		}
 	}
 	m.procMu.Unlock()
-	args = append(args, url)
+	if loop {
+		args = append(args, "--loop-file=inf")
+	}
 	if paused {
 		args = append(args, "--pause")
 	}
+	args = append(args, url)
 	cmd := m.startFn("mpv", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

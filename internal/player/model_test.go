@@ -196,6 +196,25 @@ func TestViewStaysSingleLineWithLongMetadata(t *testing.T) {
 	}
 }
 
+func TestViewSubliminalModeShowsPerTrackVolumeWithoutTimeline(t *testing.T) {
+	m := newTestModel()
+	m.Title = "Subliminal mix (3 tracks)"
+	m.Playing = true
+	m.Volume = 20
+	m.SubliminalCount = 3
+	m.SetWidth(80)
+
+	view := m.View()
+	for _, want := range []string{"Subliminal mix", "Vol:20% per track", "∞"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view does not contain %q: %s", want, view)
+		}
+	}
+	if strings.Contains(view, "0:00") || strings.Contains(view, "1.0x") {
+		t.Fatalf("subliminal footer contains normal timeline controls: %s", view)
+	}
+}
+
 func TestViewPaused(t *testing.T) {
 	m := newTestModel()
 	m.Title = "Test"

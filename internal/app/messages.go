@@ -38,3 +38,17 @@ type EditMetadataMsg struct {
 type SleepTimerExpiredMsg struct {
 	Generation uint64
 }
+
+type repeatCacheMsg struct {
+	Generation uint64
+	ItemID     string
+	Index      int
+	Start      bool
+	Err        error
+}
+
+type subliminalCacheMsg struct {
+	Generation uint64
+	ItemID     string
+	Err        error
+}

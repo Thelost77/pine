@@ -16,8 +16,13 @@ type MprisState struct {
 	position      float64
 	duration      float64
 	speed         float64
+	minimumRate   float64
+	maximumRate   float64
 	volume        int
 	queueLength   int
+	canSeek       bool
+	canGoNext     bool
+	canGoPrevious bool
 }
 
 // Update runs fn with the write lock held. fn must not call the getter methods
@@ -102,6 +107,24 @@ func (s *MprisState) PlayerDuration() float64 {
 	return s.duration
 }
 
+func (s *MprisState) PlayerMinimumRate() float64 {
+	if s == nil {
+		return 1.0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.minimumRate
+}
+
+func (s *MprisState) PlayerMaximumRate() float64 {
+	if s == nil {
+		return 1.0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.maximumRate
+}
+
 func (s *MprisState) PlayerVolume() int {
 	if s == nil {
 		return 100
@@ -118,6 +141,33 @@ func (s *MprisState) PlayerSpeed() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.speed
+}
+
+func (s *MprisState) CanSeek() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.canSeek
+}
+
+func (s *MprisState) CanGoNext() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.canGoNext
+}
+
+func (s *MprisState) CanGoPrevious() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.canGoPrevious
 }
 
 func (s *MprisState) QueueLength() int {

@@ -111,6 +111,43 @@ func (c *Client) StreamHeaders() []string {
 	return []string{"Authorization: " + c.authHeader()}
 }
 
+// DownloadAudio writes the original audio item to dst without applying an
+// overall request timeout. Cancellation is controlled by ctx.
+func (c *Client) DownloadAudio(ctx context.Context, itemID string, dst io.Writer) (int64, error) {
+	if itemID == "" {
+		return 0, errors.New("item ID is empty")
+	}
+	if dst == nil {
+		return 0, errors.New("download destination is nil")
+	}
+	path := fmt.Sprintf("/Items/%s/Download", url.PathEscape(itemID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create audio download request: %w", err)
+	}
+	req.Header.Set("Authorization", c.authHeader())
+
+	downloadClient := &http.Client{
+		Transport:     c.httpClient.Transport,
+		CheckRedirect: c.httpClient.CheckRedirect,
+		Jar:           c.httpClient.Jar,
+	}
+	resp, err := downloadClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("download audio: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4*1024))
+		return 0, &HTTPStatusError{StatusCode: resp.StatusCode}
+	}
+	written, err := io.Copy(dst, resp.Body)
+	if err != nil {
+		return written, fmt.Errorf("write audio download: %w", err)
+	}
+	return written, nil
+}
+
 // do executes an authenticated HTTP request and returns the response body.
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
 	start := time.Now()

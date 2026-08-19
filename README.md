@@ -12,6 +12,8 @@ interface and [mpv](https://mpv.io/) for audio playback.
 - Browse Jellyfin playlists
 - Play individual tracks or queue whole albums and playlists
 - Shuffle, repeat, filter, remove, and jump within the playback queue
+- Cache repeated media locally for the current Spruce session
+- Play up to eight queued tracks together in subliminal mode
 - Fuzzy command-palette search across loaded albums, playlists, and tracks
 - Edit album and track metadata
 - Report playback state and progress to Jellyfin
@@ -84,6 +86,7 @@ Keys can be context-specific. Press `?` in Spruce for the complete active help.
 | `S` | Shuffle selected collection or cycle the sleep timer |
 | `s` | Shuffle the current queue |
 | `r` / `R` | Repeat current track or queue |
+| `b` | Toggle subliminal mode from the queue |
 | `+` / `-` | Increase or decrease playback speed |
 | `]` / `[` | Increase or decrease volume |
 | `m` | Edit selected album or track metadata |
@@ -92,6 +95,23 @@ Keys can be context-specific. Press `?` in Spruce for the complete active help.
 | `tab` | Switch between content and queue |
 | `ctrl+p` | Open the command palette |
 | `?` | Toggle help |
+
+## Repeat cache and subliminal mode
+
+When track or queue repeat is active, Spruce downloads repeated media into a
+private session cache. Later repeats play the local files instead of transferring
+the media again. If repeat is enabled after playback starts, the current item
+may transfer once more while the cache is prepared. The cache is limited to 2
+GiB and removed when Spruce exits. Jellyfin playback progress reports still use
+a small amount of network traffic.
+
+Subliminal mode is available from the queue with `b` or the command palette. It
+first caches every queued track, then plays each queue entry at the same time in
+an independent loop. Each track starts at 20% volume. The normal volume controls
+change every track to the same value. Subliminal mode supports up to eight queue
+entries and locks queue changes until the mode stops. Jellyfin does not receive
+playback progress for a simultaneous subliminal mix because its session model
+represents only one current item.
 
 ## Configuration
 

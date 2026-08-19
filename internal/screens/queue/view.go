@@ -14,7 +14,28 @@ func (m Model) View() string {
 	}
 
 	var header string
-	if m.isPlaying && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
+	if m.subliminalStatus != SubliminalInactive {
+		icon := "▶"
+		status := "Playing"
+		switch m.subliminalStatus {
+		case SubliminalPreparing:
+			icon = "…"
+			status = "Preparing"
+		case SubliminalStarting:
+			icon = "…"
+			status = "Starting"
+		case SubliminalPaused:
+			icon = "⏸"
+			status = "Paused"
+		}
+		progress := fmt.Sprintf("%d tracks", m.subliminalTotal)
+		if m.subliminalStatus == SubliminalPreparing {
+			progress = fmt.Sprintf("%d/%d cached", m.subliminalComplete, m.subliminalTotal)
+		}
+		title := m.styles.Accent.Render(fmt.Sprintf("%s Subliminal mode • %s", icon, status))
+		detail := m.styles.Muted.Render(fmt.Sprintf("%s • %d%% per track", progress, m.subliminalVolume))
+		header = lipgloss.JoinVertical(lipgloss.Left, title, detail) + "\n\n"
+	} else if m.isPlaying && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 		cur := m.tracks[m.currentIndex]
 		statusIcon := "▶"
 		if m.isPaused {

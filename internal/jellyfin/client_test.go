@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -242,6 +243,46 @@ func TestClient_SetFavorite(t *testing.T) {
 				t.Fatalf("IsFavorite = %v, want %v", got.IsFavorite, tt.favorite)
 			}
 		})
+	}
+}
+
+func TestClient_DownloadAudio(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/Items/track%2F1/Download" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
+		}
+		if !strings.Contains(r.Header.Get("Authorization"), `Token="token-xyz"`) {
+			t.Fatalf("missing authorization header: %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte("audio data"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-xyz", "user-123", "Test device", "test-device")
+	var dst bytes.Buffer
+	written, err := client.DownloadAudio(context.Background(), "track/1", &dst)
+	if err != nil {
+		t.Fatalf("DownloadAudio() error: %v", err)
+	}
+	if written != int64(len("audio data")) || dst.String() != "audio data" {
+		t.Fatalf("written=%d data=%q", written, dst.String())
+	}
+}
+
+func TestClient_DownloadAudioReturnsHTTPStatusError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "downloads disabled", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-xyz", "user-123", "Test device", "test-device")
+	var dst bytes.Buffer
+	_, err := client.DownloadAudio(context.Background(), "track-1", &dst)
+	if !IsHTTPStatus(err, http.StatusForbidden) {
+		t.Fatalf("DownloadAudio() error = %v, want HTTP 403", err)
+	}
+	if strings.Contains(err.Error(), "downloads disabled") {
+		t.Fatalf("DownloadAudio() exposed response body: %v", err)
 	}
 }
 

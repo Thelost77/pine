@@ -61,6 +61,7 @@ const (
 	ActionEditMetadata
 	ActionDeleteItem
 	ActionShuffleItem
+	ActionSubliminalMode
 )
 
 type PaletteItem struct {

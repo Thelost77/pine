@@ -47,8 +47,13 @@ func (m *Model) openCommandPalette() {
 		)
 	}
 	if len(m.tracks) > 0 {
+		subliminalLabel := "Start Subliminal Mode"
+		if m.isSubliminalActive() {
+			subliminalLabel = "Stop Subliminal Mode"
+		}
 		staticItems = append(staticItems,
 			components.PaletteItem{Label: "Queue", IsHeader: true},
+			components.PaletteItem{Label: subliminalLabel, Action: components.ActionSubliminalMode},
 			components.PaletteItem{Label: "Shuffle Queue", Action: components.ActionShuffleQueue},
 			components.PaletteItem{Label: "Repeat Current Track", Action: components.ActionRepeatTrack},
 			components.PaletteItem{Label: "Repeat Queue", Action: components.ActionRepeatQueue},
@@ -181,7 +186,12 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 	case components.ActionShowQueue:
 		m.screen = ScreenQueue
 		return m, nil
+	case components.ActionSubliminalMode:
+		return m.toggleSubliminalMode()
 	case components.ActionTogglePlay:
+		if m.isSubliminalRunning() {
+			return m.setSubliminalPaused(m.playerState.Playing)
+		}
 		if !m.IsPlaying() {
 			return m, nil
 		}
@@ -261,24 +271,20 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 		}
 		return m, nil
 	case components.ActionClearQueue:
-		newM, _ := m.Update(queue.QueueActionMsg{Action: "clear"})
-		return newM, nil
+		return m.Update(queue.QueueActionMsg{Action: "clear"})
 	case components.ActionShuffleQueue:
-		newM, _ := m.Update(queue.QueueActionMsg{Action: "shuffle"})
-		return newM, nil
+		return m.Update(queue.QueueActionMsg{Action: "shuffle"})
 	case components.ActionRepeatTrack:
 		if m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
-			newM, _ := m.Update(queue.QueueActionMsg{
+			return m.Update(queue.QueueActionMsg{
 				Action:  "repeat_track",
 				Index:   m.currentIndex,
 				TrackID: m.tracks[m.currentIndex].ID,
 			})
-			return newM, nil
 		}
 		return m, nil
 	case components.ActionRepeatQueue:
-		newM, _ := m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
-		return newM, nil
+		return m.Update(queue.QueueActionMsg{Action: "repeat_queue"})
 	case components.ActionQueueItem:
 		switch item := data.(type) {
 		case jellyfin.Track:
@@ -377,6 +383,9 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 			return m, cmd
 		}
 	case components.ActionPlayDirect:
+		if m.isSubliminalActive() {
+			return m, m.err.SetError(fmt.Errorf("stop subliminal mode before starting another track"))
+		}
 		if track, ok := data.(jellyfin.Track); ok {
 			m.tracks = append(m.tracks, track)
 			return m.startPlaybackAt(len(m.tracks) - 1)
