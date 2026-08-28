@@ -1,6 +1,9 @@
 package app
 
-import "github.com/Thelost77/pine/internal/abs"
+import (
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/captions"
+)
 
 // Screen represents a screen identifier in the application.
 type Screen int
@@ -65,6 +68,8 @@ type PlaySessionData struct {
 	Chapters         []abs.Chapter
 	TrackStartOffset float64
 	TrackDuration    float64
+	TrackFilename    string
+	TranscriptIno    string
 }
 
 // QueueEntry represents a queued book or podcast episode.
@@ -128,3 +133,9 @@ type SeriesContinueMsg struct {
 // PrewarmDoneMsg is sent after cache pre-warming completes. No action needed,
 // just used to keep the command chain alive.
 type PrewarmDoneMsg struct{}
+
+// CaptionLoadedMsg carries parsed VTT cues for the current play generation.
+type CaptionLoadedMsg struct {
+	Generation uint64
+	Cues       []captions.Cue
+}

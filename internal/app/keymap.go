@@ -11,6 +11,7 @@ type KeyMap struct {
 	Back           key.Binding
 	Help           key.Binding
 	ChapterOverlay key.Binding
+	Captions       key.Binding
 	NextInQueue    key.Binding
 	NextChapter    key.Binding
 	PrevChapter    key.Binding
@@ -34,8 +35,12 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 			key.WithHelp("?", "toggle help"),
 		),
 		ChapterOverlay: key.NewBinding(
+			key.WithKeys("C"),
+			key.WithHelp("C", "chapters"),
+		),
+		Captions: key.NewBinding(
 			key.WithKeys("c"),
-			key.WithHelp("c", "chapters"),
+			key.WithHelp("c", "captions"),
 		),
 		NextInQueue: key.NewBinding(
 			key.WithKeys(cfg.NextInQueue),

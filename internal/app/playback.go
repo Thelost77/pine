@@ -10,6 +10,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/captions"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
@@ -191,6 +192,8 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				Chapters:         playSessionChapters(session),
 				TrackStartOffset: session.AudioTracks[0].StartOffset,
 				TrackDuration:    session.AudioTracks[0].Duration,
+				TrackFilename:    session.AudioTracks[0].Metadata.Filename,
+				TranscriptIno:    session.TranscriptIno(session.AudioTracks[0].Metadata.Filename),
 			},
 			StreamURL: streamURL,
 			AuthToken: client.Token(),
@@ -211,6 +214,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.episodeID = msg.Session.EpisodeID
 	m.chapters = msg.Session.Chapters
 	m.resetChapterOverlay()
+	m.captionCues = nil
 	m.trackStartOffset = msg.Session.TrackStartOffset
 	m.trackDuration = msg.Session.TrackDuration
 	m.timeListened = 0
@@ -233,7 +237,61 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	if msg.AuthToken != "" {
 		headers = []string{"Authorization: Bearer " + msg.AuthToken}
 	}
-	return m, tea.Batch(m.mprisPlaybackCmd(), player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers, m.playGeneration))
+	cmds := []tea.Cmd{
+		m.mprisPlaybackCmd(),
+		player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers, m.playGeneration),
+	}
+	if capCmd := loadCaptionsCmd(m.client, msg.Session.ItemID, msg.Session.TrackFilename, msg.Session.TranscriptIno, m.playGeneration); capCmd != nil {
+		cmds = append(cmds, capCmd)
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleCaptionLoaded(msg CaptionLoadedMsg) (Model, tea.Cmd) {
+	if msg.Generation != m.playGeneration {
+		logger.Debug("ignoring stale captions", "msgGen", msg.Generation, "currentGen", m.playGeneration)
+		return m, nil
+	}
+	if !m.isPlaying() {
+		return m, nil
+	}
+	m.captionCues = msg.Cues
+	m.propagateSize()
+	return m, nil
+}
+
+func (m *Model) toggleCaptions() {
+	if len(m.captionCues) == 0 {
+		return
+	}
+	m.captionsHidden = !m.captionsHidden
+	m.propagateSize()
+}
+
+func loadCaptionsCmd(client *cache.Client, itemID, audioFilename, ino string, generation uint64) tea.Cmd {
+	if client == nil || itemID == "" {
+		return nil
+	}
+	inner := client.Client
+	return func() tea.Msg {
+		if ino == "" {
+			files, err := inner.GetLibraryFiles(context.Background(), itemID)
+			if err != nil {
+				logger.Warn("captions: list files failed", "itemID", itemID, "err", err)
+				return CaptionLoadedMsg{Generation: generation}
+			}
+			ino = abs.TranscriptIno(files, audioFilename)
+		}
+		if ino == "" {
+			return CaptionLoadedMsg{Generation: generation}
+		}
+		data, err := inner.GetLibraryFile(context.Background(), itemID, ino)
+		if err != nil {
+			logger.Warn("captions: download failed", "itemID", itemID, "ino", ino, "err", err)
+			return CaptionLoadedMsg{Generation: generation}
+		}
+		return CaptionLoadedMsg{Generation: generation, Cues: captions.ParseVTT(data)}
+	}
 }
 
 // handlePlayerReady starts the position tick and sync tick.
@@ -396,6 +454,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	// Clear current session but keep itemID/chapters for the restart.
 	m.sessionID = ""
 	m.timeListened = 0
+	m.captionCues = nil
 
 	return m, func() tea.Msg {
 		if client != nil && sessionID != "" {
@@ -558,6 +617,8 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 					Chapters:         playSessionChapters(session),
 					TrackStartOffset: session.AudioTracks[0].StartOffset,
 					TrackDuration:    session.AudioTracks[0].Duration,
+					TrackFilename:    session.AudioTracks[0].Metadata.Filename,
+					TranscriptIno:    session.TranscriptIno(session.AudioTracks[0].Metadata.Filename),
 				},
 				StreamURL: streamURL,
 				AuthToken: client.Token(),
@@ -645,6 +706,8 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 			Chapters:         playSessionChapters(session),
 			TrackStartOffset: track.StartOffset,
 			TrackDuration:    track.Duration,
+			TrackFilename:    track.Metadata.Filename,
+			TranscriptIno:    session.TranscriptIno(track.Metadata.Filename),
 		},
 		StreamURL: streamURL,
 		AuthToken: client.Token(),

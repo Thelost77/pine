@@ -12,6 +12,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/captions"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/player"
@@ -1642,6 +1643,170 @@ func TestSeekPendingStaysPendingWithinTimeoutAndOutsideWindow(t *testing.T) {
 
 	if !m.seekPending {
 		t.Fatal("seekPending should remain true when far from target and within the timeout")
+	}
+}
+
+func TestLoadCaptionsCmdDownloadsMatchingVTT(t *testing.T) {
+	vtt := "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello world\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/items/item-001/file/vtt-1" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(vtt))
+	}))
+	defer srv.Close()
+
+	cmd := loadCaptionsCmd(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), "item-001", "book.m4b", "vtt-1", 7)
+	msg := cmd()
+	loaded, ok := msg.(CaptionLoadedMsg)
+	if !ok {
+		t.Fatalf("got %T", msg)
+	}
+	if loaded.Generation != 7 {
+		t.Fatalf("generation = %d, want 7", loaded.Generation)
+	}
+	if len(loaded.Cues) != 1 || loaded.Cues[0].Text != "Hello world" {
+		t.Fatalf("cues = %+v", loaded.Cues)
+	}
+}
+
+func TestLoadCaptionsCmdNoSidecar(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/items/item-001" {
+			_ = json.NewEncoder(w).Encode(struct {
+				LibraryFiles []abs.LibraryFile `json:"libraryFiles"`
+			}{})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	msg := loadCaptionsCmd(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), "item-001", "book.m4b", "", 1)()
+	loaded, ok := msg.(CaptionLoadedMsg)
+	if !ok {
+		t.Fatalf("got %T", msg)
+	}
+	if len(loaded.Cues) != 0 {
+		t.Fatalf("cues = %+v, want empty", loaded.Cues)
+	}
+}
+
+func TestBuildBookPlaySessionMsgResolvesTranscriptIno(t *testing.T) {
+	client := cache.NewClient(abs.NewClient("http://test", "tok"), nil)
+	session := &abs.PlaySession{
+		ID: "sess",
+		AudioTracks: []abs.AudioTrack{
+			{Index: 0, ContentURL: "/s/a", Duration: 100, Metadata: abs.FileMetadata{Filename: "book.m4b"}},
+		},
+		LibraryItem: abs.PlaySessionItem{
+			LibraryFiles: []abs.LibraryFile{
+				{Ino: "audio-1", Metadata: abs.FileMetadata{Filename: "book.m4b"}},
+				{Ino: "vtt-1", Metadata: abs.FileMetadata{Filename: "book.vtt", Ext: ".vtt"}},
+			},
+		},
+	}
+	msg, err := buildBookPlaySessionMsg(client, session, "item-001", "Title", nil, 100, 0)
+	if err != nil {
+		t.Fatalf("buildBookPlaySessionMsg: %v", err)
+	}
+	if msg.Session.TranscriptIno != "vtt-1" {
+		t.Fatalf("TranscriptIno = %q, want vtt-1", msg.Session.TranscriptIno)
+	}
+	if msg.Session.TrackFilename != "book.m4b" {
+		t.Fatalf("TrackFilename = %q, want book.m4b", msg.Session.TrackFilename)
+	}
+}
+
+func TestCaptionLoadedMsgSetsCues(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess"
+	m.playGeneration = 1
+
+	result, _ := m.Update(CaptionLoadedMsg{
+		Generation: 1,
+		Cues:       []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}},
+	})
+	m = result.(Model)
+	if len(m.captionCues) != 1 || m.captionCues[0].Text != "Hello world" {
+		t.Fatalf("cues = %+v", m.captionCues)
+	}
+}
+
+func TestCaptionLoadedMsgIgnoredWhenStale(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess"
+	m.playGeneration = 2
+	m.captionCues = []captions.Cue{{Start: 0, End: 1, Text: "keep"}}
+
+	result, _ := m.Update(CaptionLoadedMsg{
+		Generation: 1,
+		Cues:       []captions.Cue{{Start: 0, End: 1, Text: "stale"}},
+	})
+	m = result.(Model)
+	if len(m.captionCues) != 1 || m.captionCues[0].Text != "keep" {
+		t.Fatalf("stale captions replaced state: %+v", m.captionCues)
+	}
+}
+
+func TestClearPlaybackSessionStateClearsCaptions(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess"
+	m.captionCues = []captions.Cue{{Text: "x"}}
+	m.clearPlaybackSessionState()
+	if m.captionCues != nil {
+		t.Fatalf("captionCues = %+v, want nil", m.captionCues)
+	}
+}
+
+func TestRestartPlaybackAtClearsCaptions(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.itemID = "item-001"
+	m.player.Title = "Book"
+	m.player.Playing = true
+	m.player.Position = 1799
+	m.trackDuration = 1800
+	m.captionCues = []captions.Cue{{Start: 0, End: 10, Text: "old track"}}
+	m.width = 80
+	m.height = 24
+	m.propagateSize()
+
+	if !m.showingCaptions() {
+		t.Fatal("expected captions before restart")
+	}
+
+	m, _ = m.restartPlaybackAt(1800)
+	if m.sessionID != "" {
+		t.Fatalf("sessionID = %q, want empty", m.sessionID)
+	}
+	if m.captionCues != nil {
+		t.Fatalf("captionCues = %+v, want nil", m.captionCues)
+	}
+	if m.showingCaptions() {
+		t.Fatal("stale captions should not remain visible during restart")
+	}
+}
+
+func TestCaptionsHiddenSurvivesReload(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess"
+	m.playGeneration = 1
+	m.captionsHidden = true
+
+	result, _ := m.Update(CaptionLoadedMsg{
+		Generation: 1,
+		Cues:       []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}},
+	})
+	m = result.(Model)
+	if !m.captionsHidden {
+		t.Fatal("hidden flag should survive a new sidecar load")
+	}
+	if m.showingCaptions() {
+		t.Fatal("hidden captions should not display after reload")
 	}
 }
 

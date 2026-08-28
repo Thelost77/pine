@@ -49,6 +49,9 @@ func (m Model) screenHeight() int {
 	}
 	if m.isPlaying() {
 		h -= playerFooterHeight
+		if m.showingCaptions() {
+			h -= captionLineHeight
+		}
 	}
 	if h < 0 {
 		return 0
@@ -113,4 +116,3 @@ func (m Model) updateScreen(msg tea.Msg) (Model, tea.Cmd) {
 	}
 	return m, cmd
 }
-

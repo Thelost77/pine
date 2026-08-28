@@ -65,7 +65,8 @@ Some keys are context-specific.
 | `n` / `N` | Next / previous chapter |
 | `+` / `-` | Speed up / down |
 | `]` / `[` | Volume up / down |
-| `c` | Open chapter list |
+| `c` | Toggle captions during playback |
+| `C` | Open chapter list |
 | `s` | Browse series (library) |
 | `S` | Cycle sleep timer during playback |
 | `b` | Add bookmark |

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Thelost77/pine/internal/captions"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -18,6 +19,7 @@ func (m Model) View() string {
 	errBanner := m.err.View()
 	body := m.viewScreen()
 	hints := m.viewHints()
+	caption := m.viewCaption()
 	footer := m.player.View()
 
 	parts := []string{header}
@@ -25,6 +27,9 @@ func (m Model) View() string {
 		parts = append(parts, errBanner)
 	}
 	parts = append(parts, body)
+	if caption != "" {
+		parts = append(parts, caption)
+	}
 	if hints != "" {
 		parts = append(parts, hints)
 	}
@@ -53,7 +58,7 @@ func (m Model) View() string {
 	}
 
 	if m.width > 0 && m.height > 0 {
-		content = m.restoreFooter(content, hints, footer)
+		content = m.restoreFooter(content, hints, caption, footer)
 	}
 
 	return content
@@ -112,6 +117,9 @@ func (m Model) overlayPaletteModal(content string) string {
 
 	x := max(0, (m.width-overlayWidth)/2)
 	bottomReserve := 2
+	if m.showingCaptions() {
+		bottomReserve++
+	}
 	availHeight := m.height - bottomReserve
 	if availHeight < overlayHeight {
 		availHeight = overlayHeight
@@ -130,15 +138,21 @@ func (m Model) overlayPaletteModal(content string) string {
 	return strings.Join(baseLines, "\n")
 }
 
-func (m Model) restoreFooter(content, hints, footer string) string {
+func (m Model) restoreFooter(content, hints, caption, footer string) string {
 	lines := strings.Split(content, "\n")
 
 	hintLine := ""
+	captionLine := ""
 	footerLine := ""
 	if footer != "" {
 		footerLine = lipgloss.NewStyle().Width(m.width - 1).Render(footer)
 		footerLine = strings.Split(footerLine, "\n")[0]
 		footerLine = ansi.Truncate(footerLine, m.width-1, "")
+	}
+	if caption != "" {
+		captionLine = lipgloss.NewStyle().Width(m.width - 1).Render(caption)
+		captionLine = strings.Split(captionLine, "\n")[0]
+		captionLine = ansi.Truncate(captionLine, m.width-1, "")
 	}
 	if hints != "" {
 		hintLine = lipgloss.NewStyle().Width(m.width - 1).Render(hints)
@@ -157,9 +171,39 @@ func (m Model) restoreFooter(content, hints, footer string) string {
 		if idx >= 0 {
 			lines[idx] = hintLine
 		}
+		idx--
+	}
+	if captionLine != "" {
+		if idx >= 0 {
+			lines[idx] = captionLine
+		}
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) showingCaptions() bool {
+	return m.isPlaying() && len(m.captionCues) > 0 && !m.captionsHidden
+}
+
+func (m Model) viewCaption() string {
+	if !m.showingCaptions() {
+		return ""
+	}
+	text := captions.At(m.captionCues, m.player.Position-m.trackStartOffset)
+	w := normalizeViewWidth(m.width)
+	if w > 0 && text != "" {
+		text = ansi.Truncate(text, max(w-2, 1), "…")
+	}
+	style := m.styles.Caption
+	if w > 0 {
+		style = style.Width(w)
+	}
+	rendered := style.Render(text)
+	if strings.TrimSpace(ansi.Strip(rendered)) == "" {
+		return style.Render(" ")
+	}
+	return rendered
 }
 
 // normalizeViewWidth subtracts 1 from the terminal width to prevent rendering bugs.
@@ -265,7 +309,10 @@ func (m Model) viewHints() string {
 			parts = append(parts, key(">", "next queued"))
 		}
 		if len(m.chapters) > 0 {
-			parts = append(parts, key("c", "chapters"))
+			parts = append(parts, key("C", "chapters"))
+		}
+		if len(m.captionCues) > 0 {
+			parts = append(parts, key("c", "captions"))
 		}
 	}
 	if len(m.queue) > 0 {

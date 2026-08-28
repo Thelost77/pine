@@ -7,6 +7,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/captions"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
@@ -31,6 +32,7 @@ import (
 const headerHeight = 2
 const errorBannerHeight = 1
 const playerFooterHeight = 1
+const captionLineHeight = 1
 const syncInterval = 30 * time.Second
 
 // Model is the root application model that manages screen routing.
@@ -58,6 +60,8 @@ type Model struct {
 	chapters                 []abs.Chapter
 	chapterOverlayVisible    bool
 	chapterOverlayIndex      int
+	captionCues              []captions.Cue
+	captionsHidden           bool
 	trackStartOffset         float64
 	trackDuration            float64
 	sleepDeadline            time.Time
@@ -578,6 +582,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case series.BackMsg:
 		return m.back()
 
+	case CaptionLoadedMsg:
+		return m.handleCaptionLoaded(msg)
+
 	case PlaySessionMsg:
 		logger.Info("play session started", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)
 		return m.handlePlaySessionMsg(msg)
@@ -794,6 +801,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if !m.isFiltering() && m.isPlaying() && len(m.captionCues) > 0 && key.Matches(msg, m.keys.Captions) {
+			m.toggleCaptions()
+			return m, nil
+		}
 		// Global quit: q always quits the app.
 		if !m.isFiltering() && m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
 			if m.isPlaying() {
@@ -960,6 +971,7 @@ func (m *Model) clearPlaybackSessionState() {
 	m.lastSyncPos = 0
 	m.chapters = nil
 	m.resetChapterOverlay()
+	m.captionCues = nil
 	m.trackStartOffset = 0
 	m.trackDuration = 0
 	m.sleepDeadline = time.Time{}
@@ -1093,6 +1105,13 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 			components.PaletteItem{Label: "Previous Chapter", Action: components.ActionPrevChapter},
 		)
 	}
+	if len(m.captionCues) > 0 {
+		label := "Show Captions"
+		if m.showingCaptions() {
+			label = "Hide Captions"
+		}
+		player = append(player, components.PaletteItem{Label: label, Action: components.ActionToggleCaptions})
+	}
 
 	sleep := []components.PaletteItem{
 		{Label: "Sleep Timer", IsHeader: true},
@@ -1208,6 +1227,9 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		if len(m.chapters) > 0 {
 			return m.seekToChapter(m.prevChapter())
 		}
+		return m, nil
+	case components.ActionToggleCaptions:
+		m.toggleCaptions()
 		return m, nil
 	case components.ActionSleep15:
 		m.sleepDuration = 15 * time.Minute

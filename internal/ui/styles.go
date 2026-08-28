@@ -16,6 +16,7 @@ type Styles struct {
 	Border    lipgloss.Style
 	PlayerBar lipgloss.Style
 	StatusBar lipgloss.Style
+	Caption   lipgloss.Style
 }
 
 // NewStyles builds a Styles set from a ThemeConfig, allowing user overrides.
@@ -68,6 +69,11 @@ func NewStyles(theme config.ThemeConfig) Styles {
 		StatusBar: lipgloss.NewStyle().
 			Background(bg).
 			Foreground(muted).
+			Padding(0, 1),
+
+		Caption: lipgloss.NewStyle().
+			Background(selected).
+			Foreground(fg).
 			Padding(0, 1),
 	}
 }

@@ -54,6 +54,7 @@ const (
 	ActionPlayDirect
 	ActionEditMetadata
 	ActionDeleteItem
+	ActionToggleCaptions
 )
 
 type PaletteItem struct {

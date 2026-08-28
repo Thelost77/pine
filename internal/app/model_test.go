@@ -11,6 +11,7 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/captions"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
@@ -969,14 +970,14 @@ func TestBackWhilePlayingKeepsPlayback(t *testing.T) {
 func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
 	m := newPlaybackTestModel()
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
 	m = result.(Model)
 	if m.chapterOverlayVisible {
 		t.Fatal("overlay should stay closed when not playing")
 	}
 
 	m.sessionID = "sess-123"
-	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
 	m = result.(Model)
 	if m.chapterOverlayVisible {
 		t.Fatal("overlay should stay closed without chapters")
@@ -987,7 +988,7 @@ func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
 		{ID: 1, Start: 60, End: 120, Title: "Two"},
 	}
 	m.player.Position = 70.0
-	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
 	m = result.(Model)
 	if !m.chapterOverlayVisible {
 		t.Fatal("overlay should open during active playback when chapters exist")
@@ -995,6 +996,42 @@ func TestCKeyOpensChapterOverlayOnlyWhenPlayingWithChapters(t *testing.T) {
 	if m.chapterOverlayIndex != 1 {
 		t.Fatalf("overlay index = %d, want 1", m.chapterOverlayIndex)
 	}
+}
+
+func TestPaletteToggleCaptions(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	m.captionCues = []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}}
+
+	playerItems, _ := m.buildStaticPaletteItems()
+	if !paletteHasAction(playerItems, components.ActionToggleCaptions, "Hide Captions") {
+		t.Fatalf("expected Hide Captions while visible, got %#v", playerItems)
+	}
+
+	m, _ = m.handlePaletteAction(components.ActionToggleCaptions, "", "", "", nil)
+	if !m.captionsHidden {
+		t.Fatal("palette action should hide captions")
+	}
+
+	playerItems, _ = m.buildStaticPaletteItems()
+	if !paletteHasAction(playerItems, components.ActionToggleCaptions, "Show Captions") {
+		t.Fatalf("expected Show Captions while hidden, got %#v", playerItems)
+	}
+
+	m, _ = m.handlePaletteAction(components.ActionToggleCaptions, "", "", "", nil)
+	if m.captionsHidden {
+		t.Fatal("palette action should show captions")
+	}
+}
+
+func paletteHasAction(items []components.PaletteItem, action components.PaletteAction, label string) bool {
+	for _, item := range items {
+		if item.Action == action && item.Label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLibraryScreenSeriesKeyWinsDuringPlayback(t *testing.T) {

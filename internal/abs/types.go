@@ -37,6 +37,19 @@ type LibraryItem struct {
 	RecentEpisode     *PodcastEpisode    `json:"recentEpisode,omitempty"`
 }
 
+// LibraryFile is a file attached to a library item.
+type LibraryFile struct {
+	Ino      string       `json:"ino"`
+	FileType string       `json:"fileType,omitempty"`
+	Metadata FileMetadata `json:"metadata"`
+}
+
+// FileMetadata is ABS file metadata used to match audio tracks to sidecars.
+type FileMetadata struct {
+	Filename string `json:"filename"`
+	Ext      string `json:"ext,omitempty"`
+}
+
 // SortRecentlyAdded sorts library items by descending addedAt and then title.
 func SortRecentlyAdded(items []LibraryItem) {
 	slices.SortFunc(items, func(a, b LibraryItem) int {
@@ -280,20 +293,32 @@ type UserMediaProgress struct {
 
 // PlaySession is returned by POST /api/items/{id}/play or /api/items/{id}/play/{episodeId}.
 type PlaySession struct {
-	ID            string        `json:"id"`
-	AudioTracks   []AudioTrack  `json:"audioTracks"`
-	CurrentTime   float64       `json:"currentTime"`
-	EpisodeID     string        `json:"episodeId,omitempty"`
-	MediaMetadata MediaMetadata `json:"mediaMetadata"`
-	Chapters      []Chapter     `json:"chapters,omitempty"`
+	ID            string          `json:"id"`
+	AudioTracks   []AudioTrack    `json:"audioTracks"`
+	CurrentTime   float64         `json:"currentTime"`
+	EpisodeID     string          `json:"episodeId,omitempty"`
+	MediaMetadata MediaMetadata   `json:"mediaMetadata"`
+	Chapters      []Chapter       `json:"chapters,omitempty"`
+	LibraryItem   PlaySessionItem `json:"libraryItem"`
+}
+
+// PlaySessionItem is the nested library item on a play-session response.
+type PlaySessionItem struct {
+	LibraryFiles []LibraryFile `json:"libraryFiles,omitempty"`
+}
+
+// TranscriptIno returns the VTT inode for audioFilename from the session item.
+func (s PlaySession) TranscriptIno(audioFilename string) string {
+	return TranscriptIno(s.LibraryItem.LibraryFiles, audioFilename)
 }
 
 // AudioTrack represents a single audio track in a play session.
 type AudioTrack struct {
-	Index       int     `json:"index"`
-	StartOffset float64 `json:"startOffset"`
-	Duration    float64 `json:"duration"`
-	ContentURL  string  `json:"contentUrl"`
+	Index       int          `json:"index"`
+	StartOffset float64      `json:"startOffset"`
+	Duration    float64      `json:"duration"`
+	ContentURL  string       `json:"contentUrl"`
+	Metadata    FileMetadata `json:"metadata"`
 }
 
 // LibraryItemsResponse is returned by GET /api/libraries/{id}/items.

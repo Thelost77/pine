@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/captions"
 	"github.com/Thelost77/pine/internal/screens/library"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -70,18 +71,18 @@ func TestViewRendersChapterOrdinalsAlongsideRawTitles(t *testing.T) {
 func TestViewHintsAdvertiseChaptersOnlyWhenAvailable(t *testing.T) {
 	m := newPlaybackTestModel()
 
-	if containsString(m.viewHints(), "c chapters") {
+	if containsString(m.viewHints(), "C chapters") {
 		t.Fatal("chapter hint should be hidden when playback is inactive")
 	}
 
 	m.sessionID = "sess-123"
 	m.player.Playing = true
-	if containsString(m.viewHints(), "c chapters") {
+	if containsString(m.viewHints(), "C chapters") {
 		t.Fatal("chapter hint should be hidden when no chapters exist")
 	}
 
 	m.chapters = []abs.Chapter{{ID: 0, Start: 0, End: 60, Title: "One"}}
-	if !containsString(m.viewHints(), "c chapters") {
+	if !containsString(m.viewHints(), "C chapters") {
 		t.Fatalf("chapter hint should be shown when playback chapters exist\n%s", m.viewHints())
 	}
 }
@@ -140,11 +141,14 @@ func TestHelpOverlayDocumentsChapterOverlay(t *testing.T) {
 	m.help.Toggle()
 
 	view := m.View()
-	if !containsString(view, "c") || !containsString(view, "open chapters") {
+	if !containsString(view, "open chapters") {
 		t.Fatalf("help overlay should document chapter overlay binding\n%s", view)
 	}
 	if !containsString(view, ">") || !containsString(view, "play next queued") {
 		t.Fatalf("help overlay should document next queued binding\n%s", view)
+	}
+	if !containsString(view, "toggle captions") {
+		t.Fatalf("help overlay should document caption toggle\n%s", view)
 	}
 }
 
@@ -202,5 +206,129 @@ func TestViewMaintainsStrictHeightConstraint(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	if len(lines) != m.height {
 		t.Fatalf("View() output height=%d, expected exactly m.height=%d. If the output is taller, it will cause the terminal to scroll and hide the header. Output:\n%s", len(lines), m.height, out)
+	}
+}
+
+func TestViewRendersCaptionLine(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 80
+	m.height = 24
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	m.player.Position = 1802
+	m.player.Duration = 3600
+	m.trackStartOffset = 1800
+	m.captionCues = []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}}
+	m.propagateSize()
+
+	view := m.View()
+	if !containsString(view, "Hello world") {
+		t.Fatalf("View() missing caption\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	if len(lines) != m.height {
+		t.Fatalf("View() height=%d, want %d\n%s", len(lines), m.height, view)
+	}
+
+	captionIdx, hintIdx, footerIdx := -1, -1, -1
+	for i, line := range lines {
+		switch {
+		case containsString(line, "Hello world"):
+			captionIdx = i
+		case containsString(line, "tab focus"):
+			hintIdx = i
+		case containsString(line, "1.0x"):
+			footerIdx = i
+		}
+	}
+	if captionIdx < 0 || hintIdx < 0 || footerIdx < 0 {
+		t.Fatalf("missing chrome lines caption=%d hints=%d footer=%d\n%s", captionIdx, hintIdx, footerIdx, view)
+	}
+	if captionIdx >= hintIdx || hintIdx >= footerIdx {
+		t.Fatalf("caption should sit above hints and player, got caption=%d hints=%d footer=%d", captionIdx, hintIdx, footerIdx)
+	}
+}
+
+func TestViewHintsAdvertiseCaptionsOnlyWhenAvailable(t *testing.T) {
+	m := newPlaybackTestModel()
+
+	if containsString(m.viewHints(), "c captions") {
+		t.Fatal("caption hint should be hidden when playback is inactive")
+	}
+
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	if containsString(m.viewHints(), "c captions") {
+		t.Fatal("caption hint should be hidden when no cues exist")
+	}
+
+	m.captionCues = []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}}
+	if !containsString(m.viewHints(), "c captions") {
+		t.Fatalf("caption hint should be shown when cues exist\n%s", m.viewHints())
+	}
+}
+
+func TestToggleCaptionsHidesAndShowsLine(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 80
+	m.height = 24
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	m.player.Position = 2
+	m.captionCues = []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}}
+	m.propagateSize()
+
+	if !containsString(m.View(), "Hello world") {
+		t.Fatal("captions should start visible")
+	}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = result.(Model)
+	if containsString(m.View(), "Hello world") {
+		t.Fatal("c should hide captions")
+	}
+	if !containsString(m.viewHints(), "c captions") {
+		t.Fatal("hint should remain while cues exist")
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = result.(Model)
+	if !containsString(m.View(), "Hello world") {
+		t.Fatal("c should show captions again")
+	}
+}
+
+func TestViewHidesCaptionsWhenNotPlaying(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 80
+	m.height = 24
+	m.player.Title = "Test Book"
+	m.player.Playing = false
+	m.captionCues = []captions.Cue{{Start: 1, End: 4, Text: "Hello world"}}
+	m.propagateSize()
+
+	if containsString(m.View(), "Hello world") {
+		t.Fatal("captions should hide when playback is inactive")
+	}
+}
+
+func TestViewHidesCaptionWithoutCues(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 80
+	m.height = 24
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	m.propagateSize()
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != m.height {
+		t.Fatalf("View() height=%d, want %d\n%s", len(lines), m.height, view)
+	}
+	if containsString(view, "Hello world") {
+		t.Fatal("View() showed caption text without cues")
 	}
 }

@@ -289,7 +289,7 @@ func TestE2E_ChapterOverlayRequiresPlayback(t *testing.T) {
 	m, _ = m.navigate(ScreenDetail)
 	m = e2eSetSize(m, 120, 40)
 
-	m, _ = e2ePressKey(m, 'c')
+	m, _ = e2ePressKey(m, 'C')
 
 	if m.chapterOverlayVisible {
 		t.Fatal("chapter overlay should stay closed before playback starts")
@@ -325,7 +325,7 @@ func TestE2E_ChapterOverlayOpenCloseAndSeek(t *testing.T) {
 		t.Fatalf("chapters len = %d, want 2", len(m.chapters))
 	}
 
-	m, _ = e2ePressKey(m, 'c')
+	m, _ = e2ePressKey(m, 'C')
 	if !m.chapterOverlayVisible {
 		t.Fatal("expected chapter overlay to open")
 	}
@@ -340,7 +340,7 @@ func TestE2E_ChapterOverlayOpenCloseAndSeek(t *testing.T) {
 		t.Fatalf("screen = %v, want Detail after closing overlay", m.ActiveScreen())
 	}
 
-	m, _ = e2ePressKey(m, 'c')
+	m, _ = e2ePressKey(m, 'C')
 	m, _ = e2ePressKey(m, 'j')
 	if m.chapterOverlayIndex != 1 {
 		t.Fatalf("chapter overlay index = %d, want 1", m.chapterOverlayIndex)
