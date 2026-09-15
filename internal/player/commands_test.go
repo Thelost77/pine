@@ -1,6 +1,7 @@
 package player
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ import (
 // root model can discard stale launch errors from superseded sessions.
 func TestLaunchCmdPropagatesGenerationToLaunchError(t *testing.T) {
 	mp := &launchFailPlayer{}
-	cmd := LaunchCmd(mp, "http://test/audio.mp3", 0, false, nil, 7)
+	cmd := LaunchCmd(mp, "http://test/audio.mp3", 0, 0, false, nil, 7)
 	msg := cmd()
 	launchErr, ok := msg.(PlayerLaunchErrMsg)
 	if !ok {
@@ -28,6 +29,48 @@ func TestPlayerReadyMsgAndLaunchErrMsgZeroValueGeneration(t *testing.T) {
 	}
 	if (PlayerLaunchErrMsg{}).Generation != 0 {
 		t.Error("PlayerLaunchErrMsg zero-value Generation should be 0")
+	}
+}
+
+func TestFormatStartPosition(t *testing.T) {
+	tests := []struct {
+		name      string
+		startTime float64
+		duration  float64
+		want      string
+	}{
+		{
+			name:      "late resume uses percent",
+			startTime: 93767,
+			duration:  124076,
+			want:      fmt.Sprintf("%f%%", 93767.0/124076.0*100),
+		},
+		{
+			name:      "unknown duration uses seconds",
+			startTime: 30,
+			duration:  0,
+			want:      fmt.Sprintf("%f", 30.0),
+		},
+		{
+			name:      "start at zero uses seconds",
+			startTime: 0,
+			duration:  124076,
+			want:      fmt.Sprintf("%f", 0.0),
+		},
+		{
+			name:      "past end clamps to 100 percent",
+			startTime: 200,
+			duration:  100,
+			want:      fmt.Sprintf("%f%%", 100.0),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatStartPosition(tt.startTime, tt.duration)
+			if got != tt.want {
+				t.Fatalf("formatStartPosition(%v, %v) = %q, want %q", tt.startTime, tt.duration, got, tt.want)
+			}
+		})
 	}
 }
 

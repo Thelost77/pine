@@ -93,20 +93,36 @@ type PlayerLaunchErrMsg struct {
 // PlayerQuitMsg signals that mpv has been quit.
 type PlayerQuitMsg struct{}
 
+// formatStartPosition builds mpv's --start value.
+// If duration is known and start is past 0, it uses a percent so mpv can jump
+// by byte offset instead of scanning to a timestamp.
+func formatStartPosition(startTime, duration float64) string {
+	if duration > 0 && startTime > 0 {
+		pct := startTime / duration * 100
+		if pct > 100 {
+			pct = 100
+		}
+		return fmt.Sprintf("%f%%", pct)
+	}
+	return fmt.Sprintf("%f", startTime)
+}
+
 // LaunchCmd spawns mpv and connects via IPC. If paused is true, mpv starts paused.
 // httpHeaders are passed to mpv via --http-header-fields.
+// duration is the current track length in seconds; it is used to start at a
+// percent offset when resuming into a long HTTP stream.
 // The generation ties the resulting PlayerReadyMsg/PlayerLaunchErrMsg to the
 // play session that started the launch, so stale events from a superseded
 // session can be ignored by the root model.
 // Returns PlayerReadyMsg on success.
-func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, generation uint64) tea.Cmd {
+func LaunchCmd(p Player, url string, startTime, duration float64, paused bool, httpHeaders []string, generation uint64) tea.Cmd {
 	return func() tea.Msg {
-		logger.Info("launching mpv", "startTime", startTime, "socketDir", MpvSocketDir(), "generation", generation)
+		startStr := formatStartPosition(startTime, duration)
+		logger.Info("launching mpv", "startTime", startTime, "duration", duration, "start", startStr, "socketDir", MpvSocketDir(), "generation", generation)
 		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("pine-mpv-%d.sock", os.Getpid()))
 		// Remove stale socket
 		_ = os.Remove(socketPath)
 
-		startStr := fmt.Sprintf("%f", startTime)
 		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders); err != nil {
 			logger.Error("mpv launch failed", "err", err)
 			return PlayerLaunchErrMsg{Err: err, Generation: generation}

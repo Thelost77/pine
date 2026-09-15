@@ -114,6 +114,7 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders
 		"--no-video",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 		fmt.Sprintf("--start=%s", startTime),
+		"--force-seekable=yes",
 	}
 	// Headers carry the auth token; keep them out of the process argument list
 	// (visible via ps or /proc) by writing them to a 0600 temp config file.

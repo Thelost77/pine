@@ -512,6 +512,40 @@ func TestPlaybackSyncTickNoOpWhenNotPlaying(t *testing.T) {
 	}
 }
 
+// TestPlaybackPropertyUnavailableKeepsWaiting verifies that mpv reporting
+// time-pos as unavailable does not stop playback, even after several ticks.
+func TestPlaybackPropertyUnavailableKeepsWaiting(t *testing.T) {
+	mp := &mockPlayer{position: 0, duration: 3600}
+	client := abs.NewClient("http://example.invalid", "tok")
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, mp)
+	m.sessionID = "sess-abc"
+	m.itemID = "item-001"
+	m.playGeneration = 1
+	m.player.Playing = true
+	m.player.Position = 93767.0
+	m.player.Duration = 248152.0
+
+	for i := 0; i < 6; i++ {
+		result, cmd := m.Update(player.PositionMsg{
+			Err:        fmt.Errorf("get time-pos: mpv error: property unavailable"),
+			Generation: 1,
+		})
+		m = result.(Model)
+		if m.sessionID == "" {
+			t.Fatalf("sessionID cleared after property unavailable attempt %d", i+1)
+		}
+		if !m.player.Playing {
+			t.Fatalf("player stopped after property unavailable attempt %d", i+1)
+		}
+		if cmd == nil {
+			t.Fatalf("expected backoff tick after property unavailable attempt %d", i+1)
+		}
+	}
+	if m.propertyUnavailableCount != 6 {
+		t.Fatalf("propertyUnavailableCount = %d, want 6", m.propertyUnavailableCount)
+	}
+}
+
 // TestPlaybackPositionErrorTriggersCleanup verifies that a PositionMsg with
 // an error triggers stopPlayback.
 func TestPlaybackPositionErrorTriggersCleanup(t *testing.T) {

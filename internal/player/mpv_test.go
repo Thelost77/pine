@@ -282,6 +282,7 @@ func TestLaunch(t *testing.T) {
 				"--no-video",
 				"--input-ipc-server=/tmp/test.sock",
 				"--start=30",
+				"--force-seekable=yes",
 				"http://example.com/audio.mp3",
 			}
 			for i, a := range expected {

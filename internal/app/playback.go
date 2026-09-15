@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	trackEndRolloverSlack         = 2.0
-	maxPropertyUnavailableRetries = 4
+	trackEndRolloverSlack            = 2.0
+	propertyUnavailableMaxBackoffExp = 2 // 500ms << 2 = 2s
 )
 
 func pineVersion() string {
@@ -239,7 +239,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	}
 	cmds := []tea.Cmd{
 		m.mprisPlaybackCmd(),
-		player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers, m.playGeneration),
+		player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, msg.Session.TrackDuration, paused, headers, m.playGeneration),
 	}
 	if capCmd := loadCaptionsCmd(m.client, msg.Session.ItemID, msg.Session.TrackFilename, msg.Session.TranscriptIno, m.playGeneration); capCmd != nil {
 		cmds = append(cmds, capCmd)
@@ -334,16 +334,18 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		}
 
 		if strings.Contains(msg.Err.Error(), "property unavailable") {
+			// IPC is up; mpv has not finished opening or seeking yet.
+			// Keep polling. Do not treat this as a dead player.
 			m.propertyUnavailableCount++
-			if m.propertyUnavailableCount < maxPropertyUnavailableRetries {
-				interval := 500 * time.Millisecond << m.propertyUnavailableCount
-				logger.Debug("mpv properties not ready yet, backing off", "attempt", m.propertyUnavailableCount, "nextTick", interval)
-				return m, tickCmd(m.mpv, m.playGeneration, interval)
+			shift := m.propertyUnavailableCount
+			if shift > propertyUnavailableMaxBackoffExp {
+				shift = propertyUnavailableMaxBackoffExp
 			}
-			logger.Warn("mpv properties unavailable after retries, stopping playback", "err", msg.Err)
-		} else {
-			m.propertyUnavailableCount = 0
+			interval := 500 * time.Millisecond << shift
+			logger.Debug("mpv properties not ready yet, backing off", "attempt", m.propertyUnavailableCount, "nextTick", interval)
+			return m, tickCmd(m.mpv, m.playGeneration, interval)
 		}
+		m.propertyUnavailableCount = 0
 
 		if m.isPlaying() {
 			return m.stopPlayback()
