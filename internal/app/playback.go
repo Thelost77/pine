@@ -450,6 +450,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	targetPos := bookPos
 	cacheStore := m.cacheStore
 	libraryID := m.playbackLibraryID
+	seriesID := m.playbackSeriesID
 
 	// Bump generation so old position ticks get discarded.
 	m.playGeneration++
@@ -461,12 +462,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		if client != nil && sessionID != "" {
 			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
-			if cacheStore != nil && itemID != "" {
-				_ = cacheStore.Delete("progress:" + itemID)
-				if libraryID != "" {
-					_ = cacheStore.Delete("personalized:" + libraryID)
-				}
-			}
+			evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 		}
 		if mpvPlayer != nil {
 			_ = mpvPlayer.Quit()
@@ -981,6 +977,7 @@ func (m Model) Cleanup() {
 	defer cancel()
 
 	libraryID := m.playbackLibraryID
+	seriesID := m.playbackSeriesID
 	itemID := m.itemID
 
 	if m.client != nil && m.sessionID != "" {
@@ -989,12 +986,7 @@ func (m Model) Cleanup() {
 		} else {
 			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened)
 		}
-		if m.cacheStore != nil && itemID != "" {
-			_ = m.cacheStore.Delete("progress:" + itemID)
-			if libraryID != "" {
-				_ = m.cacheStore.Delete("personalized:" + libraryID)
-			}
-		}
+		evictProgressCaches(m.cacheStore, itemID, libraryID, seriesID)
 	}
 
 	if m.client != nil && m.itemID != "" {
@@ -1009,12 +1001,7 @@ func (m Model) Cleanup() {
 		} else {
 			logger.Debug("cleanup: progress updated", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress)
 		}
-		if m.cacheStore != nil {
-			_ = m.cacheStore.Delete("progress:" + itemID)
-			if libraryID != "" {
-				_ = m.cacheStore.Delete("personalized:" + libraryID)
-			}
-		}
+		evictProgressCaches(m.cacheStore, itemID, libraryID, seriesID)
 	}
 
 	if m.db != nil && m.itemID != "" {
