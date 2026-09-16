@@ -1033,6 +1033,144 @@ func TestMarkFinishedEvictsProgressCaches(t *testing.T) {
 	}
 }
 
+func TestCleanupEvictsProgressCaches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-cleanup/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/me/progress/book-001":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	dbStore, err := db.Open(t.TempDir() + "/cleanup.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer func() { _ = dbStore.Close() }()
+
+	client := abs.NewClient(srv.URL, "tok")
+	cacheStore := cache.NewStore(dbStore)
+
+	item := &abs.LibraryItem{ID: "book-001", LibraryID: "lib-001", MediaType: "book"}
+	if err := cacheStore.PutLibraryItem("book-001", item, time.Minute); err != nil {
+		t.Fatalf("seed item cache: %v", err)
+	}
+	if err := cacheStore.PutSeriesContents("series-001", []abs.LibraryItem{*item}, time.Minute); err != nil {
+		t.Fatalf("seed series cache: %v", err)
+	}
+	if err := cacheStore.PutPersonalized("lib-001", []abs.PersonalizedResponse{}, time.Minute); err != nil {
+		t.Fatalf("seed personalized cache: %v", err)
+	}
+	if err := cacheStore.PutMediaProgress("book-001", &abs.MediaProgressWithBookmarks{}, time.Minute); err != nil {
+		t.Fatalf("seed progress cache: %v", err)
+	}
+
+	m := NewWithPlayer(config.Default(), dbStore, cache.NewClient(client, cacheStore), cacheStore, &mockPlayer{})
+	m.sessionID = "sess-cleanup"
+	m.itemID = "book-001"
+	m.playbackLibraryID = "lib-001"
+	m.playbackSeriesID = "series-001"
+	m.player.Position = 120
+	m.player.Duration = 3600
+
+	m.Cleanup()
+
+	if _, hit, _ := cacheStore.GetLibraryItem("book-001"); hit {
+		t.Fatal("expected item cache to be evicted after Cleanup")
+	}
+	if _, hit, _ := cacheStore.GetSeriesContents("series-001"); hit {
+		t.Fatal("expected series contents cache to be evicted after Cleanup")
+	}
+	if _, hit, _ := cacheStore.GetPersonalized("lib-001"); hit {
+		t.Fatal("expected personalized cache to be evicted after Cleanup")
+	}
+	if _, hit, _ := cacheStore.GetMediaProgress("book-001"); hit {
+		t.Fatal("expected progress cache to be evicted after Cleanup")
+	}
+}
+
+func TestRestartPlaybackAtEvictsProgressCaches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/sess-restart/close":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/items/book-001/play":
+			_ = json.NewEncoder(w).Encode(abs.PlaySession{
+				ID: "sess-new",
+				AudioTracks: []abs.AudioTrack{
+					{Index: 0, ContentURL: "/s/item/book-001/audio.mp3", Duration: 3600},
+				},
+				CurrentTime: 0,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	dbStore, err := db.Open(t.TempDir() + "/restart.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer func() { _ = dbStore.Close() }()
+
+	client := abs.NewClient(srv.URL, "tok")
+	cacheStore := cache.NewStore(dbStore)
+
+	item := &abs.LibraryItem{ID: "book-001", LibraryID: "lib-001", MediaType: "book"}
+	if err := cacheStore.PutLibraryItem("book-001", item, time.Minute); err != nil {
+		t.Fatalf("seed item cache: %v", err)
+	}
+	if err := cacheStore.PutSeriesContents("series-001", []abs.LibraryItem{*item}, time.Minute); err != nil {
+		t.Fatalf("seed series cache: %v", err)
+	}
+	if err := cacheStore.PutPersonalized("lib-001", []abs.PersonalizedResponse{}, time.Minute); err != nil {
+		t.Fatalf("seed personalized cache: %v", err)
+	}
+	if err := cacheStore.PutMediaProgress("book-001", &abs.MediaProgressWithBookmarks{}, time.Minute); err != nil {
+		t.Fatalf("seed progress cache: %v", err)
+	}
+
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, cacheStore), cacheStore, &mockPlayer{})
+	m.sessionID = "sess-restart"
+	m.itemID = "book-001"
+	m.playbackLibraryID = "lib-001"
+	m.playbackSeriesID = "series-001"
+	m.player.Title = "A Book"
+	m.player.Position = 120
+	m.player.Duration = 3600
+
+	_, cmd := m.restartPlaybackAt(300)
+	if cmd == nil {
+		t.Fatal("expected command from restartPlaybackAt")
+	}
+	if _, ok := cmd().(PlaySessionMsg); !ok {
+		t.Fatalf("expected PlaySessionMsg, got %T", cmd())
+	}
+
+	if _, hit, _ := cacheStore.GetLibraryItem("book-001"); hit {
+		t.Fatal("expected item cache to be evicted after restartPlaybackAt")
+	}
+	if _, hit, _ := cacheStore.GetSeriesContents("series-001"); hit {
+		t.Fatal("expected series contents cache to be evicted after restartPlaybackAt")
+	}
+	if _, hit, _ := cacheStore.GetPersonalized("lib-001"); hit {
+		t.Fatal("expected personalized cache to be evicted after restartPlaybackAt")
+	}
+	if _, hit, _ := cacheStore.GetMediaProgress("book-001"); hit {
+		t.Fatal("expected progress cache to be evicted after restartPlaybackAt")
+	}
+}
+
 func TestPlaybackErrorDoesNotConsumeQueue(t *testing.T) {
 	log := &apiLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
