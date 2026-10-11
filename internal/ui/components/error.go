@@ -3,9 +3,11 @@ package components
 import (
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ErrorDismissTimeout is how long the error banner auto-dismisses after.
@@ -65,19 +67,33 @@ func (b ErrorBanner) View() string {
 		return ""
 	}
 
-	msg := enrichMessage(b.err.Error())
+	msg := enrichMessage(sanitizeTerminalText(b.err.Error()))
 
 	w := b.width
 	if w < 4 {
 		w = 40
 	}
 
-	banner := b.style.
-		Width(w).
-		Padding(0, 1).
-		Render("⚠ " + msg)
+	style := b.style.Padding(0, 1)
+	contentWidth := max(1, w-style.GetHorizontalFrameSize())
+	content := ansi.Truncate("⚠ "+msg, contentWidth, "…")
 
-	return banner
+	return style.Width(w).Render(content)
+}
+
+// sanitizeTerminalText removes escape sequences and controls before terminal rendering.
+func sanitizeTerminalText(msg string) string {
+	msg = ansi.Strip(msg)
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, msg)
 }
 
 // enrichMessage adds contextual hints for known error patterns.
@@ -90,15 +106,6 @@ func enrichMessage(msg string) string {
 	}
 
 	return msg
-}
-
-// IsUnauthorized returns true if the error message indicates HTTP 401.
-func IsUnauthorized(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "status 401") || strings.Contains(msg, "unauthorized")
 }
 
 // scheduleDismiss returns a command that sends ErrorDismissMsg after the timeout.

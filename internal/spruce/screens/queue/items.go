@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/ui"
+	"github.com/Thelost77/pine/internal/ui"
 )
 
 type queueItem struct {

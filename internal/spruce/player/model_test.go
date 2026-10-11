@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/Thelost77/pine/internal/spruce/config"
-	"github.com/Thelost77/pine/internal/spruce/ui"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

@@ -1,9 +1,34 @@
 package ui
 
-import (
-	"github.com/Thelost77/pine/internal/config"
-	"github.com/charmbracelet/lipgloss"
-)
+import "github.com/charmbracelet/lipgloss"
+
+// ThemeConfig holds the theme colors of the [theme] config section.
+type ThemeConfig struct {
+	Background string `toml:"background"`
+	Foreground string `toml:"foreground"`
+	Accent     string `toml:"accent"`
+	Error      string `toml:"error"`
+	Muted      string `toml:"muted"`
+	Selected   string `toml:"selected"`
+	Border     string `toml:"border"`
+	Warning    string `toml:"warning"`
+	Info       string `toml:"info"`
+}
+
+// DefaultTheme returns the default Everforest Dark palette.
+func DefaultTheme() ThemeConfig {
+	return ThemeConfig{
+		Background: "#2b3339",
+		Foreground: "#d3c6aa",
+		Accent:     "#a7c080",
+		Error:      "#e67e80",
+		Muted:      "#859289",
+		Selected:   "#475258",
+		Border:     "#4f585e",
+		Warning:    "#dbbc7f",
+		Info:       "#7fbbb3",
+	}
+}
 
 // Styles holds all lipgloss styles derived from the active theme.
 type Styles struct {
@@ -13,6 +38,7 @@ type Styles struct {
 	Selected  lipgloss.Style
 	Error     lipgloss.Style
 	Accent    lipgloss.Style
+	Info      lipgloss.Style
 	Border    lipgloss.Style
 	PlayerBar lipgloss.Style
 	StatusBar lipgloss.Style
@@ -20,7 +46,7 @@ type Styles struct {
 }
 
 // NewStyles builds a Styles set from a ThemeConfig, allowing user overrides.
-func NewStyles(theme config.ThemeConfig) Styles {
+func NewStyles(theme ThemeConfig) Styles {
 	fg := lipgloss.Color(theme.Foreground)
 	bg := lipgloss.Color(theme.Background)
 	accent := lipgloss.Color(theme.Accent)
@@ -56,6 +82,9 @@ func NewStyles(theme config.ThemeConfig) Styles {
 		Accent: lipgloss.NewStyle().
 			Foreground(accent),
 
+		Info: lipgloss.NewStyle().
+			Foreground(info),
+
 		Border: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(border).
@@ -80,5 +109,5 @@ func NewStyles(theme config.ThemeConfig) Styles {
 
 // DefaultStyles returns styles using the default Everforest Dark palette.
 func DefaultStyles() Styles {
-	return NewStyles(config.Default().Theme)
+	return NewStyles(DefaultTheme())
 }

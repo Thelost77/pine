@@ -791,7 +791,7 @@ func (m Model) TotalItems() int {
 }
 
 func (m Model) SelectedPaletteActions() []components.PaletteItem {
-	sel, ok := m.list.SelectedItem().(ui.ListItem)
+	sel, ok := m.list.SelectedItem().(ListItem)
 	if !ok {
 		return nil
 	}

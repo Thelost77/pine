@@ -26,14 +26,19 @@ const (
 	ActionNone PaletteAction = iota
 	ActionGoHome
 	ActionGoLibrary
+	ActionGoPlaylists
 	ActionGoSeriesList
 	ActionTogglePlay
+	ActionNextTrack
+	ActionPrevTrack
 	ActionNextChapter
 	ActionPrevChapter
 	ActionSeekForward
 	ActionSeekBackward
 	ActionSpeedUp
 	ActionSpeedDown
+	ActionVolumeUp
+	ActionVolumeDown
 	ActionSleep15
 	ActionSleep30
 	ActionSleep45
@@ -41,6 +46,9 @@ const (
 	ActionSleepOff
 	ActionShowQueue
 	ActionClearQueue
+	ActionShuffleQueue
+	ActionRepeatTrack
+	ActionRepeatQueue
 	ActionOpenSelected
 	ActionQueueItem
 	ActionPlayNextItem
@@ -54,6 +62,8 @@ const (
 	ActionPlayDirect
 	ActionEditMetadata
 	ActionDeleteItem
+	ActionShuffleItem
+	ActionSubliminalMode
 	ActionToggleCaptions
 )
 

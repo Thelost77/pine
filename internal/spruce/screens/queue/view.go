@@ -3,7 +3,7 @@ package queue
 import (
 	"fmt"
 
-	"github.com/Thelost77/pine/internal/spruce/ui"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/lipgloss"
 )
 

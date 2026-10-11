@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -2190,5 +2191,26 @@ func TestCurrentPlayerLaunchErrMsgCleansUp(t *testing.T) {
 	}
 	if !rm.err.HasError() {
 		t.Error("current launch error should show an error banner")
+	}
+}
+
+func TestIsUnauthorized(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{errors.New("unexpected status 401: Unauthorized"), true},
+		{errors.New("something failed"), false},
+		{errors.New("unauthorized access"), true},
+	}
+	for _, tt := range tests {
+		if got := isUnauthorized(tt.err); got != tt.want {
+			name := "<nil>"
+			if tt.err != nil {
+				name = tt.err.Error()
+			}
+			t.Errorf("isUnauthorized(%q) = %v, want %v", name, got, tt.want)
+		}
 	}
 }

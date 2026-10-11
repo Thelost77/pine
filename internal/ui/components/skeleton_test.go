@@ -3,7 +3,7 @@ package components
 import (
 	"testing"
 
-	"github.com/Thelost77/pine/internal/spruce/ui"
+	"github.com/Thelost77/pine/internal/ui"
 )
 
 func TestBuildSkeletonRows(t *testing.T) {

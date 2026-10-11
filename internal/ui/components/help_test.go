@@ -7,8 +7,27 @@ import (
 	"github.com/Thelost77/pine/internal/ui"
 )
 
+func testHelpGroups() []HelpGroup {
+	return []HelpGroup{
+		{
+			Title: "Global",
+			Bindings: []HelpBinding{
+				{Key: "q", Desc: "quit"},
+				{Key: "?", Desc: "toggle help"},
+			},
+		},
+		{
+			Title: "Player",
+			Bindings: []HelpBinding{
+				{Key: "space", Desc: "play / pause"},
+				{Key: "l", Desc: "seek forward"},
+			},
+		},
+	}
+}
+
 func TestHelpOverlay_InitiallyHidden(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 	if h.Visible() {
 		t.Error("help overlay should be hidden initially")
 	}
@@ -18,7 +37,7 @@ func TestHelpOverlay_InitiallyHidden(t *testing.T) {
 }
 
 func TestHelpOverlay_Toggle(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 
 	h.Toggle()
 	if !h.Visible() {
@@ -32,7 +51,7 @@ func TestHelpOverlay_Toggle(t *testing.T) {
 }
 
 func TestHelpOverlay_Hide(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 	h.Toggle() // show
 	h.Hide()
 	if h.Visible() {
@@ -41,13 +60,13 @@ func TestHelpOverlay_Hide(t *testing.T) {
 }
 
 func TestHelpOverlay_ViewContainsAllGroups(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 	h.SetSize(80, 40)
 	h.Toggle()
 
 	view := h.View()
 
-	groups := []string{"Global", "Navigation", "Player", "Detail"}
+	groups := []string{"Global", "Player"}
 	for _, g := range groups {
 		if !strings.Contains(view, g) {
 			t.Errorf("help overlay should contain group %q", g)
@@ -56,19 +75,13 @@ func TestHelpOverlay_ViewContainsAllGroups(t *testing.T) {
 }
 
 func TestHelpOverlay_ViewContainsKeyBindings(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 	h.SetSize(80, 40)
 	h.Toggle()
 
 	view := h.View()
 
-	bindings := []string{
-		"toggle help", "quit", "go back",
-		"move down", "move up",
-		"play / pause", "seek forward", "seek backward",
-		"play", "add bookmark", "delete bookmark",
-		"open library", "switch library",
-	}
+	bindings := []string{"quit", "toggle help", "play / pause", "seek forward"}
 	for _, b := range bindings {
 		if !strings.Contains(view, b) {
 			t.Errorf("help overlay should contain binding %q", b)
@@ -77,7 +90,7 @@ func TestHelpOverlay_ViewContainsKeyBindings(t *testing.T) {
 }
 
 func TestHelpOverlay_ViewContainsDismissHint(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 	h.SetSize(80, 40)
 	h.Toggle()
 
@@ -88,7 +101,7 @@ func TestHelpOverlay_ViewContainsDismissHint(t *testing.T) {
 }
 
 func TestHelpOverlay_SetSize(t *testing.T) {
-	h := NewHelpOverlay(ui.DefaultStyles())
+	h := NewHelpOverlay(ui.DefaultStyles(), testHelpGroups())
 	h.SetSize(120, 50)
 	h.Toggle()
 

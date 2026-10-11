@@ -2,6 +2,7 @@ package components
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -38,6 +39,34 @@ func TestSetErrorAndView(t *testing.T) {
 	}
 }
 
+func TestErrorBannerSanitizesTerminalControls(t *testing.T) {
+	b := NewErrorBanner(defaultTestStyle())
+	b.SetWidth(120)
+	b.SetError(errors.New("server said \x1b]52;c;payload\a\x1b[31mred\x1b[0m\nnext\tline\x00"))
+
+	view := b.View()
+	if strings.ContainsAny(view, "\x1b\a\x00\n\r\t") {
+		t.Fatalf("view contains terminal controls: %q", view)
+	}
+	if !strings.Contains(view, "red next line") {
+		t.Fatalf("view lost sanitized message text: %q", view)
+	}
+}
+
+func TestErrorBannerStaysSingleLine(t *testing.T) {
+	b := NewErrorBanner(defaultTestStyle())
+	b.SetWidth(20)
+	b.SetError(errors.New(strings.Repeat("connection failed ", 10)))
+
+	view := b.View()
+	if got := lipgloss.Height(view); got != 1 {
+		t.Fatalf("view height = %d, want 1: %q", got, view)
+	}
+	if got := lipgloss.Width(view); got > 20 {
+		t.Fatalf("view width = %d, want at most 20", got)
+	}
+}
+
 func TestDismiss(t *testing.T) {
 	b := NewErrorBanner(defaultTestStyle())
 	b.SetError(errors.New("test"))
@@ -71,27 +100,6 @@ func TestEnrichMessageNormalError(t *testing.T) {
 	msg := enrichMessage("connection refused")
 	if contains(msg, "Install") {
 		t.Error("normal error should not get install hint")
-	}
-}
-
-func TestIsUnauthorized(t *testing.T) {
-	tests := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{errors.New("unexpected status 401: Unauthorized"), true},
-		{errors.New("something failed"), false},
-		{errors.New("unauthorized access"), true},
-	}
-	for _, tt := range tests {
-		if got := IsUnauthorized(tt.err); got != tt.want {
-			name := "<nil>"
-			if tt.err != nil {
-				name = tt.err.Error()
-			}
-			t.Errorf("IsUnauthorized(%q) = %v, want %v", name, got, tt.want)
-		}
 	}
 }
 

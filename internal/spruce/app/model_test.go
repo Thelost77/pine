@@ -19,7 +19,7 @@ import (
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
 	"github.com/Thelost77/pine/internal/spruce/screens/playlists"
 	"github.com/Thelost77/pine/internal/spruce/screens/queue"
-	"github.com/Thelost77/pine/internal/spruce/ui/components"
+	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )

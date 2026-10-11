@@ -18,8 +18,8 @@ import (
 	"github.com/Thelost77/pine/internal/spruce/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/spruce/screens/playlists"
 	"github.com/Thelost77/pine/internal/spruce/screens/queue"
-	"github.com/Thelost77/pine/internal/spruce/ui"
-	"github.com/Thelost77/pine/internal/spruce/ui/components"
+	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -172,7 +172,7 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 		playlistsScreen:        playlistsScreen,
 		queueScreen:            queue.New(styles),
 		palette:                pal,
-		help:                   components.NewHelpOverlay(styles),
+		help:                   components.NewHelpOverlay(styles, helpGroups()),
 		client:                 client,
 		cfg:                    cfg,
 		mpv:                    mpv,

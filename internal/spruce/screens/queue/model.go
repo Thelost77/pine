@@ -2,8 +2,8 @@ package queue
 
 import (
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/ui"
-	"github.com/Thelost77/pine/internal/spruce/ui/components"
+	"github.com/Thelost77/pine/internal/ui"
+	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"

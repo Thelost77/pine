@@ -1,6 +1,9 @@
-package ui
+package library
 
-import "github.com/Thelost77/pine/internal/abs"
+import (
+	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/ui"
+)
 
 // ListItem wraps a LibraryItem to implement the bubbles list.Item interface.
 // Used by library and search screens for items without progress tracking.
@@ -24,9 +27,9 @@ func (i ListItem) Description() string {
 	}
 	duration := ""
 	if i.Item.MediaType == "podcast" && i.Item.RecentEpisode != nil && i.Item.RecentEpisode.Duration > 0 {
-		duration = " • " + FormatDuration(i.Item.RecentEpisode.Duration)
+		duration = " • " + ui.FormatDuration(i.Item.RecentEpisode.Duration)
 	} else if i.Item.Media.HasDuration() {
-		duration = " • " + FormatDuration(i.Item.Media.TotalDuration())
+		duration = " • " + ui.FormatDuration(i.Item.Media.TotalDuration())
 	}
 	return author + duration
 }

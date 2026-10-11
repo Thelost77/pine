@@ -12,23 +12,12 @@ import (
 	"unicode"
 
 	"github.com/BurntSushi/toml"
+	"github.com/Thelost77/pine/internal/ui"
 )
 
 type PlayerConfig struct {
 	Speed       float64 `toml:"speed"`
 	SeekSeconds int     `toml:"seek_seconds"`
-}
-
-type ThemeConfig struct {
-	Background string `toml:"background"`
-	Foreground string `toml:"foreground"`
-	Accent     string `toml:"accent"`
-	Error      string `toml:"error"`
-	Muted      string `toml:"muted"`
-	Selected   string `toml:"selected"`
-	Border     string `toml:"border"`
-	Warning    string `toml:"warning"`
-	Info       string `toml:"info"`
 }
 
 type KeybindsConfig struct {
@@ -49,7 +38,7 @@ type KeybindsConfig struct {
 
 type Config struct {
 	Player     PlayerConfig   `toml:"player"`
-	Theme      ThemeConfig    `toml:"theme"`
+	Theme      ui.ThemeConfig `toml:"theme"`
 	Keybinds   KeybindsConfig `toml:"keybinds"`
 	DeviceName string         `toml:"device_name"`
 	DeviceID   string         `toml:"device_id"`
@@ -61,17 +50,7 @@ func Default() Config {
 			Speed:       1.0,
 			SeekSeconds: 10,
 		},
-		Theme: ThemeConfig{
-			Background: "#2b3339",
-			Foreground: "#d3c6aa",
-			Accent:     "#a7c080",
-			Error:      "#e67e80",
-			Muted:      "#859289",
-			Selected:   "#475258",
-			Border:     "#4f585e",
-			Warning:    "#dbbc7f",
-			Info:       "#7fbbb3",
-		},
+		Theme: ui.DefaultTheme(),
 		Keybinds: KeybindsConfig{
 			Quit:         "q",
 			PlayPause:    " ",

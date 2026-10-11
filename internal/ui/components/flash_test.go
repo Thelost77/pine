@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Thelost77/pine/internal/spruce/ui"
+	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -131,7 +132,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		player:       player.NewModel(mpv, cfg, styles),
 		keys:         DefaultKeyMap(cfg.Keybinds),
 		err:          components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
-		help:         components.NewHelpOverlay(styles),
+		help:         components.NewHelpOverlay(styles, helpGroups()),
 		styles:       styles,
 		config:       cfg,
 		db:           store,
@@ -986,13 +987,22 @@ func (m *Model) clearPlaybackSessionState() {
 	m.playbackLibraryID = ""
 }
 
+// isUnauthorized returns true if the error message indicates HTTP 401.
+func isUnauthorized(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "status 401") || strings.Contains(msg, "unauthorized")
+}
+
 // checkUnauthorized checks if the error indicates a 401 response.
 // If so, it halts any active playback (stopping mpv, closing the session,
 // clearing the queue and sleep timer), resets the client, and redirects
 // to login.
 // Returns the updated model and init command plus true if 401 was handled.
 func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
-	if !components.IsUnauthorized(err) {
+	if !isUnauthorized(err) {
 		return m, nil, false
 	}
 	logger.Warn("401 unauthorized, redirecting to login")
