@@ -9,17 +9,20 @@ import (
 )
 
 // RootAdapter implements types.OrgMprisMediaPlayer2Adapter with static values.
-type RootAdapter struct{}
+// Name is the app name that MPRIS clients see.
+type RootAdapter struct {
+	Name string
+}
 
 func (r RootAdapter) Raise() error                           { return nil }
 func (r RootAdapter) Quit() error                            { return nil }
 func (r RootAdapter) CanQuit() (bool, error)                 { return true, nil }
 func (r RootAdapter) CanRaise() (bool, error)                { return false, nil }
 func (r RootAdapter) HasTrackList() (bool, error)            { return false, nil }
-func (r RootAdapter) Identity() (string, error)              { return "pine", nil }
+func (r RootAdapter) Identity() (string, error)              { return r.Name, nil }
 func (r RootAdapter) SupportedUriSchemes() ([]string, error) { return nil, nil }
 func (r RootAdapter) SupportedMimeTypes() ([]string, error)  { return nil, nil }
-func (r RootAdapter) DesktopEntry() (string, error)          { return "pine", nil }
+func (r RootAdapter) DesktopEntry() (string, error)          { return r.Name, nil }
 
 // PlayerAdapter implements types.OrgMprisMediaPlayer2PlayerAdapter using closures.
 // Each method field is a closure that reads from a ModelAccessor.
@@ -78,8 +81,9 @@ func (p PlayerAdapter) CanSeek() (bool, error)                        { return p
 func (p PlayerAdapter) CanControl() (bool, error)                     { return p.OnCanControl() }
 
 // NewPlayerAdapter creates a PlayerAdapter whose closures read from the accessor.
+// name is the app name used in track object paths.
 // accessor is a function that returns the current ModelAccessor, called on each read.
-func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) PlayerAdapter {
+func NewPlayerAdapter(name string, accessor func() ModelAccessor, actions PlayerActions) PlayerAdapter {
 	return PlayerAdapter{
 		OnNext:        actions.Next,
 		OnPrevious:    actions.Previous,
@@ -111,7 +115,7 @@ func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) Play
 				}, nil
 			}
 			itemID := strings.ReplaceAll(a.CurrentItemID(), "-", "_")
-			trackID := dbus.ObjectPath(fmt.Sprintf("/org/pine/track/%s", itemID))
+			trackID := dbus.ObjectPath(fmt.Sprintf("/org/%s/track/%s", name, itemID))
 			durationMicro := types.Microseconds(a.PlayerDuration() * 1_000_000)
 			return types.Metadata{
 				TrackId: trackID,
@@ -129,13 +133,13 @@ func NewPlayerAdapter(accessor func() ModelAccessor, actions PlayerActions) Play
 		OnPosition: func() (int64, error) {
 			return int64(accessor().PlayerPosition() * 1_000_000), nil
 		},
-		OnMinimumRate:   func() (float64, error) { return 0.5, nil },
-		OnMaximumRate:   func() (float64, error) { return 4.0, nil },
-		OnCanGoNext:     func() (bool, error) { return accessor().QueueLength() > 0, nil },
-		OnCanGoPrevious: func() (bool, error) { return true, nil },
+		OnMinimumRate:   func() (float64, error) { return accessor().PlayerMinimumRate(), nil },
+		OnMaximumRate:   func() (float64, error) { return accessor().PlayerMaximumRate(), nil },
+		OnCanGoNext:     func() (bool, error) { return accessor().CanGoNext(), nil },
+		OnCanGoPrevious: func() (bool, error) { return accessor().CanGoPrevious(), nil },
 		OnCanPlay:       func() (bool, error) { return true, nil },
 		OnCanPause:      func() (bool, error) { return true, nil },
-		OnCanSeek:       func() (bool, error) { return true, nil },
+		OnCanSeek:       func() (bool, error) { return accessor().CanSeek(), nil },
 		OnCanControl:    func() (bool, error) { return true, nil },
 	}
 }

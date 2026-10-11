@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/logger"
+	"github.com/Thelost77/pine/internal/mpris"
 	"github.com/Thelost77/pine/internal/spruce/config"
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/mpris"
 	"github.com/Thelost77/pine/internal/spruce/player"
 	"github.com/Thelost77/pine/internal/spruce/screens/library"
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
@@ -198,11 +198,11 @@ func hasSavedLogin(cfg config.Config) bool {
 
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
-	m.mprisBridge = mpris.NewBridge(p)
+	m.mprisBridge = mpris.NewBridge(p, "spruce")
 	state := m.mprisState
 	m.mprisBridge.Bind(func() mpris.ModelAccessor {
 		return state
-	})
+	}, 0)
 	m.mprisBridge.Start()
 }
 

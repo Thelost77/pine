@@ -95,3 +95,23 @@ func (s *MprisState) QueueLength() int {
 	defer s.mu.RUnlock()
 	return s.queueLength
 }
+
+func (s *MprisState) PlayerMinimumRate() float64 {
+	return 0.5
+}
+
+func (s *MprisState) PlayerMaximumRate() float64 {
+	return 4.0
+}
+
+func (s *MprisState) CanSeek() bool {
+	return true
+}
+
+func (s *MprisState) CanGoNext() bool {
+	return s.QueueLength() > 0
+}
+
+func (s *MprisState) CanGoPrevious() bool {
+	return true
+}

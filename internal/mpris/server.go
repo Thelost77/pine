@@ -12,9 +12,9 @@ type Server struct {
 	events *events.EventHandler
 }
 
-// NewServer creates an MPRIS server with the given root and player adapters.
-func NewServer(root types.OrgMprisMediaPlayer2Adapter, player types.OrgMprisMediaPlayer2PlayerAdapter) *Server {
-	srv := server.NewServer("pine", root, player)
+// NewServer creates an MPRIS server for the app name with the given root and player adapters.
+func NewServer(name string, root types.OrgMprisMediaPlayer2Adapter, player types.OrgMprisMediaPlayer2PlayerAdapter) *Server {
+	srv := server.NewServer(name, root, player)
 	return &Server{
 		srv:    srv,
 		events: events.NewEventHandler(srv),

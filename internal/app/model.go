@@ -156,12 +156,25 @@ func (m Model) Queue() []QueueEntry {
 // SetProgram sets the bubbletea program reference and starts the MPRIS bridge.
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
-	m.mprisBridge = mpris.NewBridge(p)
+	m.mprisBridge = mpris.NewBridge(p, "pine")
 	state := m.mprisState
 	m.mprisBridge.Bind(func() mpris.ModelAccessor {
 		return state
 	}, float64(m.config.Player.SeekSeconds))
 	m.mprisBridge.Start()
+}
+
+// setMprisPlaying applies an MPRIS request to play or pause the active item.
+func (m Model) setMprisPlaying(playing bool) (Model, tea.Cmd) {
+	if !m.isPlaying() || m.player.Playing == playing {
+		return m, nil
+	}
+	m.player.Playing = playing
+	m.syncMprisState()
+	if m.mpv != nil {
+		return m, tea.Batch(m.mprisPlayPauseCmd(), player.TogglePauseCmd(m.mpv, m.player.Playing))
+	}
+	return m, m.mprisPlayPauseCmd()
 }
 
 func (m *Model) mprisPlaybackCmd() tea.Cmd {
@@ -639,19 +652,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// --- MPRIS control messages ---
 
 	case mpris.PlayPauseMsg:
+		return m.setMprisPlaying(!m.player.Playing)
+
+	case mpris.PauseMsg:
+		return m.setMprisPlaying(false)
+
+	case mpris.PlayMsg:
+		return m.setMprisPlaying(true)
+
+	case mpris.SeekRelativeMsg:
 		if m.isPlaying() {
-			m.player.Playing = !m.player.Playing
-			m.syncMprisState()
-			if m.mpv != nil {
-				return m, tea.Batch(m.mprisPlayPauseCmd(), player.TogglePauseCmd(m.mpv, m.player.Playing))
-			}
-			return m, m.mprisPlayPauseCmd()
+			return m.handleSeek(msg.OffsetSeconds)
 		}
 		return m, nil
 
-	case mpris.SeekMsg:
+	case mpris.SeekAbsoluteMsg:
 		if m.isPlaying() {
-			return m.handleSeek(msg.Offset)
+			return m.handleSeek(msg.PositionSeconds - m.player.Position)
 		}
 		return m, nil
 

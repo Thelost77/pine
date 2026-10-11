@@ -1,6 +1,6 @@
 package mpris
 
-// ModelAccessor provides read-only access to pine's playback state.
+// ModelAccessor provides read-only access to the app's playback state.
 type ModelAccessor interface {
 	IsPlaying() bool
 	IsPaused() bool
@@ -12,5 +12,10 @@ type ModelAccessor interface {
 	PlayerDuration() float64
 	PlayerVolume() int
 	PlayerSpeed() float64
+	PlayerMinimumRate() float64
+	PlayerMaximumRate() float64
 	QueueLength() int
+	CanSeek() bool
+	CanGoNext() bool
+	CanGoPrevious() bool
 }

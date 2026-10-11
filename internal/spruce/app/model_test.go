@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Thelost77/pine/internal/mpris"
 	"github.com/Thelost77/pine/internal/spruce/config"
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/mpris"
 	"github.com/Thelost77/pine/internal/spruce/player"
 	"github.com/Thelost77/pine/internal/spruce/screens/library"
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
@@ -675,7 +675,7 @@ func TestAppModel_MPRISCmdHelpers(t *testing.T) {
 		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
 	}
 
-	m.mprisBridge = mpris.NewBridge(nil)
+	m.mprisBridge = mpris.NewBridge(nil, "spruce")
 	if cmd := m.mprisPlaybackCmd(); cmd != nil {
 		t.Errorf("expected nil cmd when server is nil, got %v", cmd)
 	}
