@@ -229,6 +229,22 @@ func TestMPRISPlayAndPauseSetExplicitPlaybackState(t *testing.T) {
 	}
 }
 
+func TestMPRISSeekAbsoluteSeeksTheCurrentTrack(t *testing.T) {
+	m := New(nil, player.NewMpv())
+	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}}
+	m.currentIndex = 0
+	m.playerState.Duration = 300
+
+	updated, cmd := m.Update(mpris.SeekAbsoluteMsg{PositionSeconds: 30})
+
+	if got := updated.(*Model).playerState.Position; got != 30 {
+		t.Fatalf("position = %v; want 30", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected a seek command")
+	}
+}
+
 func TestNewAppliesConfiguredTheme(t *testing.T) {
 	cfg := config.Default()
 	cfg.Theme.Foreground = "#111111"

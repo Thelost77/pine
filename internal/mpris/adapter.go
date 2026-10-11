@@ -114,8 +114,7 @@ func NewPlayerAdapter(name string, accessor func() ModelAccessor, actions Player
 					TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/NoTrack"),
 				}, nil
 			}
-			itemID := strings.ReplaceAll(a.CurrentItemID(), "-", "_")
-			trackID := dbus.ObjectPath(fmt.Sprintf("/org/%s/track/%s", name, itemID))
+			trackID := trackPath(name, a.CurrentItemID())
 			durationMicro := types.Microseconds(a.PlayerDuration() * 1_000_000)
 			return types.Metadata{
 				TrackId: trackID,
@@ -142,6 +141,11 @@ func NewPlayerAdapter(name string, accessor func() ModelAccessor, actions Player
 		OnCanSeek:       func() (bool, error) { return accessor().CanSeek(), nil },
 		OnCanControl:    func() (bool, error) { return true, nil },
 	}
+}
+
+// trackPath returns the D-Bus object path that identifies an item as an MPRIS track.
+func trackPath(name, itemID string) dbus.ObjectPath {
+	return dbus.ObjectPath(fmt.Sprintf("/org/%s/track/%s", name, strings.ReplaceAll(itemID, "-", "_")))
 }
 
 // PlayerActions defines the action callbacks for the PlayerAdapter.

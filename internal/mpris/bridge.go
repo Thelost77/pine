@@ -98,7 +98,13 @@ func (b *Bridge) Bind(accessor func() ModelAccessor, skipSeekSeconds float64) {
 			return nil
 		},
 		SetPosition: func(trackId string, pos types.Microseconds) error {
-			b.send(SeekAbsoluteMsg{TrackID: trackId, PositionSeconds: float64(pos) / 1_000_000})
+			// MPRIS: SetPosition has no effect if CanSeek is false, and a request
+			// for a track that is not the current track is stale.
+			a := accessor()
+			if !a.CanSeek() || trackId != string(trackPath(b.name, a.CurrentItemID())) {
+				return nil
+			}
+			b.send(SeekAbsoluteMsg{PositionSeconds: float64(pos) / 1_000_000})
 			return nil
 		},
 		SetRate: func(rate float64) error {

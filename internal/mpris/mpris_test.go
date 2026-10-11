@@ -16,6 +16,7 @@ type mockAccessor struct {
 	itemID   string
 	position float64
 	duration float64
+	noSeek   bool
 	volume   int
 	speed    float64
 	queueLen int
@@ -34,7 +35,7 @@ func (m *mockAccessor) PlayerSpeed() float64       { return m.speed }
 func (m *mockAccessor) PlayerMinimumRate() float64 { return 0.5 }
 func (m *mockAccessor) PlayerMaximumRate() float64 { return 4.0 }
 func (m *mockAccessor) QueueLength() int           { return m.queueLen }
-func (m *mockAccessor) CanSeek() bool              { return true }
+func (m *mockAccessor) CanSeek() bool              { return !m.noSeek }
 func (m *mockAccessor) CanGoNext() bool            { return m.queueLen > 0 }
 func (m *mockAccessor) CanGoPrevious() bool        { return true }
 

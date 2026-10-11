@@ -66,3 +66,54 @@ func TestBridgeSeeksOnNextAndPreviousWithSkipSeekSeconds(t *testing.T) {
 		t.Fatalf("Previous() sent %#v; want SeekRelativeMsg{OffsetSeconds: -10}", got)
 	}
 }
+
+func TestBridgeSetPositionAcceptsThePublishedTrackID(t *testing.T) {
+	bridge := NewBridge(nil, "spruce")
+	bridge.Bind(accessorFn(&mockAccessor{title: "Song", itemID: "t-1"}), 0)
+
+	meta, err := bridge.player.Metadata()
+	if err != nil {
+		t.Fatalf("Metadata() error: %v", err)
+	}
+	if err := bridge.player.SetPosition(string(meta.TrackId), 30_000_000); err != nil {
+		t.Fatalf("SetPosition() error: %v", err)
+	}
+
+	select {
+	case got := <-bridge.msgCh:
+		if got != (SeekAbsoluteMsg{PositionSeconds: 30}) {
+			t.Fatalf("message = %#v; want SeekAbsoluteMsg{PositionSeconds: 30}", got)
+		}
+	default:
+		t.Fatal("SetPosition for the current track sent no message")
+	}
+}
+
+func TestBridgeSetPositionIgnoresOtherTracks(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		accessor *mockAccessor
+		trackID  string
+	}{
+		{name: "other track", accessor: &mockAccessor{title: "Song", itemID: "t-1"}, trackID: "/org/spruce/track/t_2"},
+		{name: "raw item id", accessor: &mockAccessor{title: "Song", itemID: "t-1"}, trackID: "t-1"},
+		{name: "empty id", accessor: &mockAccessor{title: "Song", itemID: "t-1"}, trackID: ""},
+		{name: "no track", accessor: &mockAccessor{}, trackID: "/org/mpris/MediaPlayer2/NoTrack"},
+		{name: "seek not possible", accessor: &mockAccessor{title: "Mix", itemID: "mix", noSeek: true}, trackID: "/org/spruce/track/mix"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			bridge := NewBridge(nil, "spruce")
+			bridge.Bind(accessorFn(tt.accessor), 0)
+
+			if err := bridge.player.SetPosition(tt.trackID, 30_000_000); err != nil {
+				t.Fatalf("SetPosition() error: %v", err)
+			}
+
+			select {
+			case got := <-bridge.msgCh:
+				t.Fatalf("SetPosition sent %#v; want no message", got)
+			default:
+			}
+		})
+	}
+}

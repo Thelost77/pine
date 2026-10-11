@@ -19,9 +19,9 @@ type SeekRelativeMsg struct {
 	OffsetSeconds float64
 }
 
-// SeekAbsoluteMsg is sent when MPRIS requests setting position to an absolute timestamp (in seconds).
+// SeekAbsoluteMsg is sent when MPRIS requests setting position to an absolute timestamp (in seconds)
+// for the current track.
 type SeekAbsoluteMsg struct {
-	TrackID         string
 	PositionSeconds float64
 }
 

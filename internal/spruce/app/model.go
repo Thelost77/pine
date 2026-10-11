@@ -983,9 +983,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSeek(msg.OffsetSeconds)
 
 	case mpris.SeekAbsoluteMsg:
-		if msg.TrackID != "" && msg.TrackID != m.CurrentItemID() {
-			return m, nil
-		}
 		return m.handleSeekAbsolute(msg.PositionSeconds)
 
 	case mpris.SetVolumeMsg:
