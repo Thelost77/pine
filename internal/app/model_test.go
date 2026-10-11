@@ -2221,6 +2221,18 @@ func TestCurrentPlayerLaunchErrMsgCleansUp(t *testing.T) {
 	}
 }
 
+func TestNewStartsMpvWithForceSeekable(t *testing.T) {
+	m := New(config.Default(), nil, nil, nil)
+
+	mpv, ok := m.mpv.(*player.Mpv)
+	if !ok {
+		t.Fatalf("New uses %T, want *player.Mpv", m.mpv)
+	}
+	if !mpv.ForceSeekable {
+		t.Error("pine must start mpv with --force-seekable=yes for long streams")
+	}
+}
+
 func TestIsUnauthorized(t *testing.T) {
 	tests := []struct {
 		err  error
