@@ -45,6 +45,7 @@ func Init(dir, name string) func() {
 		if err := lockFile(f); err != nil {
 			_ = f.Close()
 			path = filepath.Join(dir, fmt.Sprintf("%s-%d.log", name, os.Getpid()))
+			logPath = path
 			f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 			if err != nil {
 				return

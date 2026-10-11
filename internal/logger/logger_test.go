@@ -3,10 +3,26 @@ package logger
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
+// resetForTest clears the logger state so that a test can call Init again.
+func resetForTest(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		once = sync.Once{}
+		instance = nil
+		logFile = nil
+		logPath = ""
+		appName = ""
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
 func TestInitCreatesPrivateLogFileNamedAfterApp(t *testing.T) {
+	resetForTest(t)
 	dir := filepath.Join(t.TempDir(), "config")
 	closeLog := Init(dir, "pine")
 	defer closeLog()
