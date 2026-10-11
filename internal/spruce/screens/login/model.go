@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/logger"
 	"github.com/Thelost77/pine/internal/spruce/ui"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"

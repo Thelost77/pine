@@ -8,7 +8,7 @@ import (
 	"github.com/quarckster/go-mpris-server/pkg/events"
 	"github.com/quarckster/go-mpris-server/pkg/types"
 
-	"github.com/Thelost77/pine/internal/spruce/logger"
+	"github.com/Thelost77/pine/internal/logger"
 )
 
 // Bridge connects spruce's bubbletea program to the MPRIS D-Bus server.

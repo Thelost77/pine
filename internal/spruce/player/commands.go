@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Thelost77/pine/internal/spruce/logger"
+	"github.com/Thelost77/pine/internal/logger"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/spruce/buildinfo"
-	"github.com/Thelost77/pine/internal/spruce/logger"
 )
 
 const pageLimit = 200

@@ -9,7 +9,7 @@ import (
 
 	"github.com/quarckster/go-mpris-server/pkg/types"
 
-	"github.com/Thelost77/pine/internal/spruce/logger"
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/spruce/player"
 	tea "github.com/charmbracelet/bubbletea"
 )

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/Thelost77/pine/internal/spruce/logger"
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/dexterlb/mpvipc"
 )
 

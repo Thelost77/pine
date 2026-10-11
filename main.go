@@ -16,12 +16,12 @@ import (
 )
 
 func main() {
-	closeLog := logger.Init()
+	cfgDir := config.ConfigDir()
+	closeLog := logger.Init(cfgDir, "pine")
 	defer closeLog()
 	logger.Session()
 	logger.Info("log file", "path", logger.Path())
 
-	cfgDir := config.ConfigDir()
 	cfgPath := filepath.Join(cfgDir, "config.toml")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {

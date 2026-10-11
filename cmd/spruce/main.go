@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/spruce/app"
 	"github.com/Thelost77/pine/internal/spruce/buildinfo"
 	"github.com/Thelost77/pine/internal/spruce/config"
-	"github.com/Thelost77/pine/internal/spruce/logger"
 	"github.com/Thelost77/pine/internal/spruce/player"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -26,11 +26,11 @@ func main() {
 		return
 	}
 
-	closeLog := logger.Init()
+	cfgDir := config.ConfigDir()
+	closeLog := logger.Init(cfgDir, "spruce")
 	defer closeLog()
 	logger.Info("starting spruce TUI")
 
-	cfgDir := config.ConfigDir()
 	cfg, err := config.Load(filepath.Join(cfgDir, "config.toml"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)
