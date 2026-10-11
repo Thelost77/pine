@@ -305,7 +305,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.player.SetWidth(msg.Width)
+		m.player.SetWidth(normalizeViewWidth(msg.Width))
 		m.err.SetWidth(msg.Width)
 		m.help.SetSize(msg.Width, msg.Height)
 		m.propagateSize()
