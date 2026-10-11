@@ -34,7 +34,7 @@ session and is primarily useful on Linux. Windows is not currently supported.
 ## Installation
 
 ```sh
-go install github.com/Thelost77/spruce@latest
+go install github.com/Thelost77/pine/cmd/spruce@latest
 ```
 
 Ensure the Go binary directory, normally `~/go/bin`, is in `PATH`.
@@ -42,7 +42,7 @@ Ensure the Go binary directory, normally `~/go/bin`, is in `PATH`.
 To build the current checkout:
 
 ```sh
-go build -o spruce .
+go build -o spruce ./cmd/spruce
 ```
 
 ## Usage
@@ -61,7 +61,7 @@ directory. On Linux this is normally `~/.config/spruce/config.toml`.
 
 The access token is stored as plaintext. The config directory uses mode `0700`
 and the file uses mode `0600`; local file permissions are the security boundary.
-See [Auth token storage](docs/design/auth-token-storage.md) for the decision and
+See [Auth token storage](../design/spruce/auth-token-storage.md) for the decision and
 operational details.
 
 Logs are written to the same config directory as `spruce.log` and rotated after
@@ -139,7 +139,7 @@ back = "esc"
 ```
 
 The generated `[theme]` section contains the editable Everforest color values.
-See [Theme configuration](docs/design/theme-configuration.md) for the supported
+See [Theme configuration](../design/spruce/theme-configuration.md) for the supported
 scope.
 
 Jellyfin identifies each Spruce installation through `server.device_id`. Keep
@@ -159,23 +159,26 @@ go build ./...
 Main packages:
 
 ```text
-main.go             process startup and shutdown
-internal/app/       root model, navigation, queue, playback lifecycle
-internal/jellyfin/  Jellyfin API client and data types
-internal/mpris/     D-Bus MPRIS adapter and bridge
-internal/player/    mpv process and IPC control
-internal/screens/   login, library, playlist, queue, metadata editor
-internal/ui/        shared styles and components
+cmd/spruce/main.go         process startup and shutdown
+internal/spruce/app/       root model, navigation, queue, playback lifecycle
+internal/spruce/jellyfin/  Jellyfin API client and data types
+internal/spruce/screens/   login, library, playlist, queue, metadata editor
+internal/mpris/            shared D-Bus MPRIS adapter and bridge
+internal/player/           shared mpv process and IPC control
+internal/ui/               shared styles and components
 ```
 
 ## Releases
 
-Spruce uses SemVer tags with a leading `v`. Release notes live in
-`docs/releases/`. Commit and push the notes and all release changes to `main`,
-then run:
+Spruce and pine are in one Go module. One SemVer tag with a leading `v`
+releases the two programs. Release notes are in `docs/releases/`. The notes for
+spruce v0.1.0 and v0.2.0 are in `docs/releases/spruce/`.
+
+Commit the notes and all release changes. Push them to `main`. Then use the
+release script:
 
 ```sh
-./scripts/release.sh v0.1.0
+./scripts/release.sh v0.6.0
 ```
 
 The script verifies the repository, creates and pushes the exact annotated tag,
@@ -184,9 +187,9 @@ partial failure.
 
 ## Related project
 
-[pine](https://github.com/Thelost77/pine) is a related terminal client for
-Audiobookshelf.
+[pine](../../README.md) is a terminal client for Audiobookshelf. It is in the
+same repository.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](../../LICENSE)

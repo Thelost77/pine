@@ -4,6 +4,9 @@ A terminal user interface for [Audiobookshelf](https://www.audiobookshelf.org/) 
 
 Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](https://mpv.io/).
 
+This repository also contains [spruce](docs/spruce/README.md), a terminal music client for Jellyfin.
+One Go module builds the two programs. They share the player, MPRIS, logger, and UI packages.
+
 <!-- ![Home Screen](assets/home.png) -->
 
 ## Features
@@ -28,7 +31,7 @@ Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](htt
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26.4+
 - [mpv](https://mpv.io/) installed and available in PATH
 - An [Audiobookshelf](https://www.audiobookshelf.org/) server
 
@@ -103,26 +106,31 @@ Local development builds report `dev`.
 
 Create SemVer tags with a leading `v` so Go can resolve `@latest` and versioned installs correctly. Keep release notes in `docs/releases/` and publish the tag plus the GitHub Release together.
 
+One tag releases pine and spruce together. Write the release notes for the two programs in one file.
+Commit the notes and push them to `main`. Then use the release script.
+
 ```sh
-${EDITOR:-vi} docs/releases/v0.5.0.md
-./scripts/release.sh v0.5.0
+${EDITOR:-vi} docs/releases/v0.6.0.md
+./scripts/release.sh v0.6.0
 ```
 
 ## Architecture
 
 ```
-main.go         Entry point
+main.go         pine entry point
+cmd/spruce/     spruce entry point
 internal/
   abs/          Audiobookshelf API client
   app/          Root model, screen routing, playback lifecycle
   cache/        Persistent API cache store and cached client wrapper
   config/       TOML configuration
   db/           SQLite persistence (accounts, last session)
-  logger/       File-based structured logging
-  mpris/        MPRIS D-Bus adapter for media-key integration
-  player/       mpv IPC wrapper
   screens/      Screen models (login, home, library, detail, metadataedit, series, serieslist)
-  ui/           Shared styles, formatting, components (confirm, error, help, palette)
+  spruce/       spruce packages (app, buildinfo, config, jellyfin, screens)
+  logger/       Shared: file-based structured logging
+  mpris/        Shared: MPRIS D-Bus adapter for media-key integration
+  player/       Shared: mpv IPC wrapper
+  ui/           Shared: styles, formatting, components
 ```
 
 ## Status

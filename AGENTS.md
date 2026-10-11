@@ -4,16 +4,38 @@
 
 pine is a TUI client for Audiobookshelf written in Go using the bubbletea framework (Elm architecture). It plays audiobooks and podcasts via mpv as a subprocess, controlled over Unix socket IPC.
 
+This repository also contains spruce, a TUI music client for Jellyfin. One Go module builds the two binaries. `main.go` is pine. `cmd/spruce/main.go` is spruce. See `docs/spruce/README.md` for spruce.
+
 ## Build & Test
 
 ```sh
-go build -o pine .                   # build
+go build -o pine .                   # build pine
+go build -o spruce ./cmd/spruce      # build spruce
 go install github.com/Thelost77/pine@latest
 go test ./... -count=1             # run all tests
 go test ./internal/app/... -v      # verbose app tests (includes E2E)
 golangci-lint run                   # linter
 go vet ./...                        # type-check
 ```
+
+## Repository Layout
+
+| Packages | Owner |
+|----------|-------|
+| `internal/logger`, `internal/ui`, `internal/ui/components`, `internal/mpris`, `internal/player` | Shared by pine and spruce |
+| `internal/abs`, `internal/app`, `internal/cache`, `internal/captions`, `internal/config`, `internal/db`, `internal/screens` | pine |
+| `internal/spruce/app`, `internal/spruce/buildinfo`, `internal/spruce/config`, `internal/spruce/jellyfin`, `internal/spruce/screens` | spruce |
+
+Rules:
+
+- A shared package must not import a pine package or a spruce package.
+- A pine package must not import a spruce package. A spruce package must not import a pine package.
+- A shared package gets the app name as an input: `logger.Init(dir, name)`, `mpris.NewBridge(program, name)`, and `player.SetAppName(name)`.
+- A shared package must not contain app content. Each app supplies its help groups and its key names.
+- `scripts/release.sh` checks that each binary links only the shared packages and its own packages.
+- A change to a shared package must keep the tests of the two apps green: `go test ./... -count=1`.
+
+The Architecture Map below describes pine and the shared packages.
 
 ## Architecture Map
 
@@ -28,18 +50,20 @@ go vet ./...                        # type-check
 | `bookmarks.go` | Bookmark CRUD, chapter next/prev, seek logic (in-track vs cross-track), fetchBookmarksCmd/fetchEpisodesCmd/fetchBookDetailCmd |
 | `metadata.go` | Metadata editor save flow: server PATCH, cache eviction, detail refresh |
 | `messages.go` | Screen enum, PlaySessionMsg, PlaySessionData, QueueEntry, all root-level message types |
-| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, chapters, sleep, command palette) |
+| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, chapters, sleep, command palette). Key names for the player model. |
+| `help.go` | Help overlay groups for pine |
 | `queue.go` | Queue entry enqueue/dequeue with dedup, clone helpers |
 | `mpris_state.go` | MPRIS bridge message conversion between player state and D-Bus adapter |
 
-### Player (internal/player/)
+### Player (internal/player/, shared)
 
 | File | Responsibility |
 |------|---------------|
 | `mpv.go` | Mpv struct: Launch (spawns subprocess), Connect (IPC socket), GetPosition/GetDuration/GetPaused, Seek, SetSpeed/SetVolume, Quit. Snap socket dir detection. |
-| `commands.go` | tea.Cmd factories: TickCmd (500ms poll), LaunchCmd (retry connect for 3s), TogglePauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd |
+| `commands.go` | tea.Cmd factories: TickCmd (500ms poll), LaunchCmd (retry connect for 3s), SetPauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd |
 | `model.go` | Player sub-model: Position/Duration/Speed/Volume state, key handling (play/pause, seek, speed, volume) |
 | `view.go` | Player footer bar: icon + title + time + speed + optional volume/sleep |
+| `cache.go`, `group.go` | Session media cache and player group for simultaneous playback. Only spruce uses them. |
 
 ### Screens (internal/screens/)
 
@@ -62,7 +86,7 @@ go vet ./...                        # type-check
 | `store.go` | SQLite-backed cache persistence and `ClearAll`. |
 | `helpers.go` | Cache key helpers and cache-aware filtering utilities. |
 
-### MPRIS (internal/mpris/)
+### MPRIS (internal/mpris/, shared)
 
 | File | Responsibility |
 |------|---------------|
@@ -88,11 +112,11 @@ SQLite store (WAL mode) for accounts and listening sessions. Single "last" sessi
 
 ### Config (internal/config/)
 
-TOML config with defaults. Theme (Everforest Dark palette), player (speed, seek), keybinds, server address.
+TOML config with defaults. Theme (Everforest Dark palette), player (speed, seek), keybinds, server address. The theme type and its default colors are in `internal/ui`.
 
-### UI (internal/ui/)
+### UI (internal/ui/, shared)
 
-Styles from theme config. Format helpers (timestamps, durations). ListItem adapter for bubbles list. Components: HelpOverlay, ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette.
+Styles from theme config. Format helpers (timestamps, durations). Components: HelpOverlay (the app supplies the groups), ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette, and the filter, flash, and skeleton helpers.
 
 ## Key Patterns to Follow
 
@@ -119,4 +143,4 @@ Styles from theme config. Format helpers (timestamps, durations). ListItem adapt
 
 ## Logging
 
-Logs to `~/.config/pine/pine.log` (slog-based, auto-rotated at 5MB). Token/credentials are NOT logged.
+Logs to `~/.config/pine/pine.log` (slog-based, auto-rotated at 5MB). Token/credentials are NOT logged. spruce logs to `spruce.log` in its config directory.
