@@ -1,4 +1,5 @@
 *.db
 abs-cli
 pine
+/spruce
 /artifacts/
