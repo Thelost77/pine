@@ -12,6 +12,7 @@ import (
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
+	"github.com/Thelost77/pine/internal/player"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -69,6 +70,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	player.SetAppName("pine")
 	model := app.New(cfg, store, cachedClient, cacheStore)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)

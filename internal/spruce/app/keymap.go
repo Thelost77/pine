@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/spruce/config"
 	"github.com/charmbracelet/bubbles/key"
 )
@@ -86,5 +87,18 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 			key.WithKeys(sleep),
 			key.WithHelp(sleep, "sleep timer"),
 		),
+	}
+}
+
+// playerKeys returns the key names that the player model uses.
+func playerKeys(cfg config.KeybindsConfig) player.Keys {
+	return player.Keys{
+		PlayPause:    cfg.PlayPause,
+		SeekForward:  cfg.SeekForward,
+		SeekBackward: cfg.SeekBackward,
+		SpeedUp:      cfg.SpeedUp,
+		SpeedDown:    cfg.SpeedDown,
+		VolumeUp:     cfg.VolumeUp,
+		VolumeDown:   cfg.VolumeDown,
 	}
 }

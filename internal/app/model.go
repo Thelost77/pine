@@ -106,7 +106,9 @@ type Model struct {
 // New creates a new root model. If client is non-nil (authenticated),
 // the initial screen is Home; otherwise it starts at Login.
 func New(cfg config.Config, store *db.Store, client *cache.Client, cacheStore *cache.Store) Model {
-	return NewWithPlayer(cfg, store, client, cacheStore, player.NewMpv())
+	mpv := player.NewMpv()
+	mpv.ForceSeekable = true
+	return NewWithPlayer(cfg, store, client, cacheStore, mpv)
 }
 
 // NewWithPlayer creates a new root model with a specific player implementation.
@@ -129,7 +131,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		metadataEdit: metadataedit.New(styles, abs.LibraryItem{MediaType: "book"}),
 		seriesList:   serieslist.New(styles, client, "", ""),
 		series:       series.New(styles, client, "", "", ""),
-		player:       player.NewModel(mpv, cfg, styles),
+		player:       player.NewModel(mpv, cfg.Player.Speed, playerKeys(cfg.Keybinds), styles),
 		keys:         DefaultKeyMap(cfg.Keybinds),
 		err:          components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
 		help:         components.NewHelpOverlay(styles, helpGroups()),
@@ -172,7 +174,7 @@ func (m Model) setMprisPlaying(playing bool) (Model, tea.Cmd) {
 	m.player.Playing = playing
 	m.syncMprisState()
 	if m.mpv != nil {
-		return m, tea.Batch(m.mprisPlayPauseCmd(), player.TogglePauseCmd(m.mpv, m.player.Playing))
+		return m, tea.Batch(m.mprisPlayPauseCmd(), player.SetPauseCmd(m.mpv, !m.player.Playing))
 	}
 	return m, m.mprisPlayPauseCmd()
 }
@@ -1218,7 +1220,7 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 			m.player.Playing = !m.player.Playing
 			m.syncMprisState()
 			if m.mpv != nil {
-				return m, tea.Batch(m.mprisPlayPauseCmd(), player.TogglePauseCmd(m.mpv, m.player.Playing))
+				return m, tea.Batch(m.mprisPlayPauseCmd(), player.SetPauseCmd(m.mpv, !m.player.Playing))
 			}
 			return m, m.mprisPlayPauseCmd()
 		}

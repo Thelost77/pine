@@ -17,6 +17,16 @@ func (m Model) View() string {
 	if !m.Playing {
 		icon = "⏸"
 	}
+	if m.SubliminalCount > 0 {
+		content := fmt.Sprintf(" %s  %s  ∞  Vol:%d%% per track ", icon, m.Title, m.Volume)
+		style := m.styles.PlayerBar
+		if m.width > 0 {
+			contentWidth := max(1, m.width-style.GetHorizontalFrameSize())
+			content = ansi.Truncate(content, contentWidth, "")
+			style = style.Width(m.width)
+		}
+		return lipgloss.PlaceVertical(1, lipgloss.Bottom, style.Render(content))
+	}
 
 	pos := formatTime(m.Position)
 	dur := formatTime(m.Duration)
@@ -27,18 +37,22 @@ func (m Model) View() string {
 	if m.Volume != 100 {
 		extras += fmt.Sprintf("  Vol:%d%%", m.Volume)
 	}
+	if m.RepeatStatus != "" {
+		extras += fmt.Sprintf("  %s", m.RepeatStatus)
+	}
 	if m.SleepRemaining != "" {
 		extras += fmt.Sprintf("  Sleep:%s", m.SleepRemaining)
 	}
 
-	w := m.width
-	if w > 0 {
-		w-- // safe width
+	style := m.styles.PlayerBar
+	barWidth := m.width
+	contentWidth := barWidth
+	if barWidth > 0 {
+		contentWidth = max(1, barWidth-style.GetHorizontalFrameSize())
 	}
 
-	// Calculate how much space we have for the title
 	fixedContent := fmt.Sprintf(" %s    %s  %s%s ", icon, timeStr, speedStr, extras)
-	availTitle := w - lipgloss.Width(fixedContent)
+	availTitle := contentWidth - lipgloss.Width(fixedContent)
 
 	title := m.Title
 	if availTitle > 0 && lipgloss.Width(title) > availTitle {
@@ -48,10 +62,9 @@ func (m Model) View() string {
 	}
 
 	content := fmt.Sprintf(" %s  %s  %s  %s%s ", icon, title, timeStr, speedStr, extras)
-
-	style := m.styles.PlayerBar
-	if w > 0 {
-		style = style.Width(w)
+	if barWidth > 0 {
+		content = ansi.Truncate(content, contentWidth, "")
+		style = style.Width(barWidth)
 	}
 
 	return lipgloss.PlaceVertical(1, lipgloss.Bottom, style.Render(content))

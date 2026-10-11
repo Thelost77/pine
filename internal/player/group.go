@@ -80,7 +80,7 @@ func (g *Group) Launch(ctx context.Context, paths []string, volume int) error {
 			return err
 		}
 		p := g.newPlayer()
-		socketPath := filepath.Join(socketDir, fmt.Sprintf("spruce-mpv-%d-group-%d-%d.sock", os.Getpid(), sequence, i))
+		socketPath := filepath.Join(socketDir, fmt.Sprintf("%s-mpv-%d-group-%d-%d.sock", appName, os.Getpid(), sequence, i))
 		_ = os.Remove(socketPath)
 		if err := p.LaunchLoop(path, socketPath, true, volume); err != nil {
 			cleanup()

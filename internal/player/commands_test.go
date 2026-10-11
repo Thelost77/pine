@@ -10,7 +10,7 @@ import (
 // root model can discard stale launch errors from superseded sessions.
 func TestLaunchCmdPropagatesGenerationToLaunchError(t *testing.T) {
 	mp := &launchFailPlayer{}
-	cmd := LaunchCmd(mp, "http://test/audio.mp3", 0, 0, false, nil, 7)
+	cmd := LaunchCmd(mp, "http://test/audio.mp3", 0, 0, false, nil, 100, 7)
 	msg := cmd()
 	launchErr, ok := msg.(PlayerLaunchErrMsg)
 	if !ok {
@@ -78,19 +78,20 @@ func TestFormatStartPosition(t *testing.T) {
 // returns PlayerLaunchErrMsg without waiting for the 3s socket-retry loop.
 type launchFailPlayer struct{}
 
-func (launchFailPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error {
+func (launchFailPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error {
 	return errLaunchSentinel
 }
-func (launchFailPlayer) Connect() error                       { return nil }
-func (launchFailPlayer) GetPosition() (float64, error)       { return 0, nil }
-func (launchFailPlayer) GetDuration() (float64, error)       { return 0, nil }
-func (launchFailPlayer) GetPaused() (bool, error)             { return false, nil }
-func (launchFailPlayer) SetPause(paused bool) error          { return nil }
-func (launchFailPlayer) Seek(seconds float64) error           { return nil }
-func (launchFailPlayer) SetSpeed(speed float64) error         { return nil }
-func (launchFailPlayer) SetVolume(vol int) error             { return nil }
-func (launchFailPlayer) GetVolume() (int, error)             { return 100, nil }
-func (launchFailPlayer) Quit() error                         { return nil }
+func (launchFailPlayer) Connect() error                     { return nil }
+func (launchFailPlayer) GetPosition() (float64, error)      { return 0, nil }
+func (launchFailPlayer) GetDuration() (float64, error)      { return 0, nil }
+func (launchFailPlayer) GetPaused() (bool, error)           { return false, nil }
+func (launchFailPlayer) SetPause(paused bool) error         { return nil }
+func (launchFailPlayer) Seek(seconds float64) error         { return nil }
+func (launchFailPlayer) SeekRelative(seconds float64) error { return nil }
+func (launchFailPlayer) SetSpeed(speed float64) error       { return nil }
+func (launchFailPlayer) SetVolume(vol int) error            { return nil }
+func (launchFailPlayer) GetVolume() (int, error)            { return 100, nil }
+func (launchFailPlayer) Quit() error                        { return nil }
 
 var errLaunchSentinel = &sentinelError{"launch failed"}
 

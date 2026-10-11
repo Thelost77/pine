@@ -17,47 +17,82 @@ import (
 )
 
 var (
-	mpvSocketDir     string
-	mpvSocketDirOnce sync.Once
+	// appName names the runtime files of this process: the socket directory,
+	// the sockets, the header file, and the media cache.
+	appName        = "player"
+	mpvSocketDir   string
+	mpvSocketDirMu sync.Mutex
 )
 
-// MpvSocketDir returns the directory where mpv can create IPC sockets.
-// For snap-packaged mpv, this is ~/snap/mpv/common/ since snap's /tmp is isolated.
-// For native mpv, this is a user-private directory under os.TempDir() with 0700
-// permissions, so that the IPC socket (which may expose the stream URL and its
-// secret token) cannot be opened by other local users.
-func MpvSocketDir() string {
-	mpvSocketDirOnce.Do(func() {
-		mpvPath, err := exec.LookPath("mpv")
-		if err == nil {
-			resolved, err := filepath.EvalSymlinks(mpvPath)
-			if err == nil && filepath.Base(resolved) == "snap" {
-				home, err := os.UserHomeDir()
-				if err == nil {
-					snapDir := filepath.Join(home, "snap", "mpv", "common")
-					if err := os.MkdirAll(snapDir, 0o700); err == nil {
-						mpvSocketDir = snapDir
-						return
+// SetAppName sets the app name used for runtime file names.
+// Call it once at startup, before playback starts.
+func SetAppName(name string) {
+	mpvSocketDirMu.Lock()
+	defer mpvSocketDirMu.Unlock()
+	appName = name
+	mpvSocketDir = ""
+}
+
+// MpvSocketDir returns a private directory where mpv can create IPC sockets.
+// For snap-packaged mpv, this is ~/snap/mpv/common/<app name>/ since snap's /tmp is isolated.
+// For native mpv, this is /tmp/<app name>-runtime-<uid> with 0700 permissions.
+func MpvSocketDir() (string, error) {
+	mpvSocketDirMu.Lock()
+	defer mpvSocketDirMu.Unlock()
+	if mpvSocketDir != "" {
+		return mpvSocketDir, nil
+	}
+	dir, err := resolveMpvSocketDir()
+	if err != nil {
+		return "", err
+	}
+	mpvSocketDir = dir
+	return dir, nil
+}
+
+func resolveMpvSocketDir() (string, error) {
+	mpvPath, err := exec.LookPath("mpv")
+	if err == nil {
+		resolved, err := filepath.EvalSymlinks(mpvPath)
+		if err == nil && filepath.Base(resolved) == "snap" {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				snapDir := filepath.Join(home, "snap", "mpv", "common")
+				if info, err := os.Stat(snapDir); err == nil && info.IsDir() {
+					sub := filepath.Join(snapDir, appName)
+					if err := prepareMpvSocketDir(sub); err == nil {
+						return sub, nil
 					}
 				}
 			}
 		}
-		dir := filepath.Join(os.TempDir(), fmt.Sprintf("pine-%d", os.Getuid()))
-		_ = os.MkdirAll(dir, 0o700)
-		mpvSocketDir = dir
-	})
-	return mpvSocketDir
+	}
+
+	primary := filepath.Join(os.TempDir(), fmt.Sprintf("%s-runtime-%d", appName, os.Getuid()))
+	fallback := filepath.Join(os.TempDir(), fmt.Sprintf("%s-%d", appName, os.Getuid()))
+	return selectMpvSocketDir(primary, fallback)
+}
+
+func selectMpvSocketDir(primary, fallback string) (string, error) {
+	if err := prepareMpvSocketDir(primary); err == nil {
+		return primary, nil
+	} else if fallbackErr := prepareMpvSocketDir(fallback); fallbackErr == nil {
+		return fallback, nil
+	} else {
+		return "", fmt.Errorf("prepare mpv socket directories: primary: %w; fallback: %v", err, fallbackErr)
+	}
 }
 
 // Player defines the interface for media playback control.
 type Player interface {
-	Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error
+	Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error
 	Connect() error
 	GetPosition() (float64, error)
 	GetDuration() (float64, error)
 	GetPaused() (bool, error)
 	SetPause(paused bool) error
 	Seek(seconds float64) error
+	SeekRelative(seconds float64) error
 	SetSpeed(speed float64) error
 	SetVolume(vol int) error
 	GetVolume() (int, error)
@@ -72,6 +107,7 @@ type IPCConnection interface {
 	Call(arguments ...interface{}) (interface{}, error)
 	Close() error
 	IsClosed() bool
+	NewEventListener() (chan *mpvipc.Event, chan struct{})
 }
 
 // ProcessStarter abstracts process spawning for testability.
@@ -80,12 +116,17 @@ type ProcessStarter func(name string, args ...string) *exec.Cmd
 // Mpv wraps mpvipc to control an mpv subprocess via IPC.
 type Mpv struct {
 	conn     IPCConnection
+	connMu   sync.RWMutex
 	cmd      *exec.Cmd
 	startFn  ProcessStarter
 	newConn  func(socketPath string) IPCConnection
 	procMu   sync.Mutex
 	waitDone chan struct{}
 	hdrFile  string
+
+	// ForceSeekable adds --force-seekable=yes at launch, so that mpv can start
+	// a long HTTP stream at a percent offset.
+	ForceSeekable bool
 }
 
 // NewMpv creates an Mpv player with default process and connection factories.
@@ -98,33 +139,64 @@ func NewMpv() *Mpv {
 	}
 }
 
+// Done returns a channel that closes when the current mpv process exits.
+func (m *Mpv) Done() <-chan struct{} {
+	if m == nil {
+		return nil
+	}
+	m.procMu.Lock()
+	defer m.procMu.Unlock()
+	return m.waitDone
+}
+
+func (m *Mpv) getConn() IPCConnection {
+	if m == nil {
+		return nil
+	}
+	m.connMu.RLock()
+	defer m.connMu.RUnlock()
+	return m.conn
+}
+
 // Launch spawns mpv in audio-only mode with the given IPC socket.
 // If paused is true, mpv starts paused and the user must press play to resume.
 // If a previous mpv process is still running, it is killed first.
-func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error {
+func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error {
+	return m.launch(url, startTime, socketPath, paused, httpHeaders, volume, false)
+}
+
+// LaunchLoop spawns mpv for an indefinitely looping local media file.
+func (m *Mpv) LaunchLoop(path, socketPath string, paused bool, volume int) error {
+	return m.launch(path, "0", socketPath, paused, nil, volume, true)
+}
+
+func (m *Mpv) launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int, loop bool) error {
 	// Clean up any existing mpv process to avoid orphans
 	if m.cmd != nil && m.cmd.Process != nil {
 		m.stopProcess("killing previous mpv process")
 	}
+	m.connMu.Lock()
 	if m.conn != nil && !m.conn.IsClosed() {
 		_ = m.conn.Close()
 	}
+	m.connMu.Unlock()
 
 	args := []string{
 		"--no-video",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 		fmt.Sprintf("--start=%s", startTime),
-		"--force-seekable=yes",
+		fmt.Sprintf("--volume=%d", volume),
 	}
-	// Headers carry the auth token; keep them out of the process argument list
-	// (visible via ps or /proc) by writing them to a 0600 temp config file.
+	if m.ForceSeekable {
+		args = append(args, "--force-seekable=yes")
+	}
 	m.procMu.Lock()
 	if m.hdrFile != "" {
 		_ = os.Remove(m.hdrFile)
 		m.hdrFile = ""
 	}
 	if len(httpHeaders) > 0 {
-		hdrFile, err := os.CreateTemp("", "pine-mpv-headers-*.conf")
+		hdrFile, err := os.CreateTemp("", appName+"-mpv-headers-*.conf")
 		if err == nil {
 			_ = os.Chmod(hdrFile.Name(), 0600)
 			for _, h := range httpHeaders {
@@ -141,10 +213,13 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders
 		}
 	}
 	m.procMu.Unlock()
-	args = append(args, url)
+	if loop {
+		args = append(args, "--loop-file=inf")
+	}
 	if paused {
 		args = append(args, "--pause")
 	}
+	args = append(args, url)
 	cmd := m.startFn("mpv", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -172,7 +247,10 @@ func (m *Mpv) Launch(url, startTime, socketPath string, paused bool, httpHeaders
 		"streamHasToken", stream.HasToken,
 	)
 	m.startProcessWatchers(cmd, stdout, stderr)
-	m.conn = m.newConn(socketPath)
+	newConn := m.newConn(socketPath)
+	m.connMu.Lock()
+	m.conn = newConn
+	m.connMu.Unlock()
 	return nil
 }
 
@@ -187,10 +265,11 @@ func (m *Mpv) Connect() error {
 		return fmt.Errorf("mpv process is not running (exited early during launch)")
 	}
 
-	if m.conn == nil {
+	conn := m.getConn()
+	if conn == nil {
 		return fmt.Errorf("no connection: call Launch first")
 	}
-	if err := m.conn.Open(); err != nil {
+	if err := conn.Open(); err != nil {
 		logger.Debug("failed to open mpv ipc connection", "err", err)
 		return err
 	}
@@ -210,7 +289,11 @@ func (m *Mpv) GetDuration() (float64, error) {
 
 // GetPaused returns whether playback is paused.
 func (m *Mpv) GetPaused() (bool, error) {
-	val, err := m.conn.Get("pause")
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return false, fmt.Errorf("get pause: mpv connection closed")
+	}
+	val, err := conn.Get("pause")
 	if err != nil {
 		logger.Debug("failed to query mpv property", "property", "pause", "err", err)
 		return false, fmt.Errorf("get pause: %w", err)
@@ -225,7 +308,11 @@ func (m *Mpv) GetPaused() (bool, error) {
 
 // SetPause pauses or resumes playback.
 func (m *Mpv) SetPause(paused bool) error {
-	if err := m.conn.Set("pause", paused); err != nil {
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return fmt.Errorf("set pause: mpv connection closed")
+	}
+	if err := conn.Set("pause", paused); err != nil {
 		logger.Warn("failed to set mpv pause", "paused", paused, "err", err)
 		return err
 	}
@@ -234,16 +321,37 @@ func (m *Mpv) SetPause(paused bool) error {
 
 // Seek seeks to an absolute position in seconds.
 func (m *Mpv) Seek(seconds float64) error {
-	_, err := m.conn.Call("seek", seconds, "absolute")
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return fmt.Errorf("seek: mpv connection closed")
+	}
+	_, err := conn.Call("seek", seconds, "absolute")
 	if err != nil {
 		logger.Warn("failed to seek mpv", "seconds", seconds, "err", err)
 	}
 	return err
 }
 
+// SeekRelative seeks by a relative offset in seconds.
+func (m *Mpv) SeekRelative(seconds float64) error {
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return fmt.Errorf("seek relative: mpv connection closed")
+	}
+	_, err := conn.Call("seek", seconds, "relative")
+	if err != nil {
+		logger.Warn("failed to seek relative mpv", "seconds", seconds, "err", err)
+	}
+	return err
+}
+
 // SetSpeed sets the playback speed multiplier.
 func (m *Mpv) SetSpeed(speed float64) error {
-	if err := m.conn.Set("speed", speed); err != nil {
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return fmt.Errorf("set speed: mpv connection closed")
+	}
+	if err := conn.Set("speed", speed); err != nil {
 		logger.Warn("failed to set mpv speed", "speed", speed, "err", err)
 		return err
 	}
@@ -252,7 +360,11 @@ func (m *Mpv) SetSpeed(speed float64) error {
 
 // SetVolume sets the playback volume (0-150).
 func (m *Mpv) SetVolume(vol int) error {
-	if err := m.conn.Set("volume", float64(vol)); err != nil {
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return fmt.Errorf("set volume: mpv connection closed")
+	}
+	if err := conn.Set("volume", float64(vol)); err != nil {
 		logger.Warn("failed to set mpv volume", "volume", vol, "err", err)
 		return err
 	}
@@ -270,9 +382,14 @@ func (m *Mpv) GetVolume() (int, error) {
 
 // Quit sends the quit command and cleans up.
 func (m *Mpv) Quit() error {
-	if m.conn != nil && !m.conn.IsClosed() {
-		_, _ = m.conn.Call("quit")
-		_ = m.conn.Close()
+	m.connMu.Lock()
+	conn := m.conn
+	m.conn = nil
+	m.connMu.Unlock()
+
+	if conn != nil && !conn.IsClosed() {
+		_, _ = conn.Call("quit")
+		_ = conn.Close()
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
 		m.stopProcess("stopping mpv subprocess")
@@ -298,7 +415,7 @@ func describeStreamURL(rawURL string) streamLogInfo {
 		Scheme:   parsed.Scheme,
 		Host:     parsed.Host,
 		Path:     parsed.EscapedPath(),
-		HasToken: parsed.Query().Has("token"),
+		HasToken: parsed.Query().Has("token") || parsed.Query().Has("api_key") || parsed.Query().Has("ApiKey"),
 	}
 }
 
@@ -365,7 +482,7 @@ func (m *Mpv) stopProcess(reason string) {
 }
 
 func logMpvPipe(stream string, pid int, r io.ReadCloser) {
-	defer func() { _ = r.Close() }()
+	defer r.Close()
 
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -393,7 +510,11 @@ func logMpvExit(pid int, state *os.ProcessState, err error) {
 }
 
 func (m *Mpv) getFloat(property string) (float64, error) {
-	val, err := m.conn.Get(property)
+	conn := m.getConn()
+	if conn == nil || conn.IsClosed() {
+		return 0, fmt.Errorf("get %s: mpv connection closed", property)
+	}
+	val, err := conn.Get(property)
 	if err != nil {
 		logger.Debug("failed to query mpv property", "property", property, "err", err)
 		return 0, fmt.Errorf("get %s: %w", property, err)

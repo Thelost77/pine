@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Thelost77/pine/internal/logger"
@@ -17,6 +18,15 @@ type PositionMsg struct {
 	Paused     bool
 	Err        error
 	Generation uint64 // ties this tick to a specific play session
+}
+
+// PlayerEndMsg is emitted when mpv broadcasts an end-file event, indicating the
+// current file finished (eof) or failed to load/decode (error/redirect). The
+// app uses the Reason to decide whether to auto-advance the queue.
+type PlayerEndMsg struct {
+	Generation uint64
+	Reason     string // "eof" | "error" | "redirect"
+	Err        error
 }
 
 // TickCmd returns a command that fires twice per second and polls mpv state.
@@ -44,10 +54,10 @@ func TickCmd(p Player, generation uint64) tea.Cmd {
 	})
 }
 
-// TogglePauseCmd sends a pause toggle to mpv.
-func TogglePauseCmd(p Player, shouldPlay bool) tea.Cmd {
+// SetPauseCmd sets mpv's paused state.
+func SetPauseCmd(p Player, paused bool) tea.Cmd {
 	return func() tea.Msg {
-		err := p.SetPause(!shouldPlay)
+		err := p.SetPause(paused)
 		if err != nil {
 			return PositionMsg{Err: err}
 		}
@@ -78,16 +88,14 @@ func SetVolumeCmd(p Player, vol int) tea.Cmd {
 }
 
 // PlayerReadyMsg signals that mpv has been launched and connected.
-// Generation ties the ready event to the play session that started it so stale
-// launches (from a superseded session) can be ignored.
 type PlayerReadyMsg struct {
 	Generation uint64
 }
 
 // PlayerLaunchErrMsg signals that mpv failed to launch.
 type PlayerLaunchErrMsg struct {
-	Err        error
 	Generation uint64
+	Err        error
 }
 
 // PlayerQuitMsg signals that mpv has been quit.
@@ -110,22 +118,25 @@ func formatStartPosition(startTime, duration float64) string {
 // LaunchCmd spawns mpv and connects via IPC. If paused is true, mpv starts paused.
 // httpHeaders are passed to mpv via --http-header-fields.
 // duration is the current track length in seconds; it is used to start at a
-// percent offset when resuming into a long HTTP stream.
-// The generation ties the resulting PlayerReadyMsg/PlayerLaunchErrMsg to the
-// play session that started the launch, so stale events from a superseded
-// session can be ignored by the root model.
+// percent offset when resuming into a long HTTP stream. Pass 0 to start at
+// startTime in seconds.
 // Returns PlayerReadyMsg on success.
-func LaunchCmd(p Player, url string, startTime, duration float64, paused bool, httpHeaders []string, generation uint64) tea.Cmd {
+func LaunchCmd(p Player, url string, startTime, duration float64, paused bool, httpHeaders []string, volume int, generation uint64) tea.Cmd {
 	return func() tea.Msg {
+		socketDir, err := MpvSocketDir()
+		if err != nil {
+			logger.Error("failed to prepare mpv socket directory", "err", err)
+			return PlayerLaunchErrMsg{Generation: generation, Err: err}
+		}
 		startStr := formatStartPosition(startTime, duration)
-		logger.Info("launching mpv", "startTime", startTime, "duration", duration, "start", startStr, "socketDir", MpvSocketDir(), "generation", generation)
-		socketPath := filepath.Join(MpvSocketDir(), fmt.Sprintf("pine-mpv-%d.sock", os.Getpid()))
+		logger.Info("launching mpv", "startTime", startTime, "duration", duration, "start", startStr, "socketDir", socketDir, "generation", generation)
+		socketPath := filepath.Join(socketDir, fmt.Sprintf("%s-mpv-%d.sock", appName, os.Getpid()))
 		// Remove stale socket
 		_ = os.Remove(socketPath)
 
-		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders); err != nil {
+		if err := p.Launch(url, startStr, socketPath, paused, httpHeaders, volume); err != nil {
 			logger.Error("mpv launch failed", "err", err)
-			return PlayerLaunchErrMsg{Err: err, Generation: generation}
+			return PlayerLaunchErrMsg{Generation: generation, Err: err}
 		}
 
 		// Retry connection for up to 3 seconds (mpv takes a moment to create the socket)
@@ -138,7 +149,7 @@ func LaunchCmd(p Player, url string, startTime, duration float64, paused bool, h
 			}
 		}
 		logger.Error("mpv socket connect timeout", "socket", socketPath, "err", connectErr)
-		return PlayerLaunchErrMsg{Err: fmt.Errorf("connect to mpv: %w", connectErr), Generation: generation}
+		return PlayerLaunchErrMsg{Generation: generation, Err: fmt.Errorf("connect to mpv: %w", connectErr)}
 	}
 }
 
@@ -147,5 +158,70 @@ func QuitCmd(p Player) tea.Cmd {
 	return func() tea.Msg {
 		_ = p.Quit()
 		return PlayerQuitMsg{}
+	}
+}
+
+// SeekCmd sends an absolute seek request to mpv by target seconds.
+func SeekCmd(p Player, target float64) tea.Cmd {
+	return func() tea.Msg {
+		err := p.Seek(target)
+		if err != nil {
+			return PositionMsg{Err: err}
+		}
+		return nil
+	}
+}
+
+// SeekRelativeCmd sends a relative seek request to mpv by offset seconds.
+func SeekRelativeCmd(p Player, offset float64) tea.Cmd {
+	return func() tea.Msg {
+		err := p.SeekRelative(offset)
+		if err != nil {
+			return PositionMsg{Err: err}
+		}
+		return nil
+	}
+}
+
+// WatchEvents subscribes to mpv's IPC event stream and returns a PlayerEndMsg
+// when mpv broadcasts end-file (normal EOF, load/decode error, or redirect).
+// mpv auto-broadcasts end-file; no observe command is required.
+//
+// A side goroutine polls conn.IsClosed so that if mpv is killed without
+// emitting end-file (e.g. SIGKILL during stopPlayback), the event listener is
+// unregistered and this cmd returns a fatal PlayerEndMsg instead of leaking.
+func (m *Mpv) WatchEvents(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		conn := m.getConn()
+		if conn == nil {
+			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("no mpv connection")}
+		}
+		events, stop := conn.NewEventListener()
+		if events == nil {
+			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("event listener unavailable")}
+		}
+		var closeOnce sync.Once
+		closeStop := func() {
+			closeOnce.Do(func() {
+				close(stop)
+			})
+		}
+		go func() {
+			for !conn.IsClosed() {
+				time.Sleep(200 * time.Millisecond)
+			}
+			closeStop()
+		}()
+		for ev := range events {
+			if ev == nil {
+				continue
+			}
+			if ev.Name == "end-file" {
+				closeStop()
+				return PlayerEndMsg{Generation: generation, Reason: ev.Reason}
+			}
+		}
+		closeStop()
+		return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("mpv connection closed")}
 	}
 }

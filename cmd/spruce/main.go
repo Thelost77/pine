@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 
 	"github.com/Thelost77/pine/internal/logger"
+	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/spruce/app"
 	"github.com/Thelost77/pine/internal/spruce/buildinfo"
 	"github.com/Thelost77/pine/internal/spruce/config"
-	"github.com/Thelost77/pine/internal/spruce/player"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -37,6 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	player.SetAppName("spruce")
 	mpv := player.NewMpv()
 	rootModel := app.New(&cfg, mpv)
 

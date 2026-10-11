@@ -20,7 +20,7 @@ var ErrMediaCacheFull = errors.New("media cache size limit reached")
 // MediaDownloadFunc writes one media item and returns its byte count.
 type MediaDownloadFunc func(context.Context, io.Writer) (int64, error)
 
-// SessionCache stores media files for the lifetime of one Spruce process.
+// SessionCache stores media files for the lifetime of one app process.
 // Downloads are serialized so the configured size limit cannot be exceeded by
 // concurrent cache requests.
 type SessionCache struct {
@@ -47,7 +47,7 @@ func newSessionCacheAt(root string, maxBytes int64) (*SessionCache, error) {
 	if maxBytes <= 0 {
 		return nil, errors.New("media cache limit must be positive")
 	}
-	dir, err := os.MkdirTemp(root, fmt.Sprintf("spruce-media-%d-", os.Getpid()))
+	dir, err := os.MkdirTemp(root, fmt.Sprintf("%s-media-%d-", appName, os.Getpid()))
 	if err != nil {
 		return nil, fmt.Errorf("create media cache directory: %w", err)
 	}

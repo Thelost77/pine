@@ -10,9 +10,9 @@ import (
 
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/mpris"
+	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/spruce/config"
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/player"
 	"github.com/Thelost77/pine/internal/spruce/screens/library"
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
 	"github.com/Thelost77/pine/internal/spruce/screens/metadataedit"
@@ -183,7 +183,7 @@ func New(cfg *config.Config, mpv *player.Mpv) *Model {
 			maximumRate: 4.0,
 			volume:      100,
 		},
-		playerState:        player.NewModel(p, actualCfg, styles),
+		playerState:        player.NewModel(p, actualCfg.Player.Speed, playerKeys(actualCfg.Keybinds), styles),
 		err:                components.NewErrorBanner(styles.Error),
 		currentIndex:       -1,
 		pendingRepeatIndex: -1,

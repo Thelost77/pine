@@ -38,7 +38,7 @@ type mockPlayer struct {
 	connectErr error
 }
 
-func (p *mockPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string) error {
+func (p *mockPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launched = true
@@ -75,6 +75,12 @@ func (p *mockPlayer) Seek(seconds float64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.position = seconds
+	return nil
+}
+func (p *mockPlayer) SeekRelative(seconds float64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.position += seconds
 	return nil
 }
 func (p *mockPlayer) SetSpeed(speed float64) error { return nil }
@@ -1248,6 +1254,27 @@ func TestPlayCmdTogglesPauseWhilePlaying(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected pause toggle command")
+	}
+}
+
+func TestPlayCmdToggleSendsPausedStateToPlayer(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.sessionID = "sess-123"
+	m.itemID = "item-old"
+	m.player.Playing = true
+	mp := m.mpv.(*mockPlayer)
+	toggle := detail.PlayCmd{Item: abs.LibraryItem{ID: "item-old"}}
+
+	result, cmd := m.Update(toggle)
+	m, _ = feedCmd(result.(Model), cmd)
+	if paused, _ := mp.GetPaused(); !paused {
+		t.Error("toggle while playing should pause the player")
+	}
+
+	result, cmd = m.Update(toggle)
+	feedCmd(result.(Model), cmd)
+	if paused, _ := mp.GetPaused(); paused {
+		t.Error("toggle while paused should resume the player")
 	}
 }
 

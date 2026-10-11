@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,16 +16,17 @@ type StartPlayMsg struct {
 
 // Model is the bubbletea sub-model for the player footer bar.
 type Model struct {
-	Playing        bool
-	Title          string
-	Position       float64
-	Duration       float64
-	Speed          float64
-	Volume         int
-	SleepRemaining string
+	Playing         bool
+	Title           string
+	Position        float64
+	Duration        float64
+	Speed           float64
+	Volume          int
+	SleepRemaining  string
+	RepeatStatus    string
+	SubliminalCount int
 
 	player Player
-	config config.PlayerConfig
 	styles ui.Styles
 	width  int
 	keys   PlayerKeyMap
@@ -43,41 +43,51 @@ type PlayerKeyMap struct {
 	VolumeDown  key.Binding
 }
 
-// NewModel creates a new player sub-model.
-func NewModel(p Player, cfg config.Config, styles ui.Styles) Model {
+// Keys holds the key names for the player keybindings.
+type Keys struct {
+	PlayPause    string
+	SeekForward  string
+	SeekBackward string
+	SpeedUp      string
+	SpeedDown    string
+	VolumeUp     string
+	VolumeDown   string
+}
+
+// NewModel creates a new player sub-model with the initial speed and the key names.
+func NewModel(p Player, speed float64, keys Keys, styles ui.Styles) Model {
 	return Model{
-		Speed:  cfg.Player.Speed,
+		Speed:  speed,
 		Volume: 100,
 		player: p,
-		config: cfg.Player,
 		styles: styles,
 		keys: PlayerKeyMap{
 			PlayPause: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.PlayPause),
+				key.WithKeys(keys.PlayPause),
 				key.WithHelp("space", "play/pause"),
 			),
 			SeekForward: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.SeekForward),
+				key.WithKeys(keys.SeekForward),
 				key.WithHelp("l", "seek forward"),
 			),
 			SeekBack: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.SeekBackward),
+				key.WithKeys(keys.SeekBackward),
 				key.WithHelp("h", "seek backward"),
 			),
 			SpeedUp: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.SpeedUp),
+				key.WithKeys(keys.SpeedUp),
 				key.WithHelp("+", "speed up"),
 			),
 			SpeedDown: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.SpeedDown),
+				key.WithKeys(keys.SpeedDown),
 				key.WithHelp("-", "speed down"),
 			),
 			VolumeUp: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.VolumeUp),
+				key.WithKeys(keys.VolumeUp),
 				key.WithHelp("]", "volume up"),
 			),
 			VolumeDown: key.NewBinding(
-				key.WithKeys(cfg.Keybinds.VolumeDown),
+				key.WithKeys(keys.VolumeDown),
 				key.WithHelp("[", "volume down"),
 			),
 		},
@@ -94,11 +104,20 @@ func (m *Model) SetWidth(w int) {
 	m.width = w
 }
 
+// PlayPauseKey returns the play/pause key binding.
+func (m Model) PlayPauseKey() key.Binding { return m.keys.PlayPause }
+
 // SeekForwardKey returns the seek forward key binding.
 func (m Model) SeekForwardKey() key.Binding { return m.keys.SeekForward }
 
 // SeekBackKey returns the seek backward key binding.
 func (m Model) SeekBackKey() key.Binding { return m.keys.SeekBack }
+
+// VolumeUpKey returns the volume-up key binding.
+func (m Model) VolumeUpKey() key.Binding { return m.keys.VolumeUp }
+
+// VolumeDownKey returns the volume-down key binding.
+func (m Model) VolumeDownKey() key.Binding { return m.keys.VolumeDown }
 
 // HandlesKey reports whether the player should consume the key while a session is active.
 func (m Model) HandlesKey(msg tea.KeyMsg) bool {
@@ -152,7 +171,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.PlayPause):
 		m.Playing = !m.Playing
 		if m.player != nil {
-			return m, TogglePauseCmd(m.player, m.Playing)
+			return m, SetPauseCmd(m.player, !m.Playing)
 		}
 		return m, nil
 

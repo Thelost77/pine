@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
-	"github.com/Thelost77/pine/internal/spruce/player"
 	"github.com/Thelost77/pine/internal/spruce/screens/library"
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
 	tea "github.com/charmbracelet/bubbletea"

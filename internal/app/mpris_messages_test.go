@@ -107,3 +107,20 @@ func TestMprisMessagesDoNothingWithoutPlayback(t *testing.T) {
 		}
 	}
 }
+
+func TestMprisPauseAndPlayMsgSendTheStateToThePlayer(t *testing.T) {
+	m := newMprisPlaybackTestModel(true)
+	mp := m.mpv.(*mockPlayer)
+
+	result, cmd := m.Update(mpris.PauseMsg{})
+	m, _ = feedCmd(result.(Model), cmd)
+	if paused, _ := mp.GetPaused(); !paused {
+		t.Error("PauseMsg should pause the player")
+	}
+
+	result, cmd = m.Update(mpris.PlayMsg{})
+	feedCmd(result.(Model), cmd)
+	if paused, _ := mp.GetPaused(); paused {
+		t.Error("PlayMsg should resume the player")
+	}
+}

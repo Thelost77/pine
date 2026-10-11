@@ -4,16 +4,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newTestModel() Model {
-	cfg := config.Default()
-	styles := ui.DefaultStyles()
-	return NewModel(nil, cfg, styles)
+	keys := Keys{
+		PlayPause:    " ",
+		SeekForward:  "l",
+		SeekBackward: "h",
+		SpeedUp:      "+",
+		SpeedDown:    "-",
+		VolumeUp:     "]",
+		VolumeDown:   "[",
+	}
+	return NewModel(nil, 1.0, keys, ui.DefaultStyles())
 }
 
 func TestInitReturnsNil(t *testing.T) {
@@ -172,6 +179,45 @@ func TestViewPlaying(t *testing.T) {
 	}
 	if !strings.Contains(v, "1.0x") {
 		t.Error("expected '1.0x' in view")
+	}
+}
+
+func TestViewStaysSingleLineWithLongMetadata(t *testing.T) {
+	m := newTestModel()
+	m.Title = strings.Repeat("Long title ", 10)
+	m.Playing = true
+	m.Position = 754
+	m.Duration = 1725
+	m.Volume = 95
+	m.RepeatStatus = "🔁 Queue"
+	m.SleepRemaining = "45m"
+	m.SetWidth(30)
+
+	view := m.View()
+	if got := lipgloss.Height(view); got != 1 {
+		t.Fatalf("view height = %d, want 1: %q", got, view)
+	}
+	if got := lipgloss.Width(view); got > 30 {
+		t.Fatalf("view width = %d, want at most 30", got)
+	}
+}
+
+func TestViewSubliminalModeShowsPerTrackVolumeWithoutTimeline(t *testing.T) {
+	m := newTestModel()
+	m.Title = "Subliminal mix (3 tracks)"
+	m.Playing = true
+	m.Volume = 20
+	m.SubliminalCount = 3
+	m.SetWidth(80)
+
+	view := m.View()
+	for _, want := range []string{"Subliminal mix", "Vol:20% per track", "∞"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view does not contain %q: %s", want, view)
+		}
+	}
+	if strings.Contains(view, "0:00") || strings.Contains(view, "1.0x") {
+		t.Fatalf("subliminal footer contains normal timeline controls: %s", view)
 	}
 }
 
