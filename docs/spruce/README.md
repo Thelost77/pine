@@ -32,6 +32,9 @@ interface and [mpv](https://mpv.io/) for audio playback.
 - A Jellyfin account with at least one music library
 - A Unix-like operating system
 
+spruce does not load the mpv config files. The options in `mpv.conf` do not
+apply.
+
 Linux is the primary platform. macOS cross-compiles, but MPRIS requires a D-Bus
 session and is primarily useful on Linux. Windows is not currently supported.
 

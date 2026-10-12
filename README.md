@@ -38,6 +38,8 @@ One Go module builds the two programs. They share the player, MPRIS, logger, and
   - macOS: `brew install mpv`
 - An [Audiobookshelf](https://www.audiobookshelf.org/) server
 
+pine does not load the mpv config files. The options in `mpv.conf` do not apply.
+
 ## Installation
 
 ```sh
