@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/quarckster/go-mpris-server/pkg/types"
-
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
 	tea "github.com/charmbracelet/bubbletea"
@@ -290,8 +288,8 @@ func (m *Model) syncQueueScreen() {
 		})
 
 		if m.mprisBridge != nil {
-			handler := m.mprisBridge.EventHandler()
-			if handler != nil && handler.Player != nil {
+			server := m.mprisBridge.Server()
+			if server != nil {
 				playbackChanged := oldState.playing != newState.playing ||
 					oldState.paused != newState.paused ||
 					oldState.speed != newState.speed
@@ -302,20 +300,19 @@ func (m *Model) syncQueueScreen() {
 				positionChanged := oldState.position != newState.position
 
 				if playbackChanged {
-					_ = handler.Player.OnPlayback()
+					server.PlaybackChanged()
 				}
 				if metadataChanged {
-					_ = handler.Player.OnTitle()
+					server.MetadataChanged()
 				}
 				if volumeChanged {
-					_ = handler.Player.OnVolume()
+					server.VolumeChanged()
 				}
 				if positionChanged {
 					now := time.Now()
 					if now.Sub(m.lastMprisEmit) >= time.Second {
 						m.lastMprisEmit = now
-						pos := types.Microseconds(newState.position * 1_000_000)
-						_ = handler.Player.OnSeek(pos)
+						server.Seeked(newState.position)
 					}
 				}
 			}
@@ -359,12 +356,12 @@ func (m *Model) mprisPlaybackCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
-	if handler == nil || handler.Player == nil {
+	server := m.mprisBridge.Server()
+	if server == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = handler.Player.OnPlayback()
+		server.PlaybackChanged()
 		return nil
 	}
 }
@@ -373,12 +370,12 @@ func (m *Model) mprisPlayPauseCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
-	if handler == nil || handler.Player == nil {
+	server := m.mprisBridge.Server()
+	if server == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = handler.Player.OnPlayPause()
+		server.StatusChanged()
 		return nil
 	}
 }
@@ -387,12 +384,12 @@ func (m *Model) mprisEndedCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
-	if handler == nil || handler.Player == nil {
+	server := m.mprisBridge.Server()
+	if server == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = handler.Player.OnEnded()
+		server.StatusChanged()
 		return nil
 	}
 }
@@ -401,12 +398,12 @@ func (m *Model) mprisTitleCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
-	if handler == nil || handler.Player == nil {
+	server := m.mprisBridge.Server()
+	if server == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = handler.Player.OnTitle()
+		server.MetadataChanged()
 		return nil
 	}
 }
@@ -420,13 +417,13 @@ func (m *Model) mprisPositionCmd() tea.Cmd {
 		return nil
 	}
 	m.lastMprisEmit = now
-	handler := m.mprisBridge.EventHandler()
-	if handler == nil || handler.Player == nil {
+	server := m.mprisBridge.Server()
+	if server == nil {
 		return nil
 	}
-	pos := types.Microseconds(m.playerState.Position * 1_000_000)
+	pos := m.playerState.Position
 	return func() tea.Msg {
-		_ = handler.Player.OnSeek(pos)
+		server.Seeked(pos)
 		return nil
 	}
 }
@@ -435,12 +432,12 @@ func (m *Model) mprisVolumeCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
-	if handler == nil || handler.Player == nil {
+	server := m.mprisBridge.Server()
+	if server == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = handler.Player.OnVolume()
+		server.VolumeChanged()
 		return nil
 	}
 }

@@ -2,9 +2,9 @@ package mpris
 
 import (
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
 type mockAccessor struct {
@@ -81,11 +81,11 @@ func TestPlayerAdapterPlaybackStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		accessor *mockAccessor
-		want     types.PlaybackStatus
+		want     PlaybackStatus
 	}{
-		{"playing", &mockAccessor{playing: true}, types.PlaybackStatusPlaying},
-		{"paused", &mockAccessor{paused: true}, types.PlaybackStatusPaused},
-		{"stopped", &mockAccessor{}, types.PlaybackStatusStopped},
+		{"playing", &mockAccessor{playing: true}, StatusPlaying},
+		{"paused", &mockAccessor{paused: true}, StatusPaused},
+		{"stopped", &mockAccessor{}, StatusStopped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -166,12 +166,12 @@ func TestPlayerAdapterMetadata(t *testing.T) {
 	if len(meta.Artist) != 1 || meta.Artist[0] != "J.R.R. Tolkien" {
 		t.Errorf("Metadata().Artist = %v; want [J.R.R. Tolkien]", meta.Artist)
 	}
-	if meta.Length != types.Microseconds(3600*1_000_000) {
-		t.Errorf("Metadata().Length = %d; want %d", meta.Length, 3600*1_000_000)
+	if meta.Length != time.Hour {
+		t.Errorf("Metadata().Length = %v; want %v", meta.Length, time.Hour)
 	}
 	expectedPath := dbus.ObjectPath("/org/spruce/track/item_123")
-	if meta.TrackId != expectedPath {
-		t.Errorf("Metadata().TrackId = %q; want %q", meta.TrackId, expectedPath)
+	if meta.TrackID != expectedPath {
+		t.Errorf("Metadata().TrackID = %q; want %q", meta.TrackID, expectedPath)
 	}
 }
 
@@ -202,9 +202,9 @@ func TestPlayerAdapterPosition(t *testing.T) {
 }
 
 func TestPlayerAdapterSeek(t *testing.T) {
-	var capturedOffset types.Microseconds
+	var capturedOffset time.Duration
 	actions := PlayerActions{
-		Seek: func(offset types.Microseconds) error {
+		Seek: func(offset time.Duration) error {
 			capturedOffset = offset
 			return nil
 		},
@@ -212,11 +212,11 @@ func TestPlayerAdapterSeek(t *testing.T) {
 	a := &mockAccessor{}
 	p := NewPlayerAdapter("spruce", accessorFn(a), actions)
 
-	if err := p.Seek(types.Microseconds(10_000_000)); err != nil {
+	if err := p.Seek(10 * time.Second); err != nil {
 		t.Fatalf("Seek() error: %v", err)
 	}
-	if capturedOffset != 10_000_000 {
-		t.Errorf("Seek(10_000_000) captured = %d; want 10000000", capturedOffset)
+	if capturedOffset != 10*time.Second {
+		t.Errorf("Seek(10s) captured = %v; want 10s", capturedOffset)
 	}
 }
 

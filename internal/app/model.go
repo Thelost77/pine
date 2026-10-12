@@ -27,7 +27,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
 const headerHeight = 2
@@ -183,9 +182,9 @@ func (m *Model) mprisPlaybackCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
+	server := m.mprisBridge.Server()
 	return func() tea.Msg {
-		_ = handler.Player.OnPlayback()
+		server.PlaybackChanged()
 		return nil
 	}
 }
@@ -194,9 +193,9 @@ func (m *Model) mprisPlayPauseCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
+	server := m.mprisBridge.Server()
 	return func() tea.Msg {
-		_ = handler.Player.OnPlayPause()
+		server.StatusChanged()
 		return nil
 	}
 }
@@ -205,9 +204,9 @@ func (m *Model) mprisEndedCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
+	server := m.mprisBridge.Server()
 	return func() tea.Msg {
-		_ = handler.Player.OnEnded()
+		server.StatusChanged()
 		return nil
 	}
 }
@@ -216,9 +215,9 @@ func (m *Model) mprisTitleCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
+	server := m.mprisBridge.Server()
 	return func() tea.Msg {
-		_ = handler.Player.OnTitle()
+		server.MetadataChanged()
 		return nil
 	}
 }
@@ -232,10 +231,10 @@ func (m *Model) mprisPositionCmd() tea.Cmd {
 		return nil
 	}
 	m.lastMprisEmit = now
-	handler := m.mprisBridge.EventHandler()
-	pos := types.Microseconds(m.player.Position * 1_000_000)
+	server := m.mprisBridge.Server()
+	pos := m.player.Position
 	return func() tea.Msg {
-		_ = handler.Player.OnSeek(pos)
+		server.Seeked(pos)
 		return nil
 	}
 }
@@ -244,9 +243,9 @@ func (m *Model) mprisVolumeCmd() tea.Cmd {
 	if m.mprisBridge == nil {
 		return nil
 	}
-	handler := m.mprisBridge.EventHandler()
+	server := m.mprisBridge.Server()
 	return func() tea.Msg {
-		_ = handler.Player.OnVolume()
+		server.VolumeChanged()
 		return nil
 	}
 }

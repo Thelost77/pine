@@ -40,7 +40,7 @@ The remaining sections describe pine. For spruce, see [docs/spruce/README.md](do
 
 ## Requirements
 
-- Go 1.26.4+
+- Go 1.26.4+ for an installation from source
 - libmpv, the library of [mpv](https://mpv.io/) 0.34 or later. The `mpv` program is not necessary.
   - Debian and Ubuntu: `sudo apt install libmpv2`. On Ubuntu 22.04 the package is `libmpv1`.
   - Arch: `sudo pacman -S mpv`
@@ -56,6 +56,8 @@ Linux is the primary platform. macOS works with mpv from Homebrew. MPRIS needs a
 ```sh
 go install github.com/Thelost77/pine@latest
 ```
+
+Each release from v0.8.0 also has archives with a binary for Linux, macOS, and Windows. Download an archive from the [release page](https://github.com/Thelost77/pine/releases). The binary needs libmpv. See "Requirements".
 
 ## Usage
 
@@ -166,9 +168,11 @@ One tag releases pine and spruce together. Write the release notes for the two p
 Commit the notes and push them to `main`. Then use the release script.
 
 ```sh
-${EDITOR:-vi} docs/releases/v0.7.0.md
-./scripts/release.sh v0.7.0
+${EDITOR:-vi} docs/releases/v0.8.0.md
+./scripts/release.sh v0.8.0
 ```
+
+When the script publishes the GitHub Release, the `Release` workflow builds the two programs for Linux, macOS, and Windows. It attaches one archive for each program and each system to the release.
 
 ## Architecture
 

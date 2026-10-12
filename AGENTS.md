@@ -26,7 +26,7 @@ go vet ./...                        # type-check
 1. Use `gofmt -l .`. Make sure that it shows no file. Use `gofmt -w <file>` to format a file.
 2. Use `go vet ./...`.
 3. Use `golangci-lint run`. Make sure that it reports 0 issues. Use version 2.14.0, which is the version in `.github/workflows/ci.yml`.
-4. Use `PINE_REQUIRE_LIBMPV=1 go test ./... -count=1`.
+4. Use `PINE_REQUIRE_LIBMPV=1 PINE_REQUIRE_DBUS=1 go test ./... -count=1`.
 
 ## Repository Layout
 
@@ -104,7 +104,9 @@ The Architecture Map below describes pine and the shared packages.
 | `adapter.go` | D-Bus MPRIS adapter exposing playback status, metadata, and seek controls. |
 | `bridge.go` | Bubbletea message bridge between the MPRIS adapter and root model. |
 | `accessor.go` | Read-only MPRIS property accessor. |
-| `server.go` | D-Bus service registration. |
+| `server.go` | MPRIS server on `godbus/dbus`: the root and player interfaces, the D-Bus properties interface, introspection, and the change signals. |
+
+The server is written from the MPRIS 2.2 specification. The Go MPRIS server library that exists is GPL-3.0, and a GPL module makes the release binaries GPL. Do not add a module with a copyleft license.
 
 ### API (internal/abs/)
 
@@ -150,6 +152,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - `internal/app/model_test.go`, `playback_test.go`, `bookmarks_test.go`, `render_test.go` for app-level tests
 - `internal/cache/*_test.go` for cache store and helper behavior
 - `internal/mpris/mpris_test.go` for the D-Bus adapter and bridge
+- `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.
 - `internal/screens/metadataedit/model_test.go` for the metadata editor
 - Screen models have individual `*_test.go` files
 - `internal/player/libmpv_test.go`, `mpv_test.go`, and `group_test.go` play audio through the real libmpv with `ao=null`. They skip if libmpv is absent. With `PINE_REQUIRE_LIBMPV=1` they fail instead. `scripts/release.sh` sets that variable.

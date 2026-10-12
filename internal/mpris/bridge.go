@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/quarckster/go-mpris-server/pkg/events"
-	"github.com/quarckster/go-mpris-server/pkg/types"
 
 	"github.com/Thelost77/pine/internal/logger"
 )
@@ -93,18 +92,18 @@ func (b *Bridge) Bind(accessor func() ModelAccessor, skipSeekSeconds float64) {
 			b.send(PlayMsg{})
 			return nil
 		},
-		Seek: func(offset types.Microseconds) error {
-			b.send(SeekRelativeMsg{OffsetSeconds: float64(offset) / 1_000_000})
+		Seek: func(offset time.Duration) error {
+			b.send(SeekRelativeMsg{OffsetSeconds: offset.Seconds()})
 			return nil
 		},
-		SetPosition: func(trackId string, pos types.Microseconds) error {
+		SetPosition: func(trackId string, pos time.Duration) error {
 			// MPRIS: SetPosition has no effect if CanSeek is false, and a request
 			// for a track that is not the current track is stale.
 			a := accessor()
 			if !a.CanSeek() || trackId != string(trackPath(b.name, a.CurrentItemID())) {
 				return nil
 			}
-			b.send(SeekAbsoluteMsg{PositionSeconds: float64(pos) / 1_000_000})
+			b.send(SeekAbsoluteMsg{PositionSeconds: pos.Seconds()})
 			return nil
 		},
 		SetRate: func(rate float64) error {
@@ -171,10 +170,7 @@ func (b *Bridge) Stop() error {
 	return err
 }
 
-// EventHandler returns the MPRIS event handler for emitting property changes.
-func (b *Bridge) EventHandler() *events.EventHandler {
-	if b.server == nil {
-		return nil
-	}
-	return b.server.EventHandler()
+// Server returns the MPRIS server. It is nil before Bind.
+func (b *Bridge) Server() *Server {
+	return b.server
 }
