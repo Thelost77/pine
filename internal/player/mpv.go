@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 
@@ -200,6 +201,11 @@ func (m *Mpv) start(h mpvHandle, url, startTime string, paused bool, httpHeaders
 	}
 	if m.audioOutput != "" {
 		options = append(options, [2]string{"ao", m.audioOutput})
+	}
+	if runtime.GOOS == "darwin" {
+		// On macOS 27 with mpv 0.41, CoreAudio plays mono audio at double
+		// speed. With a stereo layout it plays at the correct speed.
+		options = append(options, [2]string{"audio-channels", "stereo"})
 	}
 	// The options go in before mpv_initialize and not into loadfile: the
 	// position of the loadfile options argument changed in mpv 0.38.
