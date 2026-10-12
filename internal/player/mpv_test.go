@@ -322,6 +322,9 @@ func TestMpvLaunchAppliesHeaderStartPauseAndVolume(t *testing.T) {
 	if volume, err := m.GetVolume(); err != nil || volume != 35 {
 		t.Errorf("GetVolume() = %d, %v, want 35", volume, err)
 	}
+	if forced, err := m.handle.getFlag("force-seekable"); err != nil || !forced {
+		t.Errorf("force-seekable = %v, %v, want true with ForceSeekable", forced, err)
+	}
 }
 
 func TestMpvControls(t *testing.T) {
@@ -331,6 +334,9 @@ func TestMpvControls(t *testing.T) {
 		t.Fatalf("Launch() error: %v", err)
 	}
 	waitPosition(t, m)
+	if forced, err := m.handle.getFlag("force-seekable"); err != nil || forced {
+		t.Errorf("force-seekable = %v, %v, want false without ForceSeekable", forced, err)
+	}
 
 	if err := m.Seek(10); err != nil {
 		t.Fatalf("Seek() error: %v", err)
@@ -429,6 +435,60 @@ func TestMpvReportsPropertyUnavailableWhileTheFileOpens(t *testing.T) {
 	case <-stopped:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Quit() did not return while the file opens")
+	}
+}
+
+func TestMpvLaunchFailureBeforeInitializeLeavesThePlayerUsable(t *testing.T) {
+	srv := newAudioServer(t)
+	m := newTestMpv(t)
+
+	// mpv rejects the start value before mpv_initialize.
+	if err := m.Launch(srv.URL+"/long.wav", "not-a-time", true, []string{testAuthHeader}, 100); err == nil {
+		t.Fatal("Launch() with an invalid start position gave no error")
+	}
+	if m.Done() != nil {
+		t.Error("Done() is not nil after a failed Launch()")
+	}
+	if _, err := m.GetPosition(); !errors.Is(err, ErrClosed) {
+		t.Errorf("GetPosition() after a failed Launch() error = %v, want ErrClosed", err)
+	}
+
+	if err := m.Launch(srv.URL+"/long.wav", "0", true, []string{testAuthHeader}, 100); err != nil {
+		t.Fatalf("Launch() after a failed Launch() error: %v", err)
+	}
+	waitPosition(t, m)
+}
+
+func TestMpvQuitEndsWatchEventsWithQuit(t *testing.T) {
+	srv := newAudioServer(t)
+	m := newTestMpv(t)
+	if err := m.Launch(srv.URL+"/long.wav", "0", true, []string{testAuthHeader}, 100); err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+	waitPosition(t, m)
+
+	watch := m.WatchEvents(4)
+	started := make(chan struct{})
+	result := make(chan tea.Msg, 1)
+	go func() {
+		close(started)
+		result <- watch()
+	}()
+	<-started
+	// Let the goroutine read the current playback before Quit removes it.
+	time.Sleep(50 * time.Millisecond)
+	if err := m.Quit(); err != nil {
+		t.Fatalf("Quit() error: %v", err)
+	}
+
+	select {
+	case msg := <-result:
+		end, ok := msg.(PlayerEndMsg)
+		if !ok || end.Generation != 4 || end.Reason != "quit" || end.Err != nil {
+			t.Fatalf("WatchEvents() after Quit() = %+v, want generation 4, reason quit, no error", msg)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WatchEvents() did not return after Quit()")
 	}
 }
 
