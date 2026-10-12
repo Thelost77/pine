@@ -8,11 +8,12 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/dexterlb/mpvipc v0.0.0-20241005113212-7cdefca0e933
+	github.com/ebitengine/purego v0.11.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/muesli/termenv v0.16.0
 	github.com/quarckster/go-mpris-server v1.0.3
 	github.com/sahilm/fuzzy v0.1.1
+	golang.org/x/sys v0.42.0
 	golang.org/x/text v0.3.8
 	modernc.org/sqlite v1.48.0
 )
@@ -39,8 +40,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

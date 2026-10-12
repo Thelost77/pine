@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -40,7 +41,8 @@ func TestSessionCacheStoresOnceAndRemovesFilesOnClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat cached file: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
+	// Windows has no Unix file modes.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("cached file mode = %o, want 600", info.Mode().Perm())
 	}
 	data, err := os.ReadFile(first)

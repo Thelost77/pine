@@ -328,14 +328,14 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 	}
 	c.mu.Unlock()
 
-// Try to restore from disk cache
+	// Try to restore from disk cache
 	if c.store != nil {
 		var persisted PersistedSnapshot
 		if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit && persisted.MediaType == resolvedMediaType && (len(persisted.Items) > 0 || len(persisted.Entries) == 0) {
 			snapshot := &librarySnapshot{
 				libraryID:      persisted.LibraryID,
 				mediaType:      persisted.MediaType,
-				builtAt:         persisted.BuiltAt,
+				builtAt:        persisted.BuiltAt,
 				lastAccessedAt: persisted.LastAccessedAt,
 				entries:        toSnapshotEntries(persisted.Entries),
 				items:          persisted.Items,

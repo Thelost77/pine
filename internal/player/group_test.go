@@ -3,8 +3,11 @@ package player
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 type groupPlayerSpy struct {
@@ -15,11 +18,10 @@ type groupPlayerSpy struct {
 	pauses      []bool
 	quit        bool
 	launchErr   error
-	connectErr  error
 	done        chan struct{}
 }
 
-func (p *groupPlayerSpy) LaunchLoop(path, _ string, paused bool, volume int) error {
+func (p *groupPlayerSpy) LaunchLoop(path string, paused bool, volume int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.path = path
@@ -27,15 +29,12 @@ func (p *groupPlayerSpy) LaunchLoop(path, _ string, paused bool, volume int) err
 	p.volume = volume
 	return p.launchErr
 }
-func (p *groupPlayerSpy) Connect() error             { return p.connectErr }
 func (p *groupPlayerSpy) SetPause(paused bool) error { p.pauses = append(p.pauses, paused); return nil }
 func (p *groupPlayerSpy) SetVolume(volume int) error { p.volume = volume; return nil }
 func (p *groupPlayerSpy) Quit() error                { p.quit = true; return nil }
 func (p *groupPlayerSpy) Done() <-chan struct{}      { return p.done }
 
 func TestGroupLaunchesPausedAtPerTrackVolumeThenResumes(t *testing.T) {
-	resetMpvSocketDirForTest(t)
-	t.Setenv("TMPDIR", t.TempDir())
 	var players []*groupPlayerSpy
 	group := newGroupWithFactory(func() groupMember {
 		p := &groupPlayerSpy{done: make(chan struct{})}
@@ -73,8 +72,6 @@ func TestGroupLaunchesPausedAtPerTrackVolumeThenResumes(t *testing.T) {
 }
 
 func TestGroupWaitReportsMemberExit(t *testing.T) {
-	resetMpvSocketDirForTest(t)
-	t.Setenv("TMPDIR", t.TempDir())
 	member := &groupPlayerSpy{done: make(chan struct{})}
 	group := newGroupWithFactory(func() groupMember { return member })
 	if err := group.Launch(context.Background(), []string{"one.media"}, 20); err != nil {
@@ -87,8 +84,6 @@ func TestGroupWaitReportsMemberExit(t *testing.T) {
 }
 
 func TestDelayedCommandsCannotAffectAnotherGroup(t *testing.T) {
-	resetMpvSocketDirForTest(t)
-	t.Setenv("TMPDIR", t.TempDir())
 	firstMember := &groupPlayerSpy{done: make(chan struct{})}
 	secondMember := &groupPlayerSpy{done: make(chan struct{})}
 	first := newGroupWithFactory(func() groupMember { return firstMember })
@@ -110,8 +105,6 @@ func TestDelayedCommandsCannotAffectAnotherGroup(t *testing.T) {
 }
 
 func TestGroupCleansUpAfterPartialLaunchFailure(t *testing.T) {
-	resetMpvSocketDirForTest(t)
-	t.Setenv("TMPDIR", t.TempDir())
 	first := &groupPlayerSpy{done: make(chan struct{})}
 	second := &groupPlayerSpy{launchErr: errors.New("boom"), done: make(chan struct{})}
 	players := []*groupPlayerSpy{first, second}
@@ -127,5 +120,56 @@ func TestGroupCleansUpAfterPartialLaunchFailure(t *testing.T) {
 	}
 	if !first.quit {
 		t.Fatal("first player was not stopped after second launch failed")
+	}
+}
+
+func TestGroupLoopsTracksThroughLibmpv(t *testing.T) {
+	requireLibmpv(t)
+	dir := t.TempDir()
+	var paths []string
+	for _, name := range []string{"one.wav", "two.wav"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, silentWAV(1), 0600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		paths = append(paths, path)
+	}
+	var members []*Mpv
+	group := newGroupWithFactory(func() groupMember {
+		m := NewMpv()
+		m.audioOutput = "null"
+		members = append(members, m)
+		return m
+	})
+	t.Cleanup(func() { _ = group.Quit() })
+
+	if err := group.Launch(context.Background(), paths, 20); err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+	for i, m := range members {
+		waitPosition(t, m)
+		if paused, err := m.GetPaused(); err != nil || paused {
+			t.Errorf("member %d GetPaused() = %v, %v, want false", i, paused, err)
+		}
+		if volume, err := m.GetVolume(); err != nil || volume != 20 {
+			t.Errorf("member %d GetVolume() = %d, %v, want 20", i, volume, err)
+		}
+	}
+
+	// Each file is 1 second. A member that does not loop ends before the
+	// context does.
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+	if err := group.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait() = %v, want the context deadline", err)
+	}
+
+	if err := group.Quit(); err != nil {
+		t.Fatalf("Quit() error: %v", err)
+	}
+	for i, m := range members {
+		if _, err := m.GetPosition(); !errors.Is(err, ErrClosed) {
+			t.Errorf("member %d GetPosition() after Quit() error = %v, want ErrClosed", i, err)
+		}
 	}
 }

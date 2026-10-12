@@ -2,9 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/quarckster/go-mpris-server/pkg/types"
@@ -129,8 +129,14 @@ func (m *Model) handlePositionMsg(msg player.PositionMsg) (*Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if errors.Is(msg.Err, player.ErrClosed) {
+			// The playback ended. The player reports this from the instant of
+			// the end-file event, so this tick can arrive before PlayerEndMsg.
+			// PlayerEndMsg has the reason and selects the next step.
+			return m, nil
+		}
 		logger.Error("player position poll failed (fatal)", "err", msg.Err)
-		// Do NOT auto-advance — this is a fatal load/socket error, not EOF.
+		// Do NOT auto-advance — this is a fatal player error, not EOF.
 		// EOF is delivered via PlayerEndMsg{Reason:"eof"}.
 		return m.stopPlayback()
 	}
@@ -175,7 +181,7 @@ func (m *Model) handlePositionMsg(msg player.PositionMsg) (*Model, tea.Cmd) {
 }
 
 func isMpvPropertyUnavailable(err error) bool {
-	return strings.Contains(err.Error(), "property unavailable")
+	return errors.Is(err, player.ErrPropertyUnavailable)
 }
 
 func authorsEqual(a, b []string) bool {

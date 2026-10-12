@@ -6,18 +6,18 @@ import "sync"
 // The Model writes to it via Update; the MPRIS adapter reads from it via the
 // getter methods. All access is guarded by mu.
 type MprisState struct {
-	mu             sync.RWMutex
-	playing        bool
-	paused         bool
-	hasActiveItem  bool
-	title          string
-	authors        []string
-	itemID         string
-	position       float64
-	duration       float64
-	volume         int
-	speed          float64
-	queueLength    int
+	mu            sync.RWMutex
+	playing       bool
+	paused        bool
+	hasActiveItem bool
+	title         string
+	authors       []string
+	itemID        string
+	position      float64
+	duration      float64
+	volume        int
+	speed         float64
+	queueLength   int
 }
 
 // Update runs fn with the write lock held. fn must not call the getter methods

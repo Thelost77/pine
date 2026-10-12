@@ -46,15 +46,14 @@ type Model struct {
 	albumList  list.Model
 	trackList  list.Model
 
-	selectedArtist jellyfin.Artist
-	selectedAlbum  jellyfin.Album
-	artists        []jellyfin.Artist
-	albums         []jellyfin.Album
-	trackSource    []jellyfin.Track
-	tracks         []jellyfin.Track
-	trackSort      TrackSort
-	allTracks      []jellyfin.Track
-	allTracksErr   error
+	selectedAlbum jellyfin.Album
+	artists       []jellyfin.Artist
+	albums        []jellyfin.Album
+	trackSource   []jellyfin.Track
+	tracks        []jellyfin.Track
+	trackSort     TrackSort
+	allTracks     []jellyfin.Track
+	allTracksErr  error
 
 	loading bool
 	err     error
@@ -169,15 +168,6 @@ func (m Model) fetchAllAlbumsCmd() tea.Cmd {
 			all = append(all, albums...)
 		}
 		return AlbumsLoadedMsg{Albums: all}
-	}
-}
-
-func (m Model) fetchAlbumsCmd(artistID string) tea.Cmd {
-	client := m.client
-	return func() tea.Msg {
-		logger.Info("fetching albums", "artistID", artistID)
-		albums, err := client.GetAlbums(context.Background(), artistID)
-		return AlbumsLoadedMsg{Albums: albums, Err: err}
 	}
 }
 
@@ -361,14 +351,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "m":
-			if m.level == LevelAlbums {
+			switch m.level {
+			case LevelAlbums:
 				if sel, ok := m.albumList.SelectedItem().(albumItem); ok {
 					alb := sel.Album
 					return m, func() tea.Msg {
 						return EditMetadataMsg{ItemID: alb.ID, ItemType: "Album", Album: &alb}
 					}
 				}
-			} else if m.level == LevelTracks {
+			case LevelTracks:
 				if sel, ok := m.trackList.SelectedItem().(trackItem); ok {
 					trk := sel.Track
 					return m, func() tea.Msg {

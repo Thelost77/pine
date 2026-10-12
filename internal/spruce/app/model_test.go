@@ -107,7 +107,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Restart and verify mpv's brief EOF-window "property unavailable" does not kill repeat playback.
 	newM, _ = m.startPlaybackAt(0)
 	m = newM.(*Model)
-	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: errors.New("get time-pos: mpv error: property unavailable")}
+	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: fmt.Errorf("get time-pos: %w", player.ErrPropertyUnavailable)}
 	newM, _ = m.Update(posMsg)
 	m = newM.(*Model)
 	if !m.IsPlaying() || m.currentIndex != 0 {
@@ -226,6 +226,30 @@ func TestMPRISPlayAndPauseSetExplicitPlaybackState(t *testing.T) {
 				t.Fatalf("Playing = %v; want %v", m.playerState.Playing, tt.playing)
 			}
 		})
+	}
+}
+
+// The player reports ErrClosed from the instant of the end-file event. A
+// position tick can thus arrive before the PlayerEndMsg of the same playback.
+func TestClosedPlayerTickDoesNotStopBeforeTheEndEvent(t *testing.T) {
+	m := New(nil, nil)
+	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}, {ID: "t-2", Name: "Track 2"}}
+	m, _ = m.startPlaybackAt(0)
+
+	tick := player.PositionMsg{Generation: m.playGeneration, Err: fmt.Errorf("get time-pos: %w", player.ErrClosed)}
+	updated, cmd := m.Update(tick)
+	m = updated.(*Model)
+	if !m.IsPlaying() || m.currentIndex != 0 {
+		t.Fatalf("a closed player tick stopped playback: playing=%v idx=%d", m.IsPlaying(), m.currentIndex)
+	}
+	if cmd != nil {
+		t.Error("a closed player tick must not schedule a command")
+	}
+
+	updated, _ = m.Update(player.PlayerEndMsg{Generation: m.playGeneration, Reason: "eof"})
+	m = updated.(*Model)
+	if m.currentIndex != 1 || m.CurrentItemID() != "t-2" {
+		t.Fatalf("eof after a closed player tick did not advance: idx=%d id=%q", m.currentIndex, m.CurrentItemID())
 	}
 }
 

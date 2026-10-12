@@ -16,7 +16,7 @@ import (
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintln(flag.CommandLine.Output(), "Usage: spruce [--version]")
+		_, _ = fmt.Fprintln(flag.CommandLine.Output(), "Usage: spruce [--version]")
 		flag.PrintDefaults()
 	}
 	showVersion := flag.Bool("version", false, "Print version and exit")

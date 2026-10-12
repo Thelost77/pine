@@ -4,36 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// MaxSubliminalTracks prevents accidental unbounded mpv process creation.
+// MaxSubliminalTracks prevents accidental unbounded mpv player creation.
 const MaxSubliminalTracks = 8
 
 type groupMember interface {
-	LaunchLoop(path, socketPath string, paused bool, volume int) error
-	Connect() error
+	LaunchLoop(path string, paused bool, volume int) error
 	SetPause(bool) error
 	SetVolume(int) error
 	Quit() error
 	Done() <-chan struct{}
 }
 
-// Group manages independently looping mpv processes as one playback unit.
+// Group manages independently looping mpv players as one playback unit.
 type Group struct {
 	opMu      sync.Mutex
 	mu        sync.RWMutex
 	players   []groupMember
 	newPlayer func() groupMember
 }
-
-var groupSocketSequence atomic.Uint64
 
 func NewGroup() *Group {
 	return &Group{newPlayer: func() groupMember { return NewMpv() }}
@@ -60,12 +53,8 @@ func (g *Group) Launch(ctx context.Context, paths []string, volume int) error {
 
 	g.opMu.Lock()
 	defer g.opMu.Unlock()
-	g.quitLocked()
+	_ = g.quitLocked()
 
-	socketDir, err := MpvSocketDir()
-	if err != nil {
-		return err
-	}
 	players := make([]groupMember, 0, len(paths))
 	cleanup := func() {
 		for _, p := range players {
@@ -73,24 +62,17 @@ func (g *Group) Launch(ctx context.Context, paths []string, volume int) error {
 		}
 	}
 
-	sequence := groupSocketSequence.Add(1)
 	for i, path := range paths {
 		if err := ctx.Err(); err != nil {
 			cleanup()
 			return err
 		}
 		p := g.newPlayer()
-		socketPath := filepath.Join(socketDir, fmt.Sprintf("%s-mpv-%d-group-%d-%d.sock", appName, os.Getpid(), sequence, i))
-		_ = os.Remove(socketPath)
-		if err := p.LaunchLoop(path, socketPath, true, volume); err != nil {
+		if err := p.LaunchLoop(path, true, volume); err != nil {
 			cleanup()
 			return fmt.Errorf("launch subliminal track %d: %w", i+1, err)
 		}
 		players = append(players, p)
-		if err := connectPlayer(ctx, p); err != nil {
-			cleanup()
-			return fmt.Errorf("connect subliminal track %d: %w", i+1, err)
-		}
 	}
 	for _, p := range players {
 		if err := p.SetPause(false); err != nil {
@@ -103,24 +85,6 @@ func (g *Group) Launch(ctx context.Context, paths []string, volume int) error {
 	g.players = players
 	g.mu.Unlock()
 	return nil
-}
-
-func connectPlayer(ctx context.Context, p groupMember) error {
-	var lastErr error
-	for i := 0; i < 30; i++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if lastErr = p.Connect(); lastErr == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("connect to mpv: %w", lastErr)
 }
 
 func (g *Group) SetPause(paused bool) error {
@@ -148,7 +112,7 @@ func (g *Group) forEach(action func(groupMember) error) error {
 	return nil
 }
 
-// Wait returns when a group member exits or ctx is cancelled.
+// Wait returns when the playback of a group member ends or ctx is cancelled.
 func (g *Group) Wait(ctx context.Context) error {
 	if g == nil {
 		return errors.New("player group is unavailable")

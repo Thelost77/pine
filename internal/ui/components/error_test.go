@@ -89,20 +89,6 @@ func TestSetErrorNil(t *testing.T) {
 	}
 }
 
-func TestEnrichMessageMpvNotFound(t *testing.T) {
-	msg := enrichMessage("mpv not found")
-	if !contains(msg, "Install mpv") {
-		t.Errorf("expected install hint, got: %q", msg)
-	}
-}
-
-func TestEnrichMessageNormalError(t *testing.T) {
-	msg := enrichMessage("connection refused")
-	if contains(msg, "Install") {
-		t.Error("normal error should not get install hint")
-	}
-}
-
 func TestErrorReturnsStoredError(t *testing.T) {
 	b := NewErrorBanner(defaultTestStyle())
 	err := errors.New("test error")

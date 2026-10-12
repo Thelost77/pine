@@ -18,7 +18,7 @@ func TestPathReportsTheFallbackFileWhenTheLogIsLocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open the log file: %v", err)
 	}
-	defer holder.Close()
+	defer func() { _ = holder.Close() }()
 	if err := lockFile(holder); err != nil {
 		t.Fatalf("lock the log file: %v", err)
 	}

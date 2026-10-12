@@ -559,7 +559,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.Server.Token = msg.Token
 			m.cfg.Server.UserID = msg.UserID
 			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg); err != nil {
-				_ = m.err.SetError(fmt.Errorf("Failed to save config: %w", err))
+				_ = m.err.SetError(fmt.Errorf("failed to save config: %w", err))
 			}
 		}
 		deviceName, deviceID := "", ""

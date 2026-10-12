@@ -67,7 +67,7 @@ func (b ErrorBanner) View() string {
 		return ""
 	}
 
-	msg := enrichMessage(sanitizeTerminalText(b.err.Error()))
+	msg := sanitizeTerminalText(b.err.Error())
 
 	w := b.width
 	if w < 4 {
@@ -94,18 +94,6 @@ func sanitizeTerminalText(msg string) string {
 		}
 		return r
 	}, msg)
-}
-
-// enrichMessage adds contextual hints for known error patterns.
-func enrichMessage(msg string) string {
-	lower := strings.ToLower(msg)
-
-	if strings.Contains(lower, "mpv not found") || strings.Contains(lower, "mpv: not found") ||
-		strings.Contains(lower, "executable file not found") && strings.Contains(lower, "mpv") {
-		return msg + " — Install mpv: https://mpv.io/installation/"
-	}
-
-	return msg
 }
 
 // scheduleDismiss returns a command that sends ErrorDismissMsg after the timeout.

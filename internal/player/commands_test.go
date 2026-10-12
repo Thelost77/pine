@@ -74,14 +74,13 @@ func TestFormatStartPosition(t *testing.T) {
 	}
 }
 
-// launchFailPlayer implements Player and fails Launch immediately so LaunchCmd
-// returns PlayerLaunchErrMsg without waiting for the 3s socket-retry loop.
+// launchFailPlayer implements Player and fails Launch, so that LaunchCmd
+// returns PlayerLaunchErrMsg.
 type launchFailPlayer struct{}
 
-func (launchFailPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error {
+func (launchFailPlayer) Launch(url, startTime string, paused bool, httpHeaders []string, volume int) error {
 	return errLaunchSentinel
 }
-func (launchFailPlayer) Connect() error                     { return nil }
 func (launchFailPlayer) GetPosition() (float64, error)      { return 0, nil }
 func (launchFailPlayer) GetDuration() (float64, error)      { return 0, nil }
 func (launchFailPlayer) GetPaused() (bool, error)           { return false, nil }

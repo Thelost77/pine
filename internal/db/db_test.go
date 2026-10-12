@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -119,7 +120,8 @@ func TestOpen_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Stat() error: %v", err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
+	// Windows has no Unix file modes.
+	if mode := info.Mode().Perm(); runtime.GOOS != "windows" && mode != 0o600 {
 		t.Fatalf("database file mode = %o, want 0600", mode)
 	}
 }

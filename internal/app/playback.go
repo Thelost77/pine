@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime/debug"
@@ -333,8 +334,8 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			return m.handlePlaybackCompleted()
 		}
 
-		if strings.Contains(msg.Err.Error(), "property unavailable") {
-			// IPC is up; mpv has not finished opening or seeking yet.
+		if errors.Is(msg.Err, player.ErrPropertyUnavailable) {
+			// The player is up; mpv has not finished opening or seeking yet.
 			// Keep polling. Do not treat this as a dead player.
 			m.propertyUnavailableCount++
 			shift := m.propertyUnavailableCount
@@ -416,7 +417,7 @@ func (m Model) trackEndRolloverTarget(err error) (float64, bool) {
 	if err == nil || m.episodeID != "" || m.trackDuration <= 0 {
 		return 0, false
 	}
-	if !strings.Contains(err.Error(), "closed mpv client") {
+	if !errors.Is(err, player.ErrClosed) {
 		return 0, false
 	}
 
@@ -431,7 +432,7 @@ func (m Model) didPlaybackComplete(err error) bool {
 	if err == nil || m.player.Duration <= 0 {
 		return false
 	}
-	if !strings.Contains(err.Error(), "closed mpv client") {
+	if !errors.Is(err, player.ErrClosed) {
 		return false
 	}
 	return m.player.Position >= m.player.Duration-trackEndRolloverSlack

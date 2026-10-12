@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # libmpv 0.34, the oldest library that the player supports.
+          - os: ubuntu-22.04
+            libmpv: libmpv1
+          - os: ubuntu-24.04
+            libmpv: libmpv2
+          - os: ubuntu-26.04
+            libmpv: libmpv2
+          # Apple Silicon: Homebrew is in /opt/homebrew.
+          - os: macos-latest
+          # Intel: Homebrew is in /usr/local.
+          - os: macos-15-intel
+          - os: windows-latest
+    env:
+      # The player tests fail if libmpv is absent. Without this variable they
+      # skip.
+      PINE_REQUIRE_LIBMPV: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install libmpv (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.libmpv }}
+
+      - name: Install libmpv (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install mpv
+
+      - name: Install libmpv (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$(cygpath -m "$RUNNER_TEMP")/libmpv"
+          mkdir -p "$dir"
+          gh release download --repo shinchiro/mpv-winbuild-cmake \
+            --pattern 'mpv-dev-x86_64-[0-9]*.7z' --dir "$dir"
+          ls "$dir"
+          7z e -y -r "$dir"/mpv-dev-x86_64-*.7z -o"$dir" libmpv-2.dll
+          echo "LIBMPV_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        if: matrix.os == 'ubuntu-24.04'
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+
+      - name: Test
+        if: runner.os != 'Windows'
+        run: go test ./... -count=1
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # The player loads libmpv-2.dll from the directory of the program.
+          # go test puts a test program in a temp directory, so build the
+          # player tests next to the library.
+          go test -c -o "$LIBMPV_DIR/player.test.exe" ./internal/player
+          (cd internal/player && "$LIBMPV_DIR/player.test.exe" -test.count=1)
+          # No test in the other packages loads libmpv.
+          PINE_REQUIRE_LIBMPV= go test ./... -count=1
+
+      - name: Race detector
+        if: matrix.os == 'ubuntu-24.04'
+        run: go test -race ./... -count=1
+
+      - name: Builds without cgo
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          for target in linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null . ./cmd/spruce
+          done

@@ -27,13 +27,18 @@ One Go module builds the two programs. They share the player, MPRIS, logger, and
 - Keyboard-driven navigation
 - Everforest dark theme
 - Session restore — pick up where you left off
-- Graceful cleanup — no orphaned mpv processes
+- In-process playback through libmpv — no mpv subprocess
 
 ## Requirements
 
 - Go 1.26.4+
-- [mpv](https://mpv.io/) installed and available in PATH
+- libmpv, the library of [mpv](https://mpv.io/) 0.34 or later. The `mpv` program is not necessary.
+  - Debian and Ubuntu: `sudo apt install libmpv2`. On Ubuntu 22.04 the package is `libmpv1`.
+  - Arch: `sudo pacman -S mpv`
+  - macOS: `brew install mpv`
 - An [Audiobookshelf](https://www.audiobookshelf.org/) server
+
+pine does not load the mpv config files. The options in `mpv.conf` do not apply.
 
 ## Installation
 
@@ -129,7 +134,7 @@ internal/
   spruce/       spruce packages (app, buildinfo, config, jellyfin, screens)
   logger/       Shared: file-based structured logging
   mpris/        Shared: MPRIS D-Bus adapter for media-key integration
-  player/       Shared: mpv IPC wrapper
+  player/       Shared: libmpv player
   ui/           Shared: styles, formatting, components
 ```
 

@@ -173,8 +173,7 @@ func TestDisablingRepeatCancelsActiveDownload(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("download did not start")
 	}
-	updated, _ := m.Update(queue.QueueActionMsg{Action: "repeat_track", Index: 0, TrackID: "one"})
-	m = updated.(*Model)
+	m.Update(queue.QueueActionMsg{Action: "repeat_track", Index: 0, TrackID: "one"})
 	select {
 	case <-cancelled:
 	case <-time.After(2 * time.Second):

@@ -19,14 +19,21 @@ interface and [mpv](https://mpv.io/) for audio playback.
 - Report playback state and progress to Jellyfin
 - MPRIS media controls through the D-Bus session bus
 - Configurable playback speed, seek interval, keybindings, and colors
-- Sleep timer and automatic mpv process cleanup
+- Sleep timer
 
 ## Requirements
 
 - Go 1.26.4 or newer for source installation
-- `mpv` installed and available in `PATH`
+- libmpv, the library of mpv 0.34 or later. The `mpv` program is not necessary.
+  - Debian and Ubuntu: `sudo apt install libmpv2`. On Ubuntu 22.04 the package
+    is `libmpv1`.
+  - Arch: `sudo pacman -S mpv`
+  - macOS: `brew install mpv`
 - A Jellyfin account with at least one music library
 - A Unix-like operating system
+
+spruce does not load the mpv config files. The options in `mpv.conf` do not
+apply.
 
 Linux is the primary platform. macOS cross-compiles, but MPRIS requires a D-Bus
 session and is primarily useful on Linux. Windows is not currently supported.
@@ -164,7 +171,7 @@ internal/spruce/app/       root model, navigation, queue, playback lifecycle
 internal/spruce/jellyfin/  Jellyfin API client and data types
 internal/spruce/screens/   login, library, playlist, queue, metadata editor
 internal/mpris/            shared D-Bus MPRIS adapter and bridge
-internal/player/           shared mpv process and IPC control
+internal/player/           shared libmpv player
 internal/ui/               shared styles and components
 ```
 
