@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -288,7 +289,8 @@ func TestEnsureExistsCreatesDefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected config file: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
+	// Windows has no Unix file modes.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("expected mode 0600, got %o", info.Mode().Perm())
 	}
 

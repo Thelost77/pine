@@ -3,6 +3,7 @@ package logger
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -35,12 +36,16 @@ func TestInitCreatesPrivateLogFileNamedAfterApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat log file: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("log file mode = %o, want 600", perm)
-	}
 	dirInfo, err := os.Stat(dir)
 	if err != nil {
 		t.Fatalf("stat log directory: %v", err)
+	}
+	// Windows has no Unix file modes.
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("log file mode = %o, want 600", perm)
 	}
 	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
 		t.Errorf("log directory mode = %o, want 700", perm)

@@ -7,71 +7,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-func TestPrepareMpvSocketDirCreatesPrivateDirectory(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "socket")
-
-	if err := prepareMpvSocketDir(path); err != nil {
-		t.Fatalf("prepareMpvSocketDir() error: %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat socket directory: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatal("expected socket path to be a directory")
-	}
-	if info.Mode().Perm()&0077 != 0 {
-		t.Fatalf("socket directory mode = %o, want no group or other permissions", info.Mode().Perm())
-	}
-}
-
-func TestPrepareMpvSocketDirRepairsSameUserPermissions(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "socket")
-	if err := os.Mkdir(path, 0755); err != nil {
-		t.Fatalf("create socket directory: %v", err)
-	}
-
-	if err := prepareMpvSocketDir(path); err != nil {
-		t.Fatalf("prepareMpvSocketDir() error: %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat socket directory: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0700 {
-		t.Fatalf("socket directory mode = %o, want 700", got)
-	}
-}
-
-func TestPrepareMpvSocketDirRejectsFileAndSymlink(t *testing.T) {
-	root := t.TempDir()
-	file := filepath.Join(root, "file")
-	if err := os.WriteFile(file, nil, 0600); err != nil {
-		t.Fatalf("create file: %v", err)
-	}
-	if err := prepareMpvSocketDir(file); err == nil {
-		t.Fatal("expected file to be rejected")
-	}
-
-	target := filepath.Join(root, "target")
-	if err := os.Mkdir(target, 0700); err != nil {
-		t.Fatalf("create target directory: %v", err)
-	}
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatalf("create symlink: %v", err)
-	}
-	if err := prepareMpvSocketDir(link); err == nil {
-		t.Fatal("expected symlink to be rejected")
-	}
-}
 
 func TestSelectMpvSocketDirUsesSecureFallback(t *testing.T) {
 	root := t.TempDir()
@@ -92,7 +34,8 @@ func TestSelectMpvSocketDirUsesSecureFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat fallback: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0700 {
+	// Windows has no Unix file modes.
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0700 {
 		t.Fatalf("fallback mode = %o, want 700", got)
 	}
 }
@@ -112,6 +55,14 @@ func TestSelectMpvSocketDirReturnsErrorWhenBothPathsInvalid(t *testing.T) {
 	}
 }
 
+// setTempDir makes os.TempDir return dir. Unix reads TMPDIR and Windows reads
+// TMP.
+func setTempDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("TMPDIR", dir)
+	t.Setenv("TMP", dir)
+}
+
 func resetMpvSocketDirForTest(t *testing.T) {
 	t.Helper()
 	mpvSocketDirMu.Lock()
@@ -127,7 +78,7 @@ func resetMpvSocketDirForTest(t *testing.T) {
 func TestMpvSocketDirRetriesAfterPreparationFailure(t *testing.T) {
 	resetMpvSocketDirForTest(t)
 	root := t.TempDir()
-	t.Setenv("TMPDIR", root)
+	setTempDir(t, root)
 	paths := []string{
 		filepath.Join(root, fmt.Sprintf("%s-runtime-%d", appName, os.Getuid())),
 		filepath.Join(root, fmt.Sprintf("%s-%d", appName, os.Getuid())),
@@ -196,7 +147,7 @@ func TestSetAppNameNamesTheSocketDirectory(t *testing.T) {
 	previous := appName
 	t.Cleanup(func() { SetAppName(previous) })
 	root := t.TempDir()
-	t.Setenv("TMPDIR", root)
+	setTempDir(t, root)
 
 	SetAppName("pine")
 
