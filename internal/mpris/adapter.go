@@ -3,12 +3,29 @@ package mpris
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
-// RootAdapter implements types.OrgMprisMediaPlayer2Adapter with static values.
+// PlaybackStatus is a value of the MPRIS PlaybackStatus property.
+type PlaybackStatus string
+
+const (
+	StatusPlaying PlaybackStatus = "Playing"
+	StatusPaused  PlaybackStatus = "Paused"
+	StatusStopped PlaybackStatus = "Stopped"
+)
+
+// Metadata is the metadata of the current track.
+type Metadata struct {
+	TrackID dbus.ObjectPath
+	Length  time.Duration
+	Title   string
+	Artist  []string
+}
+
+// RootAdapter supplies the org.mpris.MediaPlayer2 interface with static values.
 // Name is the app name that MPRIS clients see.
 type RootAdapter struct {
 	Name string
@@ -24,7 +41,7 @@ func (r RootAdapter) SupportedUriSchemes() ([]string, error) { return nil, nil }
 func (r RootAdapter) SupportedMimeTypes() ([]string, error)  { return nil, nil }
 func (r RootAdapter) DesktopEntry() (string, error)          { return r.Name, nil }
 
-// PlayerAdapter implements types.OrgMprisMediaPlayer2PlayerAdapter using closures.
+// PlayerAdapter supplies the org.mpris.MediaPlayer2.Player interface using closures.
 // Each method field is a closure that reads from a ModelAccessor.
 type PlayerAdapter struct {
 	OnNext           func() error
@@ -33,13 +50,13 @@ type PlayerAdapter struct {
 	OnPlayPause      func() error
 	OnStop           func() error
 	OnPlay           func() error
-	OnSeek           func(offset types.Microseconds) error
-	OnSetPosition    func(trackId string, position types.Microseconds) error
+	OnSeek           func(offset time.Duration) error
+	OnSetPosition    func(trackId string, position time.Duration) error
 	OnOpenUri        func(uri string) error
-	OnPlaybackStatus func() (types.PlaybackStatus, error)
+	OnPlaybackStatus func() (PlaybackStatus, error)
 	OnRate           func() (float64, error)
 	OnSetRate        func(rate float64) error
-	OnMetadata       func() (types.Metadata, error)
+	OnMetadata       func() (Metadata, error)
 	OnVolume         func() (float64, error)
 	OnSetVolume      func(vol float64) error
 	OnPosition       func() (int64, error)
@@ -53,32 +70,32 @@ type PlayerAdapter struct {
 	OnCanControl     func() (bool, error)
 }
 
-func (p PlayerAdapter) Next() error                          { return p.OnNext() }
-func (p PlayerAdapter) Previous() error                      { return p.OnPrevious() }
-func (p PlayerAdapter) Pause() error                         { return p.OnPause() }
-func (p PlayerAdapter) PlayPause() error                     { return p.OnPlayPause() }
-func (p PlayerAdapter) Stop() error                          { return p.OnStop() }
-func (p PlayerAdapter) Play() error                          { return p.OnPlay() }
-func (p PlayerAdapter) Seek(offset types.Microseconds) error { return p.OnSeek(offset) }
-func (p PlayerAdapter) SetPosition(trackId string, position types.Microseconds) error {
+func (p PlayerAdapter) Next() error                     { return p.OnNext() }
+func (p PlayerAdapter) Previous() error                 { return p.OnPrevious() }
+func (p PlayerAdapter) Pause() error                    { return p.OnPause() }
+func (p PlayerAdapter) PlayPause() error                { return p.OnPlayPause() }
+func (p PlayerAdapter) Stop() error                     { return p.OnStop() }
+func (p PlayerAdapter) Play() error                     { return p.OnPlay() }
+func (p PlayerAdapter) Seek(offset time.Duration) error { return p.OnSeek(offset) }
+func (p PlayerAdapter) SetPosition(trackId string, position time.Duration) error {
 	return p.OnSetPosition(trackId, position)
 }
-func (p PlayerAdapter) OpenUri(uri string) error                      { return p.OnOpenUri(uri) }
-func (p PlayerAdapter) PlaybackStatus() (types.PlaybackStatus, error) { return p.OnPlaybackStatus() }
-func (p PlayerAdapter) Rate() (float64, error)                        { return p.OnRate() }
-func (p PlayerAdapter) SetRate(rate float64) error                    { return p.OnSetRate(rate) }
-func (p PlayerAdapter) Metadata() (types.Metadata, error)             { return p.OnMetadata() }
-func (p PlayerAdapter) Volume() (float64, error)                      { return p.OnVolume() }
-func (p PlayerAdapter) SetVolume(vol float64) error                   { return p.OnSetVolume(vol) }
-func (p PlayerAdapter) Position() (int64, error)                      { return p.OnPosition() }
-func (p PlayerAdapter) MinimumRate() (float64, error)                 { return p.OnMinimumRate() }
-func (p PlayerAdapter) MaximumRate() (float64, error)                 { return p.OnMaximumRate() }
-func (p PlayerAdapter) CanGoNext() (bool, error)                      { return p.OnCanGoNext() }
-func (p PlayerAdapter) CanGoPrevious() (bool, error)                  { return p.OnCanGoPrevious() }
-func (p PlayerAdapter) CanPlay() (bool, error)                        { return p.OnCanPlay() }
-func (p PlayerAdapter) CanPause() (bool, error)                       { return p.OnCanPause() }
-func (p PlayerAdapter) CanSeek() (bool, error)                        { return p.OnCanSeek() }
-func (p PlayerAdapter) CanControl() (bool, error)                     { return p.OnCanControl() }
+func (p PlayerAdapter) OpenUri(uri string) error                { return p.OnOpenUri(uri) }
+func (p PlayerAdapter) PlaybackStatus() (PlaybackStatus, error) { return p.OnPlaybackStatus() }
+func (p PlayerAdapter) Rate() (float64, error)                  { return p.OnRate() }
+func (p PlayerAdapter) SetRate(rate float64) error              { return p.OnSetRate(rate) }
+func (p PlayerAdapter) Metadata() (Metadata, error)             { return p.OnMetadata() }
+func (p PlayerAdapter) Volume() (float64, error)                { return p.OnVolume() }
+func (p PlayerAdapter) SetVolume(vol float64) error             { return p.OnSetVolume(vol) }
+func (p PlayerAdapter) Position() (int64, error)                { return p.OnPosition() }
+func (p PlayerAdapter) MinimumRate() (float64, error)           { return p.OnMinimumRate() }
+func (p PlayerAdapter) MaximumRate() (float64, error)           { return p.OnMaximumRate() }
+func (p PlayerAdapter) CanGoNext() (bool, error)                { return p.OnCanGoNext() }
+func (p PlayerAdapter) CanGoPrevious() (bool, error)            { return p.OnCanGoPrevious() }
+func (p PlayerAdapter) CanPlay() (bool, error)                  { return p.OnCanPlay() }
+func (p PlayerAdapter) CanPause() (bool, error)                 { return p.OnCanPause() }
+func (p PlayerAdapter) CanSeek() (bool, error)                  { return p.OnCanSeek() }
+func (p PlayerAdapter) CanControl() (bool, error)               { return p.OnCanControl() }
 
 // NewPlayerAdapter creates a PlayerAdapter whose closures read from the accessor.
 // name is the app name used in track object paths.
@@ -94,31 +111,29 @@ func NewPlayerAdapter(name string, accessor func() ModelAccessor, actions Player
 		OnSeek:        actions.Seek,
 		OnSetPosition: actions.SetPosition,
 		OnOpenUri:     func(string) error { return nil },
-		OnPlaybackStatus: func() (types.PlaybackStatus, error) {
+		OnPlaybackStatus: func() (PlaybackStatus, error) {
 			a := accessor()
 			if a.IsPlaying() {
-				return types.PlaybackStatusPlaying, nil
+				return StatusPlaying, nil
 			}
 			if a.IsPaused() {
-				return types.PlaybackStatusPaused, nil
+				return StatusPaused, nil
 			}
-			return types.PlaybackStatusStopped, nil
+			return StatusStopped, nil
 		},
 		OnRate:    func() (float64, error) { return accessor().PlayerSpeed(), nil },
 		OnSetRate: actions.SetRate,
-		OnMetadata: func() (types.Metadata, error) {
+		OnMetadata: func() (Metadata, error) {
 			a := accessor()
 			title := a.CurrentTitle()
 			if title == "" {
-				return types.Metadata{
-					TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/NoTrack"),
+				return Metadata{
+					TrackID: dbus.ObjectPath("/org/mpris/MediaPlayer2/NoTrack"),
 				}, nil
 			}
-			trackID := trackPath(name, a.CurrentItemID())
-			durationMicro := types.Microseconds(a.PlayerDuration() * 1_000_000)
-			return types.Metadata{
-				TrackId: trackID,
-				Length:  durationMicro,
+			return Metadata{
+				TrackID: trackPath(name, a.CurrentItemID()),
+				Length:  time.Duration(a.PlayerDuration() * float64(time.Second)),
 				Title:   title,
 				Artist:  a.CurrentAuthors(),
 			}, nil
@@ -156,8 +171,8 @@ type PlayerActions struct {
 	PlayPause   func() error
 	Stop        func() error
 	Play        func() error
-	Seek        func(offset types.Microseconds) error
-	SetPosition func(trackId string, position types.Microseconds) error
+	Seek        func(offset time.Duration) error
+	SetPosition func(trackId string, position time.Duration) error
 	SetRate     func(rate float64) error
 	SetVolume   func(vol int) error
 }

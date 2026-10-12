@@ -63,6 +63,8 @@ git diff --check
 go mod verify
 # The player tests need libmpv. Without this variable they skip if it is absent.
 export PINE_REQUIRE_LIBMPV=1
+# The MPRIS server test needs dbus-daemon. Without this variable it skips if it is absent.
+export PINE_REQUIRE_DBUS=1
 go test ./... -count=1
 go test -race ./... -count=1
 go vet ./...

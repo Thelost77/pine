@@ -3,6 +3,7 @@ package mpris
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestBridgeMapsPlaybackActionsToExplicitMessages(t *testing.T) {
@@ -75,7 +76,7 @@ func TestBridgeSetPositionAcceptsThePublishedTrackID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Metadata() error: %v", err)
 	}
-	if err := bridge.player.SetPosition(string(meta.TrackId), 30_000_000); err != nil {
+	if err := bridge.player.SetPosition(string(meta.TrackID), 30*time.Second); err != nil {
 		t.Fatalf("SetPosition() error: %v", err)
 	}
 
@@ -105,7 +106,7 @@ func TestBridgeSetPositionIgnoresOtherTracks(t *testing.T) {
 			bridge := NewBridge(nil, "spruce")
 			bridge.Bind(accessorFn(tt.accessor), 0)
 
-			if err := bridge.player.SetPosition(tt.trackID, 30_000_000); err != nil {
+			if err := bridge.player.SetPosition(tt.trackID, 30*time.Second); err != nil {
 				t.Fatalf("SetPosition() error: %v", err)
 			}
 

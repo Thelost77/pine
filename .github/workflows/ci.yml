@@ -37,6 +37,9 @@ jobs:
       # The player tests fail if libmpv is absent. Without this variable they
       # skip.
       PINE_REQUIRE_LIBMPV: "1"
+      # The MPRIS server test fails on Linux if dbus-daemon is absent. Without
+      # this variable it skips.
+      PINE_REQUIRE_DBUS: "1"
     steps:
       - uses: actions/checkout@v7
 

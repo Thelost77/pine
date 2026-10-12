@@ -11,7 +11,6 @@ require (
 	github.com/ebitengine/purego v0.11.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/muesli/termenv v0.16.0
-	github.com/quarckster/go-mpris-server v1.0.3
 	github.com/sahilm/fuzzy v0.1.1
 	golang.org/x/sys v0.42.0
 	golang.org/x/text v0.3.8
