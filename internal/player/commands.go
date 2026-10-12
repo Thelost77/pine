@@ -17,12 +17,12 @@ type PositionMsg struct {
 	Generation uint64 // ties this tick to a specific play session
 }
 
-// PlayerEndMsg is emitted when mpv broadcasts an end-file event, indicating the
-// current file finished (eof) or failed to load/decode (error/redirect). The
+// PlayerEndMsg is emitted when the current playback ends: the file finished
+// (eof), failed to load or decode (error), or the player stopped (quit). The
 // app uses the Reason to decide whether to auto-advance the queue.
 type PlayerEndMsg struct {
 	Generation uint64
-	Reason     string // "eof" | "error" | "redirect"
+	Reason     string // "eof" | "error" | "quit" | "stop" | "redirect" | "unknown"
 	Err        error
 }
 
@@ -84,7 +84,7 @@ func SetVolumeCmd(p Player, vol int) tea.Cmd {
 	}
 }
 
-// PlayerReadyMsg signals that mpv has been launched and connected.
+// PlayerReadyMsg signals that mpv has accepted the file.
 type PlayerReadyMsg struct {
 	Generation uint64
 }

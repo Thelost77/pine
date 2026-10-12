@@ -335,7 +335,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 		}
 
 		if errors.Is(msg.Err, player.ErrPropertyUnavailable) {
-			// IPC is up; mpv has not finished opening or seeking yet.
+			// The player is up; mpv has not finished opening or seeking yet.
 			// Keep polling. Do not treat this as a dead player.
 			m.propertyUnavailableCount++
 			shift := m.propertyUnavailableCount
