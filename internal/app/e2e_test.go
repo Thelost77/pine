@@ -236,13 +236,9 @@ func TestE2E_DetailToPlayback(t *testing.T) {
 
 	mp.mu.Lock()
 	launched := mp.launched
-	connected := mp.connected
 	mp.mu.Unlock()
 	if !launched {
 		t.Error("mock player should have been launched")
-	}
-	if !connected {
-		t.Error("mock player should have been connected")
 	}
 
 	// Feed PlayerReadyMsg → returns TickCmd + syncTickCmd batch

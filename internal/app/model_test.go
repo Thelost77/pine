@@ -27,28 +27,20 @@ import (
 
 // mockPlayer implements player.Player for testing.
 type mockPlayer struct {
-	mu         sync.Mutex
-	launched   bool
-	connected  bool
-	quit       bool
-	position   float64
-	duration   float64
-	paused     bool
-	launchErr  error
-	connectErr error
+	mu        sync.Mutex
+	launched  bool
+	quit      bool
+	position  float64
+	duration  float64
+	paused    bool
+	launchErr error
 }
 
-func (p *mockPlayer) Launch(url, startTime, socketPath string, paused bool, httpHeaders []string, volume int) error {
+func (p *mockPlayer) Launch(url, startTime string, paused bool, httpHeaders []string, volume int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launched = true
 	return p.launchErr
-}
-func (p *mockPlayer) Connect() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.connected = true
-	return p.connectErr
 }
 func (p *mockPlayer) GetPosition() (float64, error) {
 	p.mu.Lock()
@@ -2062,7 +2054,7 @@ func TestPlayerLaunchErrShowsBanner(t *testing.T) {
 	m.chapterOverlayVisible = true
 	m.chapterOverlayIndex = 1
 
-	result, cmd := m.Update(player.PlayerLaunchErrMsg{Err: fmt.Errorf("mpv not found")})
+	result, cmd := m.Update(player.PlayerLaunchErrMsg{Err: fmt.Errorf("libmpv not found: install libmpv2")})
 	rm := result.(Model)
 
 	if rm.sessionID != "" {
@@ -2081,11 +2073,8 @@ func TestPlayerLaunchErrShowsBanner(t *testing.T) {
 		t.Error("launch error should show banner")
 	}
 	view := rm.View()
-	if !containsString(view, "mpv not found") {
-		t.Error("view should contain mpv error")
-	}
-	if !containsString(view, "Install mpv") {
-		t.Error("view should contain install hint for mpv errors")
+	if !containsString(view, "libmpv not found: install libmpv2") {
+		t.Error("view should contain the launch error with its install hint")
 	}
 	if cmd == nil {
 		t.Error("expected auto-dismiss cmd")
@@ -2229,7 +2218,7 @@ func TestNewStartsMpvWithForceSeekable(t *testing.T) {
 		t.Fatalf("New uses %T, want *player.Mpv", m.mpv)
 	}
 	if !mpv.ForceSeekable {
-		t.Error("pine must start mpv with --force-seekable=yes for long streams")
+		t.Error("pine must start mpv with force-seekable=yes for long streams")
 	}
 }
 

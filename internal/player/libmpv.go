@@ -16,7 +16,8 @@ const (
 	mpvFormatFlag   = 3
 	mpvFormatDouble = 5
 
-	mpvEventEndFile = 7
+	mpvEventShutdown = 1
+	mpvEventEndFile  = 7
 
 	mpvErrorPropertyUnavailable = -10
 )
