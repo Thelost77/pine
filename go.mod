@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/dexterlb/mpvipc v0.0.0-20241005113212-7cdefca0e933
+	github.com/ebitengine/purego v0.11.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/muesli/termenv v0.16.0
 	github.com/quarckster/go-mpris-server v1.0.3
