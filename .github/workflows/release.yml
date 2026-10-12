@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    name: Binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        shell: bash
+        run: |
+          # The output is outside the checkout. Go adds "+dirty" to the
+          # version of a binary if the checkout contains an untracked file.
+          mkdir -p "$RUNNER_TEMP/dist"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            bin="$RUNNER_TEMP/bin/${goos}_${goarch}"
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 \
+              go build -trimpath -ldflags='-s -w' -o "$bin/" . ./cmd/spruce
+            for program in pine spruce; do
+              package=.
+              file=$program
+              if [[ $program == spruce ]]; then package=./cmd/spruce; fi
+              if [[ $goos == windows ]]; then file=$program.exe; fi
+
+              # Each archive contains the license texts of Go and of the
+              # modules that the program links.
+              stage="$RUNNER_TEMP/stage/${program}_${goos}_${goarch}"
+              mkdir -p "$stage/licenses/go"
+              cp "$bin/$file" LICENSE "$stage/"
+              cp "$(go env GOROOT)/LICENSE" "$stage/licenses/go/"
+              modules="$(GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go list -deps \
+                -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Dir}}{{end}}{{end}}' "$package" | sort -u)"
+              while read -r module dir; do
+                dest="$stage/licenses/$module"
+                mkdir -p "$dest"
+                find "$dir" -maxdepth 1 -type f \
+                  \( -iname '*licen[sc]e*' -o -iname 'copying*' -o -iname 'notice*' \) -exec cp {} "$dest/" \;
+                if [[ -z "$(ls -A "$dest")" ]]; then
+                  # A module without a license file states its license in its README.
+                  find "$dir" -maxdepth 1 -type f -iname 'readme*' -exec cp {} "$dest/" \;
+                fi
+                if [[ -z "$(ls -A "$dest")" ]]; then
+                  echo "no license text for $module" >&2
+                  exit 1
+                fi
+              done <<< "$modules"
+
+              archive="$RUNNER_TEMP/dist/${program}_${TAG}_${goos}_${goarch}"
+              if [[ $goos == windows ]]; then
+                (cd "$stage" && zip -q -r "$archive.zip" "$file" LICENSE licenses)
+              else
+                tar -czf "$archive.tar.gz" -C "$stage" "$file" LICENSE licenses
+              fi
+            done
+          done
+
+      - name: Check the version
+        run: |
+          got="$("$RUNNER_TEMP/bin/linux_amd64/spruce" --version)"
+          if [[ $got != "spruce $TAG" ]]; then
+            echo "version is \"$got\", want \"spruce $TAG\"" >&2
+            exit 1
+          fi
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/dist/* --clobber

@@ -47,6 +47,11 @@ go install github.com/Thelost77/pine/cmd/spruce@latest
 
 Ensure the Go binary directory, normally `~/go/bin`, is in `PATH`.
 
+Each release from v0.8.0 also has archives with a binary for Linux, macOS, and
+Windows. Download an archive from the
+[release page](https://github.com/Thelost77/pine/releases). The binary needs
+libmpv. See "Requirements".
+
 To build the current checkout:
 
 ```sh
@@ -192,6 +197,9 @@ release script:
 The script verifies the repository, creates and pushes the exact annotated tag,
 and publishes a GitHub Release. It can safely retry release creation after a
 partial failure.
+
+The `Release` workflow then builds the two programs for Linux, macOS, and
+Windows. It attaches the archives to the GitHub Release.
 
 ## Related project
 
