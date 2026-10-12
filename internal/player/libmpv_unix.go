@@ -15,13 +15,13 @@ func openLibrary(name string) (uintptr, error) {
 // libmpvCandidates returns the library names to try, in order.
 func libmpvCandidates() []string {
 	if runtime.GOOS == "darwin" {
-		// The default search of macOS does not include the Homebrew directory
-		// of Apple Silicon, so the Homebrew and MacPorts paths come first.
+		// The Homebrew and MacPorts paths. A bare name is not in the list:
+		// its search does not include the Homebrew directory of Apple
+		// Silicon, and it does include the current directory.
 		return []string{
 			"/opt/homebrew/lib/libmpv.2.dylib",
 			"/usr/local/lib/libmpv.2.dylib",
 			"/opt/local/lib/libmpv.2.dylib",
-			"libmpv.2.dylib",
 		}
 	}
 	return []string{"libmpv.so.2", "libmpv.so.1"}
