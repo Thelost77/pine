@@ -143,7 +143,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - `internal/screens/metadataedit/model_test.go` for the metadata editor
 - Screen models have individual `*_test.go` files
 - `internal/player/libmpv_test.go`, `mpv_test.go`, and `group_test.go` play audio through the real libmpv with `ao=null`. They skip if libmpv is absent. With `PINE_REQUIRE_LIBMPV=1` they fail instead. `scripts/release.sh` sets that variable.
-- `.github/workflows/ci.yml` runs `go vet` and the tests on Ubuntu 22.04, 24.04, and 26.04, on macOS (Apple Silicon and Intel), and on Windows. A test that asserts a Unix file mode must not make that assertion on Windows.
+- `.github/workflows/ci.yml` runs `go vet` and the tests on Ubuntu 22.04, 24.04, and 26.04, on macOS (Apple Silicon and Intel), and on Windows. It runs `golangci-lint` v2.14.0 on Ubuntu 24.04, and the job fails on each issue. A test that asserts a Unix file mode must not make that assertion on Windows.
 
 ## Logging
 
