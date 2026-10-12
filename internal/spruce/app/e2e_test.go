@@ -161,7 +161,7 @@ func newMockJellyfin(t *testing.T, totalTracks int) *mockJellyfin {
 	})
 
 	mj.Server = httptest.NewServer(mux)
-	t.Cleanup(mj.Server.Close)
+	t.Cleanup(mj.Close)
 	return mj
 }
 
@@ -373,7 +373,7 @@ func TestE2E(t *testing.T) {
 		m.playerState.Position = 42
 
 		m, cmd := update(m, keyMsg("q"))
-		m, _ = execCmd(m, cmd)
+		execCmd(m, cmd)
 
 		stopped := mj.stoppedCalls()
 		if len(stopped) != 1 {

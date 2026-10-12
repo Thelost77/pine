@@ -53,7 +53,7 @@ func (g *Group) Launch(ctx context.Context, paths []string, volume int) error {
 
 	g.opMu.Lock()
 	defer g.opMu.Unlock()
-	g.quitLocked()
+	_ = g.quitLocked()
 
 	players := make([]groupMember, 0, len(paths))
 	cleanup := func() {

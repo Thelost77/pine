@@ -13,7 +13,6 @@ import (
 
 var (
 	instance *slog.Logger
-	logFile  *os.File
 	logPath  string
 	appName  string
 	once     sync.Once
@@ -53,7 +52,6 @@ func Init(dir, name string) func() {
 			_ = os.Chmod(path, 0o600)
 			_ = lockFile(f)
 		}
-		logFile = f
 		instance = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 		}))

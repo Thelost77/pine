@@ -14,7 +14,6 @@ func resetForTest(t *testing.T) {
 	reset := func() {
 		once = sync.Once{}
 		instance = nil
-		logFile = nil
 		logPath = ""
 		appName = ""
 	}
