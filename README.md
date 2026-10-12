@@ -115,8 +115,8 @@ One tag releases pine and spruce together. Write the release notes for the two p
 Commit the notes and push them to `main`. Then use the release script.
 
 ```sh
-${EDITOR:-vi} docs/releases/v0.6.0.md
-./scripts/release.sh v0.6.0
+${EDITOR:-vi} docs/releases/v0.7.0.md
+./scripts/release.sh v0.7.0
 ```
 
 ## Architecture
