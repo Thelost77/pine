@@ -369,7 +369,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.loading = true
 				m.loadingVisible = false
 				m.refreshListItems()
-				
+
 				cmds := []tea.Cmd{m.fetchLibraryItemsCmd(0, pageLimit), m.loadingRevealCmd()}
 				if m.searchCache != nil {
 					cmds = append(cmds, m.searchCache.PrebuildCmd(m.libraryID, m.SelectedLibraryMediaType()))
@@ -623,7 +623,7 @@ func (m *Model) ReloadCmd() tea.Cmd {
 	m.loadingVisible = false
 	m.loadingGen++
 	m.refreshListItems()
-	
+
 	cmds := []tea.Cmd{
 		m.fetchLibraryItemsCmd(m.page, pageLimit),
 		m.loadingRevealCmd(),

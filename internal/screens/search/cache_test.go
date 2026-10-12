@@ -364,13 +364,13 @@ func TestBuildSnapshotPagination(t *testing.T) {
 		if r.URL.Path != "/api/libraries/lib-pagi/items" && r.URL.Path != "/api/libraries/lib-pagi/series" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		
+
 		if r.URL.Path == "/api/libraries/lib-pagi/series" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":50,"page":0}`))
 			return
 		}
-		
+
 		listCalls++
 
 		// Query params: limit=50, page=...
@@ -401,7 +401,7 @@ func TestBuildSnapshotPagination(t *testing.T) {
 	defer srv.Close()
 
 	c := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
-	
+
 	err := c.Prepare(context.Background(), "lib-pagi", "book")
 	if err != nil {
 		t.Fatalf("failed to prepare cache: %v", err)

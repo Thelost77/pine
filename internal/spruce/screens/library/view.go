@@ -19,4 +19,3 @@ func (m Model) View() string {
 		return m.albumList.View()
 	}
 }
-

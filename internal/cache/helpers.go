@@ -126,7 +126,6 @@ func (s *Store) PutBookmarks(itemID string, v []abs.Bookmark, ttl time.Duration)
 
 // RecentEpisodes -------------------------------------------------------------
 
-
 func (s *Store) GetRecentEpisodes(libID string, limit int) ([]abs.LibraryItem, bool, error) {
 	var v []abs.LibraryItem
 	hit, err := s.Get("recent-episodes:"+libID+":"+strconv.Itoa(limit), &v)
