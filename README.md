@@ -168,8 +168,8 @@ One tag releases pine and spruce together. Write the release notes for the two p
 Commit the notes and push them to `main`. Then use the release script.
 
 ```sh
-${EDITOR:-vi} docs/releases/v0.7.0.md
-./scripts/release.sh v0.7.0
+${EDITOR:-vi} docs/releases/v0.8.0.md
+./scripts/release.sh v0.8.0
 ```
 
 When the script publishes the GitHub Release, the `Release` workflow builds the two programs for Linux, macOS, and Windows. It attaches one archive for each program and each system to the release.
