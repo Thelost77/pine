@@ -197,6 +197,65 @@ func TestLibmpvHandleReportsEndOfFile(t *testing.T) {
 	}
 }
 
+// collectLogMessages loads url with the test Authorization header and returns
+// the log texts of the mpv messages for that load.
+func collectLogMessages(t *testing.T, level, url string) []string {
+	t.Helper()
+	h := newTestHandle(t)
+	if err := mpvError(mpvRequestLogMessages(uintptr(h), level), "request log messages"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.command("change-list", "http-header-fields", "append", testAuthHeader); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.command("loadfile", url); err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	ended := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		switch event := mpvWaitEvent(uintptr(h), 0.2); event.id {
+		case mpvEventLogMessage:
+			texts = append(texts, (*mpvLogMessage)(event.data).logText())
+		case mpvEventEndFile:
+			// mpv gives other events before log messages, so messages of
+			// this load can still follow.
+			ended = true
+		case 0:
+			if ended {
+				return texts
+			}
+		}
+	}
+	t.Fatal("no end-file event")
+	return nil
+}
+
+func TestLibmpvHandleLogMessagesGiveTheCauseWithoutSecrets(t *testing.T) {
+	// The server rejects each request, so mpv sends the header and then
+	// reports an error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	texts := collectLogMessages(t, mpvLogLevel, srv.URL+"/book.wav?token=query-secret")
+
+	all := strings.Join(texts, "\n")
+	if !strings.Contains(all, "404") {
+		t.Errorf("the log messages do not give the HTTP status: %q", texts)
+	}
+	if !strings.Contains(all, "/book.wav") {
+		t.Errorf("the log messages do not name the stream: %q", texts)
+	}
+	for _, secret := range []string{testAuthValue, "query-secret"} {
+		if strings.Contains(all, secret) {
+			t.Errorf("the log messages contain the secret %q: %q", secret, texts)
+		}
+	}
+}
+
 func TestLibmpvHandleReportsLoadError(t *testing.T) {
 	srv := newAudioServer(t)
 	h := newTestHandle(t)

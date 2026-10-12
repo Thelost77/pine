@@ -211,6 +211,11 @@ func (m *Mpv) start(h mpvHandle, url, startTime string, paused bool, httpHeaders
 	if err := mpvError(mpvInitialize(uintptr(h)), "initialize"); err != nil {
 		return err
 	}
+	// mpv sends its warnings and errors as events, and watch writes them to
+	// the app log. They are the only detail on a stream that fails to load.
+	if err := mpvError(mpvRequestLogMessages(uintptr(h), mpvLogLevel), "request log messages"); err != nil {
+		return err
+	}
 	// A header value can contain a comma, so each header is one list item.
 	for _, header := range httpHeaders {
 		if err := h.command("change-list", "http-header-fields", "append", header); err != nil {
@@ -237,6 +242,13 @@ func (p *playback) watch(h mpvHandle) {
 	for {
 		// The event is valid only until the next mpv_wait_event call.
 		switch event := mpvWaitEvent(uintptr(h), -1); event.id {
+		case mpvEventLogMessage:
+			message := (*mpvLogMessage)(event.data)
+			logger.Warn("mpv message",
+				"level", cString(message.level),
+				"prefix", cString(message.prefix),
+				"text", message.logText(),
+			)
 		case mpvEventEndFile:
 			file := (*mpvEndFile)(event.data)
 			reason := endFileReason(file.reason)
