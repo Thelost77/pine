@@ -4,28 +4,37 @@ A terminal user interface for [Audiobookshelf](https://www.audiobookshelf.org/) 
 
 Built with [bubbletea](https://github.com/charmbracelet/bubbletea) and [mpv](https://mpv.io/).
 
-This repository also contains [spruce](docs/spruce/README.md), a terminal music client for Jellyfin.
-One Go module builds the two programs. They share the player, MPRIS, logger, and UI packages.
+## Two programs
 
-<!-- ![Home Screen](assets/home.png) -->
+This repository contains two programs. One Go module builds them, and one release tag covers them. They share the player, MPRIS, logger, and UI packages.
+
+| Program | Server | Install |
+|---------|--------|---------|
+| pine | [Audiobookshelf](https://www.audiobookshelf.org/): audiobooks and podcasts | `go install github.com/Thelost77/pine@latest` |
+| [spruce](docs/spruce/README.md) | [Jellyfin](https://jellyfin.org/): music | `go install github.com/Thelost77/pine/cmd/spruce@latest` |
+
+The remaining sections describe pine. For spruce, see [docs/spruce/README.md](docs/spruce/README.md).
 
 ## Features
 
 - Browse your audiobook and podcast libraries
 - Play audiobooks with chapter navigation and multi-track support
 - Play podcast episodes with progress tracking
+- Captions from VTT sidecar files
+- Playback queue
+- Series browsing, with marks for finished books
 - Persistent local API cache for instant startup and near-instant library switching
 - Fuzzy command-palette search (`Ctrl+P`) across books, podcasts, episodes, and series
 - In-place filtering (`/`) on home, library, and series lists
 - Metadata editor for books and episodes
-- MPRIS media-key support
+- MPRIS media-key support on Linux
 - Bookmarks — create, edit, navigate to, and delete
 - Sleep timer
 - Automatic progress sync every 30 seconds
 - Multiple library support with tab switching
 - Delete books and podcast episodes from the server
 - Keyboard-driven navigation
-- Everforest dark theme
+- Configurable colors and keys, with the Everforest dark theme as the default
 - Session restore — pick up where you left off
 - In-process playback through libmpv — no mpv subprocess
 
@@ -40,6 +49,8 @@ One Go module builds the two programs. They share the player, MPRIS, logger, and
 
 pine does not load the mpv config files. The options in `mpv.conf` do not apply.
 
+Linux is the primary platform. macOS works with mpv from Homebrew. MPRIS needs a D-Bus session, so the media keys work on Linux only. On Windows, the tests pass with `libmpv-2.dll` in the directory of the program, but pine has not run on a Windows machine.
+
 ## Installation
 
 ```sh
@@ -53,7 +64,15 @@ pine                # start the TUI
 pine --clear-cache  # clear local cache and exit
 ```
 
-On first run, you'll be prompted to log in to your Audiobookshelf server. pine stores the server URL, username, and auth token locally in `~/.config/pine/pine.db` for future sessions.
+On first run, you'll be prompted to log in to your Audiobookshelf server.
+
+pine keeps its files in the user config directory. On Linux this is `~/.config/pine`.
+
+| File | Content |
+|------|---------|
+| `pine.db` | The server URL, the username, the auth token, the last session, and the API cache |
+| `config.toml` | The optional configuration |
+| `pine.log` | The log. It shows why a stream did not load. |
 
 ## Common keybindings
 
@@ -88,7 +107,39 @@ Some keys are context-specific.
 
 ## Configuration
 
-Optional config file: `~/.config/pine/config.toml`
+Optional config file: `config.toml` in the config directory. Each key is optional. This example shows the defaults:
+
+```toml
+[player]
+speed = 1.0
+seek_seconds = 10
+
+[keybinds]
+quit = "q"
+back = "esc"
+play_pause = " "
+seek_forward = "l"
+seek_backward = "h"
+next_in_queue = ">"
+speed_up = "+"
+speed_down = "-"
+volume_up = "]"
+volume_down = "["
+next_chapter = "n"
+prev_chapter = "N"
+sleep_timer = "S"
+
+[theme]
+background = "#2b3339"
+foreground = "#d3c6aa"
+accent = "#a7c080"
+error = "#e67e80"
+muted = "#859289"
+selected = "#475258"
+border = "#4f585e"
+warning = "#dbbc7f"
+info = "#7fbbb3"
+```
 
 Pine creates a stable playback identity on first run:
 
@@ -128,6 +179,7 @@ internal/
   abs/          Audiobookshelf API client
   app/          Root model, screen routing, playback lifecycle
   cache/        Persistent API cache store and cached client wrapper
+  captions/     VTT caption parser
   config/       TOML configuration
   db/           SQLite persistence (accounts, last session)
   screens/      Screen models (login, home, library, detail, metadataedit, series, serieslist)
@@ -137,6 +189,19 @@ internal/
   player/       Shared: libmpv player
   ui/           Shared: styles, formatting, components
 ```
+
+## Development
+
+```sh
+go build -o pine .
+go build -o spruce ./cmd/spruce
+gofmt -l .
+go vet ./...
+golangci-lint run
+go test ./... -count=1
+```
+
+A GitHub Actions workflow runs `go vet`, `golangci-lint`, and the tests on Linux, macOS, and Windows for each pull request. The player tests need libmpv. See [AGENTS.md](AGENTS.md) for the package map and the rules.
 
 ## Status
 

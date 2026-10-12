@@ -30,13 +30,14 @@ interface and [mpv](https://mpv.io/) for audio playback.
   - Arch: `sudo pacman -S mpv`
   - macOS: `brew install mpv`
 - A Jellyfin account with at least one music library
-- A Unix-like operating system
 
 spruce does not load the mpv config files. The options in `mpv.conf` do not
 apply.
 
-Linux is the primary platform. macOS cross-compiles, but MPRIS requires a D-Bus
-session and is primarily useful on Linux. Windows is not currently supported.
+Linux is the primary platform. macOS works with mpv from Homebrew. MPRIS needs
+a D-Bus session, so the media keys work on Linux only. On Windows, the tests
+pass with `libmpv-2.dll` in the directory of the program, but spruce has not
+run on a Windows machine.
 
 ## Installation
 
