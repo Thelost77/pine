@@ -14,9 +14,19 @@ go build -o spruce ./cmd/spruce      # build spruce
 go install github.com/Thelost77/pine@latest
 go test ./... -count=1             # run all tests
 go test ./internal/app/... -v      # verbose app tests (includes E2E)
+gofmt -l .                          # list the files that are not formatted
 golangci-lint run                   # linter
 go vet ./...                        # type-check
 ```
+
+## Verify a Change
+
+`gofmt` and `golangci-lint` are part of the development of this repository. Before you finish a change, do these checks. Each check must pass.
+
+1. Use `gofmt -l .`. Make sure that it shows no file. Use `gofmt -w <file>` to format a file.
+2. Use `go vet ./...`.
+3. Use `golangci-lint run`. Make sure that it reports 0 issues. Use version 2.14.0, which is the version in `.github/workflows/ci.yml`.
+4. Use `PINE_REQUIRE_LIBMPV=1 go test ./... -count=1`.
 
 ## Repository Layout
 
