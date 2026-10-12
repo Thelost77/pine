@@ -3,12 +3,14 @@ package player
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -81,6 +83,25 @@ func selectMpvSocketDir(primary, fallback string) (string, error) {
 	} else {
 		return "", fmt.Errorf("prepare mpv socket directories: primary: %w; fallback: %v", err, fallbackErr)
 	}
+}
+
+// ErrClosed reports that the player is gone: mpv exited or the connection is
+// closed.
+var ErrClosed = errors.New("player closed")
+
+// ErrPropertyUnavailable reports that mpv has no value for a property yet, for
+// example while it opens a file or seeks.
+var ErrPropertyUnavailable = errors.New("property unavailable")
+
+// ipcError maps the error text of the IPC library to the typed player errors.
+func ipcError(err error) error {
+	switch text := err.Error(); {
+	case strings.Contains(text, "closed mpv client"):
+		return fmt.Errorf("%w: %v", ErrClosed, err)
+	case strings.Contains(text, "property unavailable"):
+		return fmt.Errorf("%w: %v", ErrPropertyUnavailable, err)
+	}
+	return err
 }
 
 // Player defines the interface for media playback control.
@@ -291,12 +312,12 @@ func (m *Mpv) GetDuration() (float64, error) {
 func (m *Mpv) GetPaused() (bool, error) {
 	conn := m.getConn()
 	if conn == nil || conn.IsClosed() {
-		return false, fmt.Errorf("get pause: mpv connection closed")
+		return false, fmt.Errorf("get pause: %w", ErrClosed)
 	}
 	val, err := conn.Get("pause")
 	if err != nil {
 		logger.Debug("failed to query mpv property", "property", "pause", "err", err)
-		return false, fmt.Errorf("get pause: %w", err)
+		return false, fmt.Errorf("get pause: %w", ipcError(err))
 	}
 	b, ok := val.(bool)
 	if !ok {
@@ -512,12 +533,12 @@ func logMpvExit(pid int, state *os.ProcessState, err error) {
 func (m *Mpv) getFloat(property string) (float64, error) {
 	conn := m.getConn()
 	if conn == nil || conn.IsClosed() {
-		return 0, fmt.Errorf("get %s: mpv connection closed", property)
+		return 0, fmt.Errorf("get %s: %w", property, ErrClosed)
 	}
 	val, err := conn.Get(property)
 	if err != nil {
 		logger.Debug("failed to query mpv property", "property", property, "err", err)
-		return 0, fmt.Errorf("get %s: %w", property, err)
+		return 0, fmt.Errorf("get %s: %w", property, ipcError(err))
 	}
 	switch v := val.(type) {
 	case float64:

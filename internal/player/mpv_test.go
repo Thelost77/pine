@@ -1,6 +1,7 @@
 package player
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -572,6 +573,49 @@ func TestGetPositionError(t *testing.T) {
 	_, err := m.GetPosition()
 	if err == nil {
 		t.Fatal("expected error from GetPosition()")
+	}
+}
+
+func TestGettersReturnTypedErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		conn func() *mockConn
+		want error
+	}{
+		{
+			name: "closed connection",
+			conn: func() *mockConn { mc := newMockConn(); mc.closed = true; return mc },
+			want: ErrClosed,
+		},
+		{
+			name: "connection closes during the call",
+			conn: func() *mockConn {
+				mc := newMockConn()
+				mc.getErr = fmt.Errorf("trying to send command on closed mpv client")
+				return mc
+			},
+			want: ErrClosed,
+		},
+		{
+			name: "property unavailable",
+			conn: func() *mockConn {
+				mc := newMockConn()
+				mc.getErr = fmt.Errorf("mpv error: property unavailable")
+				return mc
+			},
+			want: ErrPropertyUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestMpv(tt.conn())
+			if _, err := m.GetPosition(); !errors.Is(err, tt.want) {
+				t.Errorf("GetPosition() error = %v, want %v", err, tt.want)
+			}
+			if _, err := m.GetPaused(); !errors.Is(err, tt.want) {
+				t.Errorf("GetPaused() error = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 

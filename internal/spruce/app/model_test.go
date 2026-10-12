@@ -107,7 +107,7 @@ func TestAppModel_LifecycleAndMPRIS(t *testing.T) {
 	// Restart and verify mpv's brief EOF-window "property unavailable" does not kill repeat playback.
 	newM, _ = m.startPlaybackAt(0)
 	m = newM.(*Model)
-	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: errors.New("get time-pos: mpv error: property unavailable")}
+	posMsg = player.PositionMsg{Generation: m.playGeneration, Err: fmt.Errorf("get time-pos: %w", player.ErrPropertyUnavailable)}
 	newM, _ = m.Update(posMsg)
 	m = newM.(*Model)
 	if !m.IsPlaying() || m.currentIndex != 0 {

@@ -527,7 +527,7 @@ func TestPlaybackPropertyUnavailableKeepsWaiting(t *testing.T) {
 
 	for i := 0; i < 6; i++ {
 		result, cmd := m.Update(player.PositionMsg{
-			Err:        fmt.Errorf("get time-pos: mpv error: property unavailable"),
+			Err:        fmt.Errorf("get time-pos: %w", player.ErrPropertyUnavailable),
 			Generation: 1,
 		})
 		m = result.(Model)
@@ -625,7 +625,7 @@ func TestPlaybackPositionErrorAtTrackEndRestartsNextTrack(t *testing.T) {
 	m.playGeneration = 1
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -711,7 +711,7 @@ func TestPlaybackPositionErrorNearTrackEndWithinTwoSecondsRestartsNextTrack(t *t
 	m.playGeneration = 1
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -768,7 +768,7 @@ func TestPlaybackPositionErrorAtFinalTrackEndStopsPlayback(t *testing.T) {
 	m.playGeneration = 1
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -849,7 +849,7 @@ func TestPlaybackCompletionStartsNextQueuedItem(t *testing.T) {
 	}}
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -1416,7 +1416,7 @@ func TestPlaybackCompletionSeriesAutoContinue(t *testing.T) {
 	m.playbackLibraryID = "lib-series-lib"
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -1498,7 +1498,7 @@ func TestPlaybackCompletionSeriesLastBookStops(t *testing.T) {
 	m.playbackLibraryID = "lib-series-lib"
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -1579,7 +1579,7 @@ func TestPlaybackCompletionQueueTakesPriorityOverSeries(t *testing.T) {
 	}}
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)
@@ -1642,7 +1642,7 @@ func TestSeriesContinueAPIErrorShowsBanner(t *testing.T) {
 	m.playbackLibraryID = "lib-series-lib"
 
 	result, cmd := m.Update(player.PositionMsg{
-		Err:        fmt.Errorf("get time-pos: trying to send command on closed mpv client"),
+		Err:        fmt.Errorf("get time-pos: %w", player.ErrClosed),
 		Generation: 1,
 	})
 	m = result.(Model)

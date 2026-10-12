@@ -2,9 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/quarckster/go-mpris-server/pkg/types"
@@ -175,7 +175,7 @@ func (m *Model) handlePositionMsg(msg player.PositionMsg) (*Model, tea.Cmd) {
 }
 
 func isMpvPropertyUnavailable(err error) bool {
-	return strings.Contains(err.Error(), "property unavailable")
+	return errors.Is(err, player.ErrPropertyUnavailable)
 }
 
 func authorsEqual(a, b []string) bool {
