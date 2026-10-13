@@ -406,7 +406,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			}
 			interval := 500 * time.Millisecond << shift
 			logger.Debug("mpv properties not ready yet, backing off", "attempt", m.propertyUnavailableCount, "nextTick", interval)
-			return m, tickCmd(m.mpv, m.playGeneration, interval)
+			return m, player.TickAfterCmd(m.mpv, m.playGeneration, interval)
 		}
 		m.propertyUnavailableCount = 0
 
@@ -1158,30 +1158,6 @@ func (m Model) Cleanup() {
 func syncTickCmd() tea.Cmd {
 	return tea.Tick(syncInterval, func(_ time.Time) tea.Msg {
 		return SyncTickMsg{}
-	})
-}
-
-// tickCmd returns a command that polls mpv position after the given interval.
-func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd {
-	return tea.Tick(interval, func(_ time.Time) tea.Msg {
-		pos, posErr := p.GetPosition()
-		dur, durErr := p.GetDuration()
-		paused, pauseErr := p.GetPaused()
-		idle, idleErr := p.GetIdle()
-
-		for _, err := range []error{posErr, durErr, pauseErr, idleErr} {
-			if err != nil {
-				return player.PositionMsg{Err: err, Generation: generation}
-			}
-		}
-
-		return player.PositionMsg{
-			Position:   pos,
-			Duration:   dur,
-			Paused:     paused,
-			Idle:       idle,
-			Generation: generation,
-		}
 	})
 }
 

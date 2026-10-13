@@ -41,7 +41,13 @@ type CommandErrMsg struct {
 // The generation parameter ties the tick to a specific play session so stale
 // ticks from a previous session can be safely ignored.
 func TickCmd(p Player, generation uint64) tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg {
+	return TickAfterCmd(p, generation, 500*time.Millisecond)
+}
+
+// TickAfterCmd returns a command that polls mpv state after the interval. An
+// app uses it to wait longer while mpv has no position yet.
+func TickAfterCmd(p Player, generation uint64, interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(_ time.Time) tea.Msg {
 		pos, posErr := p.GetPosition()
 		dur, durErr := p.GetDuration()
 		paused, pauseErr := p.GetPaused()

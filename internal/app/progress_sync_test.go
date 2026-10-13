@@ -800,28 +800,16 @@ func TestListeningTimeIsTimeOfPlay(t *testing.T) {
 // it fills its cache: its position does not move, and it is idle.
 func TestStalledPlayerAddsNoListeningTime(t *testing.T) {
 	mp := &mockPlayer{position: 100, duration: 3600, idle: true}
-	ticks := map[string]func(generation uint64) tea.Cmd{
-		"position tick": func(generation uint64) tea.Cmd {
-			return player.TickCmd(mp, generation)
-		},
-		"position tick after a property that was not ready": func(generation uint64) tea.Cmd {
-			return tickCmd(mp, generation, time.Millisecond)
-		},
+	_, client := newFakeABS(t, nil, nil)
+	m := advanceClock(newSyncTestModel(client), 1)
+
+	result, _ := m.Update(player.TickAfterCmd(mp, m.playGeneration, time.Millisecond)())
+	m = result.(Model)
+
+	if m.timeListened != 0 {
+		t.Errorf("timeListened = %v after one second of a player that waits for data, want 0", m.timeListened)
 	}
-	for name, tick := range ticks {
-		t.Run(name, func(t *testing.T) {
-			_, client := newFakeABS(t, nil, nil)
-			m := advanceClock(newSyncTestModel(client), 1)
-
-			result, _ := m.Update(tick(m.playGeneration)())
-			m = result.(Model)
-
-			if m.timeListened != 0 {
-				t.Errorf("timeListened = %v after one second of a player that waits for data, want 0", m.timeListened)
-			}
-			if !m.player.Playing {
-				t.Error("the model shows a pause for a player that waits for data")
-			}
-		})
+	if !m.player.Playing {
+		t.Error("the model shows a pause for a player that waits for data")
 	}
 }
