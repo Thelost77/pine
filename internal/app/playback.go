@@ -114,10 +114,10 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 	}
 
 	// Different item playing → stop it first
-	var stopCmd tea.Cmd
+	var closeCmd, stopCmd tea.Cmd
 	if m.isPlaying() {
 		logger.Info("switching playback", "from", m.itemID, "to", msg.Item.ID)
-		m, stopCmd = m.stopPlayback()
+		m, closeCmd, stopCmd = m.stopPlaybackCmds()
 	}
 
 	m.setSeriesContext(msg.Item)
@@ -146,7 +146,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 	}
 
 	if stopCmd != nil {
-		return m, tea.Batch(stopCmd, startCmd)
+		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
 	}
 	return m, startCmd
 }
@@ -172,10 +172,10 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 	}
 
 	// Different item/episode playing → stop it first
-	var stopCmd tea.Cmd
+	var closeCmd, stopCmd tea.Cmd
 	if m.isPlaying() {
 		logger.Info("switching playback", "from", m.itemID+"/"+m.episodeID, "to", msg.Item.ID+"/"+msg.Episode.ID)
-		m, stopCmd = m.stopPlayback()
+		m, closeCmd, stopCmd = m.stopPlaybackCmds()
 	}
 
 	item := msg.Item
@@ -216,7 +216,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 	}
 
 	if stopCmd != nil {
-		return m, tea.Batch(stopCmd, startCmd)
+		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
 	}
 	return m, startCmd
 }
@@ -649,15 +649,15 @@ func (m Model) handlePlaybackCompleted() (Model, tea.Cmd) {
 	currentItemID := m.itemID
 	client := m.client
 
-	m, stopCmd := m.stopPlayback()
+	m, closeCmd, stopCmd := m.stopPlaybackCmds()
 	if hasNext {
-		return m.startQueuedEntry(next, stopCmd)
+		return m.startQueuedEntry(next, closeCmd, stopCmd)
 	}
 	if seriesID == "" || libraryID == "" || client == nil {
-		return m, stopCmd
+		return m, tea.Batch(closeCmd, stopCmd)
 	}
 	cmd := seriesContinueCmd(client, libraryID, seriesID, currentItemID)
-	return m, tea.Batch(stopCmd, cmd)
+	return m, tea.Batch(stopCmd, closeThen(closeCmd, cmd))
 }
 
 func (m Model) skipToNextQueued() (Model, tea.Cmd) {
@@ -668,11 +668,13 @@ func (m Model) skipToNextQueued() (Model, tea.Cmd) {
 	if !hasNext {
 		return m, nil
 	}
-	m, stopCmd := m.stopPlayback()
-	return m.startQueuedEntry(next, stopCmd)
+	m, closeCmd, stopCmd := m.stopPlaybackCmds()
+	return m.startQueuedEntry(next, closeCmd, stopCmd)
 }
 
-func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cmd) {
+// startQueuedEntry starts the next entry of the queue after closeCmd, the
+// close of the old session.
+func (m Model) startQueuedEntry(next QueueEntry, closeCmd, stopCmd tea.Cmd) (Model, tea.Cmd) {
 	var nextCmd tea.Cmd
 	if next.Episode != nil {
 		m, nextCmd = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
@@ -683,13 +685,7 @@ func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cm
 		m, nextCmd = m.handlePlayCmd(detail.PlayCmd{Item: next.Item})
 	}
 
-	if stopCmd == nil {
-		return m, nextCmd
-	}
-	if nextCmd == nil {
-		return m, stopCmd
-	}
-	return m, tea.Batch(stopCmd, nextCmd)
+	return m, tea.Batch(stopCmd, closeThen(closeCmd, nextCmd))
 }
 
 func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, itemID, title string, authors []string, duration, bookPos float64) (PlaySessionMsg, error) {
@@ -931,9 +927,32 @@ func closeSession(ctx context.Context, client *cache.Client, sessionID string, c
 	return client.CloseSession(ctx, sessionID, currentTime, timeListened)
 }
 
+// closeThen returns a command that runs closeCmd, the close of a session, and
+// then next. The server closes the open session of a device when that device
+// starts a session, and it then answers 404 to the close of pine: the last
+// position and the listening time of the old item are lost. So a play request
+// must not go out before the close completes or fails.
+func closeThen(closeCmd, next tea.Cmd) tea.Cmd {
+	if next == nil {
+		return closeCmd
+	}
+	return func() tea.Msg {
+		closeCmd()
+		return next()
+	}
+}
+
 // stopPlayback fires all cleanup commands: update progress, close session, quit mpv.
 // It sends no position if the server has the position and the listening time.
 func (m Model) stopPlayback() (Model, tea.Cmd) {
+	m, closeCmd, stopCmd := m.stopPlaybackCmds()
+	return m, tea.Batch(closeCmd, stopCmd)
+}
+
+// stopPlaybackCmds stops the playback as stopPlayback does. It returns the
+// close of the session apart from the other cleanup commands, so that a
+// caller can run a play request after the close with closeThen.
+func (m Model) stopPlaybackCmds() (Model, tea.Cmd, tea.Cmd) {
 	logger.Info("stopping playback", "sessionID", m.sessionID, "itemID", m.itemID, "episodeID", m.episodeID, "position", m.player.Position, "duration", m.player.Duration, "timeListened", m.timeListened)
 	client := m.client
 	sessionID := m.sessionID
@@ -968,6 +987,18 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 		evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 	}
 
+	closeCmd := func() tea.Msg {
+		if client != nil && sessionID != "" {
+			if err := closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed); err != nil {
+				logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
+			} else {
+				logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
+			}
+		}
+		invalidateCache()
+		return nil
+	}
+
 	cmds := []tea.Cmd{
 		func() tea.Msg {
 			if changed && client != nil && itemID != "" {
@@ -976,17 +1007,6 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 					logger.Warn("failed to update progress on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress, "err", err)
 				} else {
 					logger.Debug("progress updated on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress)
-				}
-			}
-			invalidateCache()
-			return nil
-		},
-		func() tea.Msg {
-			if client != nil && sessionID != "" {
-				if err := closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed); err != nil {
-					logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
-				} else {
-					logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
 				}
 			}
 			invalidateCache()
@@ -1013,7 +1033,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 		m.mprisTitleCmd(),
 	}
 
-	return m, tea.Batch(cmds...)
+	return m, closeCmd, tea.Batch(cmds...)
 }
 
 func playSessionChapters(session *abs.PlaySession) []abs.Chapter {

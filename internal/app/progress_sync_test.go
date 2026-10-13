@@ -6,14 +6,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
 	"github.com/Thelost77/pine/internal/screens/detail"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // newFakeABS starts a fake ABS server and returns its request log and a client
@@ -409,6 +413,153 @@ func TestStopOfUntouchedSessionSendsNoProgress(t *testing.T) {
 			}
 			if len(closes[0].Body) != 0 {
 				t.Errorf("close of the session = %v, want no position", closes[0].Body)
+			}
+		})
+	}
+}
+
+// runUntilPlaySession runs cmd, and the commands that Update returns for
+// their messages, as Bubble Tea does: each command of a batch runs in its own
+// goroutine, and Update gets each message when it arrives. It returns at the
+// first PlaySessionMsg.
+func runUntilPlaySession(t *testing.T, m Model, cmd tea.Cmd) {
+	t.Helper()
+	msgs := make(chan tea.Msg)
+	done := make(chan struct{})
+	defer close(done)
+
+	var run func(cmd tea.Cmd)
+	run = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		go func() {
+			msg := cmd()
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, c := range batch {
+					run(c)
+				}
+				return
+			}
+			select {
+			case msgs <- msg:
+			case <-done:
+			}
+		}()
+	}
+	run(cmd)
+
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case msg := <-msgs:
+			if _, ok := msg.(PlaySessionMsg); ok {
+				return
+			}
+			result, next := m.Update(msg)
+			m = result.(Model)
+			run(next)
+		case <-timeout:
+			t.Fatal("no PlaySessionMsg in 5 seconds")
+		}
+	}
+}
+
+// TestOldSessionClosesBeforeNextPlay verifies that the play request of the
+// next item goes out after the close of the old session completes or fails.
+// A server closes the open session of a device when that device starts a
+// session, and it then answers 404 to the close: the last position and the
+// listening time of the old item are lost.
+func TestOldSessionClosesBeforeNextPlay(t *testing.T) {
+	current := testLibraryItem("item-001", "The Great Gatsby")
+	current.LibraryID = "lib-001"
+	current.Media.Metadata.Series = &abs.SeriesSequence{ID: "series-001", Name: "A Series", Sequence: "1"}
+	next := testLibraryItem("item-002", "1984")
+	next.LibraryID = "lib-001"
+	next.Media.Metadata.Series = &abs.SeriesSequence{ID: "series-001", Name: "A Series", Sequence: "2"}
+	podcast := testPodcastItem("pod-001", "Tech Talk Daily")
+
+	endOfBook := func(m Model) (Model, tea.Cmd) {
+		m.player.Position = 3600
+		m.trackDuration = 3600
+		result, cmd := m.Update(player.PositionMsg{Err: fmt.Errorf("get time-pos: %w", player.ErrClosed)})
+		return result.(Model), cmd
+	}
+	tests := []struct {
+		name        string
+		closeStatus int
+		start       func(m Model) (Model, tea.Cmd)
+	}{
+		{name: "play of a different book", start: func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayCmd(detail.PlayCmd{Item: next})
+		}},
+		{name: "play of an episode", start: func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: podcast, Episode: podcast.Media.Episodes[0]})
+		}},
+		{name: "next item of the queue at the end of a book", start: func(m Model) (Model, tea.Cmd) {
+			m.queue = []QueueEntry{{Item: next}}
+			return endOfBook(m)
+		}},
+		{name: "skip to the next item of the queue", start: func(m Model) (Model, tea.Cmd) {
+			m.queue = []QueueEntry{{Item: next}}
+			return m.skipToNextQueued()
+		}},
+		{name: "next book of the series at the end of a book", start: func(m Model) (Model, tea.Cmd) {
+			m.playbackSeriesID = "series-001"
+			m.playbackLibraryID = "lib-001"
+			return endOfBook(m)
+		}},
+		{name: "close fails", closeStatus: http.StatusInternalServerError, start: func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayCmd(detail.PlayCmd{Item: next})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			closed, played, playedBeforeClose := false, false, false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/api/session/sess-abc/close":
+					time.Sleep(100 * time.Millisecond)
+					mu.Lock()
+					closed = true
+					mu.Unlock()
+					if tt.closeStatus != 0 {
+						w.WriteHeader(tt.closeStatus)
+					}
+				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/play"):
+					mu.Lock()
+					played = true
+					playedBeforeClose = !closed
+					mu.Unlock()
+					_ = json.NewEncoder(w).Encode(abs.PlaySession{
+						ID:          "sess-next",
+						AudioTracks: []abs.AudioTrack{{ContentURL: "/audio.mp3", Duration: 3600}},
+					})
+					return
+				case r.URL.Path == "/api/libraries/lib-001/series/series-001":
+					_ = json.NewEncoder(w).Encode(abs.Series{ID: "series-001", Name: "A Series"})
+					return
+				case strings.HasPrefix(r.URL.Path, "/api/libraries/lib-001/items"):
+					_ = json.NewEncoder(w).Encode(abs.LibraryItemsResponse{Results: []abs.LibraryItem{current, next}, Total: 2})
+					return
+				}
+				_, _ = w.Write([]byte("{}"))
+			}))
+			defer srv.Close()
+
+			m := newSyncTestModel(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil))
+			m, cmd := tt.start(m)
+			runUntilPlaySession(t, m, cmd)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if !played {
+				t.Fatal("no play request for the next item")
+			}
+			if playedBeforeClose {
+				t.Error("the play request of the next item went out before the close of the old session completed")
 			}
 		})
 	}
