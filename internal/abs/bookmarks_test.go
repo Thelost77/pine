@@ -50,9 +50,12 @@ func TestGetBookmarksHTTP(t *testing.T) {
 
 // TestGetBookmarksReadsUserBeforeABS236 verifies that GetBookmarks reads the
 // bookmarks of the item from the user, if the server has no route for the
-// bookmarks of one item. ABS before 2.36.0 answers 404 for that route.
+// bookmarks of one item. ABS before 2.36.0 answers 404 for that route. The
+// client asks for that route only one time.
 func TestGetBookmarksReadsUserBeforeABS236(t *testing.T) {
+	requests := map[string]int{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests[r.URL.Path]++
 		if r.URL.Path != "/api/me" {
 			http.NotFound(w, r)
 			return
@@ -67,12 +70,17 @@ func TestGetBookmarksReadsUserBeforeABS236(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok")
-	bookmarks, err := c.GetBookmarks(context.Background(), "li-001")
-	if err != nil {
-		t.Fatalf("GetBookmarks() error: %v", err)
+	for read := 1; read <= 2; read++ {
+		bookmarks, err := c.GetBookmarks(context.Background(), "li-001")
+		if err != nil {
+			t.Fatalf("GetBookmarks() read %d error: %v", read, err)
+		}
+		if len(bookmarks) != 2 || bookmarks[0].Title != "Great passage" || bookmarks[1].Title != "Important quote" {
+			t.Errorf("read %d: bookmarks = %+v, want the two bookmarks of li-001", read, bookmarks)
+		}
 	}
-	if len(bookmarks) != 2 || bookmarks[0].Title != "Great passage" || bookmarks[1].Title != "Important quote" {
-		t.Errorf("bookmarks = %+v, want the two bookmarks of li-001", bookmarks)
+	if requests["/api/me/bookmarks/li-001"] != 1 || requests["/api/me"] != 2 {
+		t.Errorf("requests = %v, want 1 for the bookmark route and 2 for the user", requests)
 	}
 }
 

@@ -22,10 +22,17 @@ type bookmarksResponse struct {
 
 // GetBookmarks returns the bookmarks of the user for a library item. ABS
 // before 2.36.0 has no route for the bookmarks of one item, and answers 404.
-// GetBookmarks then reads the bookmarks of the item from GET /api/me.
+// GetBookmarks then reads the bookmarks of the item from GET /api/me, and the
+// client does not ask for the route again. A later ABS answers 404 only for
+// an item that it does not have. GET /api/me is correct for that server too.
 func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]Bookmark, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/api/me/bookmarks/"+itemID, nil)
-	allItems := IsHTTPStatus(err, http.StatusNotFound)
+	var resp []byte
+	var err error
+	allItems := c.noBookmarkRoute.Load()
+	if !allItems {
+		resp, err = c.do(ctx, http.MethodGet, "/api/me/bookmarks/"+itemID, nil)
+		allItems = IsHTTPStatus(err, http.StatusNotFound)
+	}
 	if allItems {
 		resp, err = c.do(ctx, http.MethodGet, "/api/me", nil)
 	}
@@ -39,6 +46,7 @@ func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]Bookmark, e
 	if !allItems {
 		return body.Bookmarks, nil
 	}
+	c.noBookmarkRoute.Store(true)
 	bookmarks := []Bookmark{}
 	for _, bookmark := range body.Bookmarks {
 		if bookmark.LibraryItemID == itemID {
