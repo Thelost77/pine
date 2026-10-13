@@ -55,9 +55,11 @@ type NavigateSeriesMsg struct {
 }
 
 // SeekToBookmarkCmd requests seeking the player to a bookmark's timestamp.
+// The root model finds the episode of a podcast bookmark from Title.
 type SeekToBookmarkCmd struct {
-	Item abs.LibraryItem
-	Time float64
+	Item  abs.LibraryItem
+	Time  float64
+	Title string
 }
 
 // DeleteBookmarkCmd requests deletion of a bookmark.
@@ -598,7 +600,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				item := m.item
 				bm := m.bookmarks[m.selectedBookmark]
 				return m, func() tea.Msg {
-					return SeekToBookmarkCmd{Item: item, Time: bm.Time}
+					return SeekToBookmarkCmd{Item: item, Time: bm.Time, Title: bm.Title}
 				}
 			}
 			if !m.focusBookmarks && !m.focusEpisodes && !m.focusSeries {

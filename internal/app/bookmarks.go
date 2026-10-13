@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -37,7 +38,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 	currentTime := m.player.Position
 	title := fmt.Sprintf("Bookmark at %s", ui.FormatTimestamp(currentTime))
 	if m.episodeID != "" && m.player.Title != "" {
-		title = fmt.Sprintf("%s — %s", m.player.Title, title)
+		title = m.player.Title + episodeTitleSeparator + title
 	}
 	logger.Info("creating bookmark", "itemID", itemID, "time", currentTime, "title", title)
 	existing := m.detail.Bookmarks()
@@ -58,16 +59,73 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 	}
 }
 
-// handleSeekToBookmark seeks the player to a bookmark's timestamp (book-global).
-func (m Model) handleSeekToBookmark(msg detail.SeekToBookmarkCmd) (Model, tea.Cmd) {
-	if !m.isPlaying() {
-		if m.client == nil || msg.Item.ID == "" {
-			return m, nil
+// episodeTitleSeparator is between the episode title and the bookmark title
+// in the title of a bookmark of a podcast episode.
+const episodeTitleSeparator = " — "
+
+// bookmarkEpisode finds the episode of a podcast bookmark. A bookmark of ABS
+// has no episode ID, so handleAddBookmark puts the episode title before the
+// bookmark title. If more than one episode title is before the bookmark title,
+// the longest is the episode.
+func bookmarkEpisode(title string, episodes []abs.PodcastEpisode) (abs.PodcastEpisode, bool) {
+	var episode abs.PodcastEpisode
+	found := false
+	for _, ep := range episodes {
+		if ep.Title == "" || !strings.HasPrefix(title, ep.Title+episodeTitleSeparator) {
+			continue
 		}
-		m.setSeriesContext(msg.Item)
-		return m, m.startPlaybackAtBookPositionCmd(msg.Item, msg.Time)
+		if !found || len(ep.Title) > len(episode.Title) {
+			episode, found = ep, true
+		}
 	}
-	return m.seekToBookGlobalPosition(msg.Time)
+	return episode, found
+}
+
+// handleSeekToBookmark moves the playback to a bookmark's timestamp
+// (book-global). If the book or the episode of the bookmark plays, it seeks
+// the player. If not, it starts the book or the episode at that timestamp.
+func (m Model) handleSeekToBookmark(msg detail.SeekToBookmarkCmd) (Model, tea.Cmd) {
+	isPodcast := msg.Item.MediaType == "podcast"
+	var episode abs.PodcastEpisode
+	hasEpisode := false
+	if isPodcast {
+		episode, hasEpisode = bookmarkEpisode(msg.Title, m.detail.Episodes())
+	}
+
+	// The title of a podcast bookmark can give no episode, for example after
+	// an edit of the title. Then a bookmark of the podcast that plays seeks
+	// the episode that plays.
+	if m.isPlaying() && m.itemID == msg.Item.ID && (!hasEpisode || m.episodeID == episode.ID) {
+		return m.seekToBookGlobalPosition(msg.Time)
+	}
+	if m.client == nil || msg.Item.ID == "" {
+		return m, nil
+	}
+	if isPodcast && !hasEpisode {
+		logger.Warn("bookmark seek skipped: episode not found", "itemID", msg.Item.ID, "title", msg.Title)
+		cmd := m.err.SetError(fmt.Errorf("cannot find the episode of this bookmark"))
+		m.propagateSize()
+		return m, cmd
+	}
+
+	// Different item or episode playing → stop it first
+	var closeCmd, stopCmd tea.Cmd
+	if m.isPlaying() {
+		logger.Info("switching playback", "from", m.itemID+"/"+m.episodeID, "to", msg.Item.ID+"/"+episode.ID)
+		m, closeCmd, stopCmd = m.stopPlaybackCmds()
+	}
+
+	m.setSeriesContext(msg.Item)
+	var startCmd tea.Cmd
+	if hasEpisode {
+		startCmd = m.startEpisodePlaybackAtPositionCmd(msg.Item, episode, msg.Time)
+	} else {
+		startCmd = m.startPlaybackAtBookPositionCmd(msg.Item, msg.Time)
+	}
+	if stopCmd != nil {
+		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
+	}
+	return m, startCmd
 }
 
 // handleDeleteBookmark deletes a bookmark and removes it from the local list.
