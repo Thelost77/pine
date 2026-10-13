@@ -343,7 +343,9 @@ type Bookmark struct {
 	CreatedAt     int64   `json:"createdAt"` // unix timestamp ms
 }
 
-// MediaProgressWithBookmarks extends progress with bookmark data.
+// MediaProgressWithBookmarks is the body of GET /api/me/progress/{id}. ABS
+// gives no key "bookmarks" in that body, so Bookmarks is always empty.
+// GetBookmarks reads the bookmarks.
 type MediaProgressWithBookmarks struct {
 	LibraryItemID string     `json:"libraryItemId"`
 	EpisodeID     string     `json:"episodeId,omitempty"`
