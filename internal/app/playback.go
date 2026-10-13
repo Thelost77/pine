@@ -458,6 +458,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	sessionID := m.sessionID
 	currentTime := m.player.Position
 	timeListened := m.timeListened
+	changed := m.hasUnsyncedProgress()
 	duration := m.player.Duration
 	title := m.player.Title
 	authors := m.currentAuthors
@@ -476,7 +477,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 
 	return m, func() tea.Msg {
 		if client != nil && sessionID != "" {
-			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
+			_ = closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed)
 			evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 		}
 		if mpvPlayer != nil {
@@ -918,7 +919,20 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	}
 }
 
+// closeSession closes a session on the server. The server reads a position in
+// a close as a progress update, and a position that is not at the end of a
+// finished book removes the finished mark. So the close sends the position
+// and the listening time only if changed is true: the server does not have
+// them.
+func closeSession(ctx context.Context, client *cache.Client, sessionID string, currentTime, timeListened float64, changed bool) error {
+	if !changed {
+		return client.CloseSessionNoSync(ctx, sessionID)
+	}
+	return client.CloseSession(ctx, sessionID, currentTime, timeListened)
+}
+
 // stopPlayback fires all cleanup commands: update progress, close session, quit mpv.
+// It sends no position if the server has the position and the listening time.
 func (m Model) stopPlayback() (Model, tea.Cmd) {
 	logger.Info("stopping playback", "sessionID", m.sessionID, "itemID", m.itemID, "episodeID", m.episodeID, "position", m.player.Position, "duration", m.player.Duration, "timeListened", m.timeListened)
 	client := m.client
@@ -927,6 +941,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	episodeID := m.episodeID
 	currentTime := m.player.Position
 	timeListened := m.timeListened
+	changed := m.hasUnsyncedProgress()
 	duration := m.player.Duration
 	store := m.db
 	mpvPlayer := m.mpv
@@ -955,7 +970,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 
 	cmds := []tea.Cmd{
 		func() tea.Msg {
-			if client != nil && itemID != "" {
+			if changed && client != nil && itemID != "" {
 				err := client.UpdatePosition(context.Background(), itemID, episodeID, currentTime, progress)
 				if err != nil {
 					logger.Warn("failed to update progress on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress, "err", err)
@@ -968,10 +983,10 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 		},
 		func() tea.Msg {
 			if client != nil && sessionID != "" {
-				if err := client.CloseSession(context.Background(), sessionID, currentTime, timeListened); err != nil {
-					logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+				if err := closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed); err != nil {
+					logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
 				} else {
-					logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
+					logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
 				}
 			}
 			invalidateCache()
@@ -1026,6 +1041,7 @@ func (m Model) Cleanup() {
 
 	currentTime := m.player.Position
 	timeListened := m.timeListened
+	changed := m.hasUnsyncedProgress()
 	duration := m.player.Duration
 
 	var progress float64
@@ -1041,15 +1057,15 @@ func (m Model) Cleanup() {
 	itemID := m.itemID
 
 	if m.client != nil && m.sessionID != "" {
-		if err := m.client.CloseSession(ctx, m.sessionID, currentTime, timeListened); err != nil {
-			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+		if err := closeSession(ctx, m.client, m.sessionID, currentTime, timeListened, changed); err != nil {
+			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
 		} else {
-			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened)
+			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
 		}
 		evictProgressCaches(m.cacheStore, itemID, libraryID, seriesID)
 	}
 
-	if m.client != nil && m.itemID != "" {
+	if changed && m.client != nil && m.itemID != "" {
 		err := m.client.UpdatePosition(ctx, m.itemID, m.episodeID, currentTime, progress)
 		if err != nil {
 			logger.Warn("cleanup: failed to update progress", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress, "err", err)

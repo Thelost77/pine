@@ -247,3 +247,26 @@ func TestCloseSessionHTTP(t *testing.T) {
 		t.Errorf("timeListened = %f, want 180.0", body.TimeListened)
 	}
 }
+
+func TestCloseSessionNoSyncHTTP(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/session/session-abc-123/close" {
+			t.Errorf("path = %q, want /api/session/session-abc-123/close", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %q, want POST", r.Method)
+		}
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	if err := c.CloseSessionNoSync(context.Background(), "session-abc-123"); err != nil {
+		t.Fatalf("CloseSessionNoSync() error: %v", err)
+	}
+	if len(capturedBody) != 0 {
+		t.Errorf("body = %q, want no body", capturedBody)
+	}
+}

@@ -366,3 +366,50 @@ func TestMarkFinishedSendsExplicitFlag(t *testing.T) {
 		})
 	}
 }
+
+// TestStopOfUntouchedSessionSendsNoProgress verifies that the stop of a
+// session sends no position if the user listened to nothing and did not move
+// the position. pine restores the last session at each start. For a finished
+// book, the server starts that session at the position 0, and it reads each
+// position that is not at the end as "not finished".
+func TestStopOfUntouchedSessionSendsNoProgress(t *testing.T) {
+	stops := map[string]func(m Model){
+		"quit": func(m Model) {
+			_, cmd := e2ePressKey(m, 'q')
+			executeBatchCmds(cmd)
+		},
+		"cleanup": func(m Model) { m.Cleanup() },
+		"play of a different item": func(m Model) {
+			_, cmd := m.handlePlayCmd(detail.PlayCmd{Item: testLibraryItem("item-002", "1984")})
+			executeBatchCmds(cmd)
+		},
+	}
+	for name, stop := range stops {
+		t.Run(name, func(t *testing.T) {
+			log, client := newFakeABS(t, map[string]abs.PlaySession{
+				"/api/items/item-001/play": {ID: "sess-abc", AudioTracks: []abs.AudioTrack{{ContentURL: "/audio.mp3", Duration: 3600}}},
+			}, nil)
+			m := NewWithPlayer(config.Default(), nil, client, nil, &mockPlayer{paused: true})
+
+			item := testLibraryItem("item-001", "The Great Gatsby")
+			m, _ = feedCmd(m, m.startRestorePlaybackCmd(RestoreSessionMsg{Item: &item}))
+			if m.sessionID != "sess-abc" {
+				t.Fatalf("sessionID = %q, want sess-abc", m.sessionID)
+			}
+			result, _ := m.Update(player.PositionMsg{Duration: 3600, Paused: true, Generation: m.playGeneration})
+
+			stop(result.(Model))
+
+			if n := len(requestsTo(log, http.MethodPatch, "/api/me/progress/item-001")); n != 0 {
+				t.Errorf("%d progress updates, want 0", n)
+			}
+			closes := requestsTo(log, http.MethodPost, "/api/session/sess-abc/close")
+			if len(closes) != 1 {
+				t.Fatalf("%d closes of the session, want 1", len(closes))
+			}
+			if len(closes[0].Body) != 0 {
+				t.Errorf("close of the session = %v, want no position", closes[0].Body)
+			}
+		})
+	}
+}
