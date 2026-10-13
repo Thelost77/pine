@@ -24,6 +24,12 @@ const (
 	trackEndRolloverSlack            = 2.0
 	propertyUnavailableMaxBackoffExp = 2 // 500ms << 2 = 2s
 
+	// maxListeningTick is the longest time between two position ticks that
+	// pine counts as listening time. The ticks are 500 ms apart. After a longer
+	// time, for example a suspend of the machine, pine does not know how long
+	// the player played.
+	maxListeningTick = 5 * time.Second
+
 	// syncMinChange is the smallest change of the position or of the
 	// listening time, in seconds, that pine sends to the server. A paused
 	// player can report a position that is a fraction of a second away from
@@ -58,6 +64,32 @@ func (m Model) playbackDevice() abs.DeviceInfo {
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
 	return m.sessionID != ""
+}
+
+// clock returns the current time.
+func (m Model) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// trackListeningTime adds the time since the last position tick to the
+// listening time, if the player played at that tick and plays now. The
+// listening time is the time of the clock. It is not the change of the
+// position: at the speed 2.0, the position moves two seconds in each second.
+func (m *Model) trackListeningTime(paused bool) {
+	if paused {
+		m.lastPlayingTick = time.Time{}
+		return
+	}
+	now := m.clock()
+	if !m.lastPlayingTick.IsZero() {
+		if played := now.Sub(m.lastPlayingTick); played > 0 && played <= maxListeningTick {
+			m.timeListened += played.Seconds()
+		}
+	}
+	m.lastPlayingTick = now
 }
 
 // hasUnsyncedProgress returns true if the position or the listening time has
@@ -233,6 +265,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.trackStartOffset = msg.Session.TrackStartOffset
 	m.trackDuration = msg.Session.TrackDuration
 	m.timeListened = 0
+	m.lastPlayingTick = time.Time{}
 	m.currentAuthors = msg.Session.Authors
 
 	bookPos := msg.Session.CurrentTime + m.trackStartOffset
@@ -334,6 +367,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if msg.Err != nil {
+		// pine does not know if the player plays, so the time until the next
+		// tick is not listening time.
+		m.lastPlayingTick = time.Time{}
 		if targetPos, ok := m.trackEndRolloverTarget(msg.Err); ok {
 			if m.player.Duration > 0 && targetPos >= m.player.Duration-trackEndRolloverSlack {
 				m.player.Position = m.player.Duration
@@ -369,6 +405,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	m.propertyUnavailableCount = 0
+	m.trackListeningTime(msg.Paused)
 
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
@@ -394,11 +431,6 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
 		}
 		return m, tea.Batch(mprisCmds...)
-	}
-
-	// Track time listened (delta from last position)
-	if bookPos > m.player.Position {
-		m.timeListened += bookPos - m.player.Position
 	}
 
 	m.player.Position = bookPos

@@ -55,6 +55,7 @@ type Model struct {
 	itemID                   string
 	episodeID                string
 	timeListened             float64
+	lastPlayingTick          time.Time
 	lastSyncPos              float64
 	playGeneration           uint64
 	chapters                 []abs.Chapter
@@ -100,6 +101,9 @@ type Model struct {
 	lastPlayedItemID  string
 	lastPlayedAuthors []string
 	currentAuthors    []string
+
+	// now replaces time.Now in a test.
+	now func() time.Time
 }
 
 // New creates a new root model. If client is non-nil (authenticated),

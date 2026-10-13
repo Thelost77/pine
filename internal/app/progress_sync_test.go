@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -76,11 +77,49 @@ func syncTick(m Model) Model {
 	return m
 }
 
-// listenAndSync moves the position of the player to pos, and then runs one
+// advanceClock moves the clock of the model by seconds. After the first call,
+// the clock of the model moves only in a call of advanceClock.
+func advanceClock(m Model, seconds float64) Model {
+	now := m.clock().Add(time.Duration(seconds * float64(time.Second)))
+	m.now = func() time.Time { return now }
+	return m
+}
+
+// playTick moves the clock of the model by seconds, and then sends a position
+// tick of a player that plays at the position pos.
+func playTick(m Model, seconds, pos float64) Model {
+	m = advanceClock(m, seconds)
+	result, _ := m.Update(player.PositionMsg{
+		Position:   pos - m.trackStartOffset,
+		Duration:   m.player.Duration,
+		Generation: m.playGeneration,
+	})
+	return result.(Model)
+}
+
+// playingNow stops the clock of the model, and records that the player played
+// at the last position tick. The time until the next position tick of a
+// player that plays is then listening time.
+func playingNow(m Model) Model {
+	m = advanceClock(m, 0)
+	m.lastPlayingTick = m.clock()
+	return m
+}
+
+// listen plays to the position pos at the speed 1.0, with one position tick
+// for each second.
+func listen(m Model, pos float64) Model {
+	for m.player.Position < pos {
+		step := math.Min(1, pos-m.player.Position)
+		m = playTick(m, step, m.player.Position+step)
+	}
+	return m
+}
+
+// listenAndSync plays to the position pos at the speed 1.0, and then runs one
 // sync tick and its commands.
 func listenAndSync(m Model, pos float64) Model {
-	result, _ := m.Update(player.PositionMsg{Position: pos, Duration: m.player.Duration})
-	return syncTick(result.(Model))
+	return syncTick(listen(m, pos))
 }
 
 // newSyncTestModel returns a model that plays item-001 in the session sess-abc
@@ -93,7 +132,7 @@ func newSyncTestModel(client *cache.Client) Model {
 	m.player.Position = 100
 	m.player.Duration = 3600
 	m.lastSyncPos = 100
-	return m
+	return playingNow(m)
 }
 
 // TestSyncSendsListeningTimeSinceLastSync verifies that a sync sends the time
@@ -149,8 +188,7 @@ func TestCloseSendsListeningTimeSinceLastSync(t *testing.T) {
 	m := newSyncTestModel(client)
 
 	m = listenAndSync(m, 110)
-	result, _ := m.Update(player.PositionMsg{Position: 115, Duration: 3600})
-	_, cmd := result.(Model).stopPlayback()
+	_, cmd := listen(m, 115).stopPlayback()
 	executeBatchCmds(cmd)
 
 	want := []float64{5}
@@ -672,6 +710,74 @@ func TestQuitSendsLastPositionOnce(t *testing.T) {
 			}
 			if n := len(requestsTo(log, http.MethodPatch, "/api/me/progress/item-001")); n != 1 {
 				t.Errorf("%d progress updates, want 1", n)
+			}
+		})
+	}
+}
+
+// TestListeningTimeIsTimeOfPlay verifies that the listening time is the time
+// during which the player played, and not the change of the position. At the
+// speed 2.0, the position moves two seconds in each second. The server adds
+// the timeListened of each sync to the listening time of the user.
+func TestListeningTimeIsTimeOfPlay(t *testing.T) {
+	// pausedTick moves the clock by seconds, and then sends a position tick
+	// of a paused player.
+	pausedTick := func(m Model, seconds float64) Model {
+		m = advanceClock(m, seconds)
+		result, _ := m.Update(player.PositionMsg{Position: m.player.Position, Duration: m.player.Duration, Paused: true})
+		return result.(Model)
+	}
+	tests := []struct {
+		name string
+		play func(m Model) Model
+		want map[string]interface{}
+	}{
+		{
+			name: "one minute at the speed 2.0",
+			play: func(m Model) Model {
+				for i := 0; i < 120; i++ {
+					m = playTick(m, 0.5, m.player.Position+1)
+				}
+				return m
+			},
+			want: map[string]interface{}{"currentTime": 220.0, "timeListened": 60.0},
+		},
+		{
+			name: "a pause of one minute",
+			play: func(m Model) Model {
+				m = listen(m, 110)
+				for i := 0; i < 120; i++ {
+					m = pausedTick(m, 0.5)
+				}
+				// The tick after the pause starts the count again.
+				return listen(playTick(m, 0.5, 110), 120)
+			},
+			want: map[string]interface{}{"currentTime": 120.0, "timeListened": 20.0},
+		},
+		{
+			name: "a tick after a suspend of the machine",
+			play: func(m Model) Model {
+				m = listen(m, 110)
+				m = playTick(m, 8*3600, 110.5)
+				return listen(m, 120.5)
+			},
+			want: map[string]interface{}{"currentTime": 120.5, "timeListened": 20.0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, client := newFakeABS(t, nil, nil)
+			m := syncTick(tt.play(newSyncTestModel(client)))
+
+			syncs := requestsTo(log, http.MethodPost, "/api/session/sess-abc/sync")
+			if len(syncs) != 1 {
+				t.Fatalf("%d syncs, want 1", len(syncs))
+			}
+			if !reflect.DeepEqual(syncs[0].Body, tt.want) {
+				t.Errorf("sync = %v, want %v", syncs[0].Body, tt.want)
+			}
+			if m.timeListened != 0 {
+				t.Errorf("timeListened = %v, want 0 after an accepted sync", m.timeListened)
 			}
 		})
 	}
