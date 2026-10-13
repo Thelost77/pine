@@ -1477,17 +1477,27 @@ func TestE2E_ChapterNavigation(t *testing.T) {
 		t.Fatalf("expected 2 chapters from play session, got %d", len(m.chapters))
 	}
 
-	// Position is 42 (in chapter 1: 0-1800)
-	// Press 'n' → next chapter start (1800)
-	m, _ = e2ePressKey(m, 'n')
-	if m.player.Position != 1800.0 {
-		t.Errorf("after 'n', position = %f, want 1800.0", m.player.Position)
+	// The command palette offers the two chapter actions.
+	offered := map[components.PaletteAction]bool{}
+	playerItems, _ := m.buildStaticPaletteItems()
+	for _, item := range playerItems {
+		offered[item.Action] = true
+	}
+	if !offered[components.ActionNextChapter] || !offered[components.ActionPrevChapter] {
+		t.Fatalf("palette items = %+v, want Next Chapter and Previous Chapter", playerItems)
 	}
 
-	// Press 'N' → previous chapter start (0)
-	m, _ = e2ePressKey(m, 'N')
+	// Position is 42 (in chapter 1: 0-1800)
+	// Palette action "Next Chapter" → next chapter start (1800)
+	m, _ = m.handlePaletteAction(components.ActionNextChapter, "", "", "", nil)
+	if m.player.Position != 1800.0 {
+		t.Errorf("after Next Chapter, position = %f, want 1800.0", m.player.Position)
+	}
+
+	// Palette action "Previous Chapter" → previous chapter start (0)
+	m, _ = m.handlePaletteAction(components.ActionPrevChapter, "", "", "", nil)
 	if m.player.Position != 0.0 {
-		t.Errorf("after 'N', position = %f, want 0.0", m.player.Position)
+		t.Errorf("after Previous Chapter, position = %f, want 0.0", m.player.Position)
 	}
 }
 
@@ -1733,14 +1743,14 @@ func TestE2E_WithinTrackSeek(t *testing.T) {
 		t.Errorf("expected no new API calls for within-track seek, got %d new calls", apiCallsAfter-apiCallsBefore)
 	}
 
-	// Press 'n' (next chapter) — chapter 2 starts at 900, within same track
-	m, cmd = e2ePressKey(m, 'n')
+	// Palette action "Next Chapter" — chapter 2 starts at 900, within same track
+	m, cmd = m.handlePaletteAction(components.ActionNextChapter, "", "", "", nil)
 	if cmd != nil {
 		m = feedCmdChain(m, cmd, 3)
 	}
 
 	if m.player.Position != 900.0 {
-		t.Errorf("position after 'n' = %f, want 900.0", m.player.Position)
+		t.Errorf("position after Next Chapter = %f, want 900.0", m.player.Position)
 	}
 
 	mp.mu.Lock()
@@ -1825,9 +1835,9 @@ func TestE2E_CrossTrackChapterSeek(t *testing.T) {
 		{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
 	}
 
-	// Press 'n' → chapter 2 at position 2000 is beyond current track (0-1800)
+	// Palette action "Next Chapter" → chapter 2 at position 2000 is beyond current track (0-1800)
 	// This should trigger a cross-track restart
-	m, cmd := e2ePressKey(m, 'n')
+	m, cmd := m.handlePaletteAction(components.ActionNextChapter, "", "", "", nil)
 
 	// Feed the cross-track restart command chain
 	m = feedCmdChain(m, cmd, 10)

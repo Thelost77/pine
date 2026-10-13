@@ -60,7 +60,7 @@ The Architecture Map below describes pine and the shared packages.
 | `bookmarks.go` | Bookmark CRUD, chapter next/prev, seek logic (in-track vs cross-track), fetchBookmarksCmd/fetchEpisodesCmd/fetchBookDetailCmd |
 | `metadata.go` | Metadata editor save flow: server PATCH, cache eviction, detail refresh |
 | `messages.go` | Screen enum, PlaySessionMsg, PlaySessionData, QueueEntry, all root-level message types |
-| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, chapters, sleep, command palette). Key names for the player model. |
+| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, sleep, command palette). Key names for the player model. |
 | `help.go` | Help overlay groups for pine |
 | `queue.go` | Queue entry enqueue/dequeue with dedup, clone helpers |
 | `mpris_state.go` | MPRIS bridge message conversion between player state and D-Bus adapter |

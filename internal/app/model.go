@@ -851,14 +851,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, m.keys.NextInQueue) {
 				return m.skipToNextQueued()
 			}
-			if len(m.chapters) > 0 {
-				if key.Matches(msg, m.keys.NextChapter) {
-					return m.seekToChapter(m.nextChapter())
-				}
-				if key.Matches(msg, m.keys.PrevChapter) {
-					return m.seekToChapter(m.prevChapter())
-				}
-			}
 			if key.Matches(msg, m.keys.SleepTimer) {
 				return m.cycleSleepTimer()
 			}
