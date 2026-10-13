@@ -650,7 +650,7 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	// Execute the bookmark fetch
 	m = feedCmdChain(m, cmd, 5)
 
-	assertAPICallMade(t, log, "GET", "/api/me")
+	assertAPICallMade(t, log, "GET", "/api/me/bookmarks/item-001")
 
 	// Verify bookmarks are on the detail screen
 	if len(m.detail.Bookmarks()) != 2 {
@@ -689,8 +689,8 @@ func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForNoBookmarks(t *testing.
 func TestE2E_BookmarkFetchOnDetailEntryShowsBookmarkErrorForServerFailure(t *testing.T) {
 	log := &apiLog{}
 	state := &e2eServerState{
-		bookmarks:      make(map[string][]abs.Bookmark),
-		progressStatus: map[string]int{"item-001": http.StatusInternalServerError},
+		bookmarks:       make(map[string][]abs.Bookmark),
+		bookmarksStatus: map[string]int{"item-001": http.StatusInternalServerError},
 	}
 	srv := newFullMockABSServer(log, state)
 	defer srv.Close()

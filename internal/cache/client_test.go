@@ -274,6 +274,42 @@ func TestClient_GetLibraryItem_CacheHit(t *testing.T) {
 	}
 }
 
+// TestClient_GetBookmarks_CacheHit verifies that the cache keeps the bookmarks
+// of an item, also if the item has no bookmarks.
+func TestClient_GetBookmarks_CacheHit(t *testing.T) {
+	requestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/me/bookmarks/li1":
+			_, _ = w.Write([]byte(`{"bookmarks":[{"libraryItemId":"li1","time":30,"title":"mark1","createdAt":1700000000000}]}`))
+		case "/api/me/bookmarks/li2":
+			_, _ = w.Write([]byte(`{"bookmarks":[]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), NewStore(openTestDB(t)))
+
+	for itemID, want := range map[string]int{"li1": 1, "li2": 0} {
+		for call := 1; call <= 2; call++ {
+			bookmarks, err := client.GetBookmarks(context.Background(), itemID)
+			if err != nil {
+				t.Fatalf("GetBookmarks(%s) call %d error: %v", itemID, call, err)
+			}
+			if len(bookmarks) != want {
+				t.Errorf("GetBookmarks(%s) call %d = %d bookmarks, want %d", itemID, call, len(bookmarks), want)
+			}
+		}
+	}
+	if requestCount != 2 {
+		t.Errorf("%d requests, want 1 for each item", requestCount)
+	}
+}
+
 func TestClient_GetRecentlyAdded_CacheHit(t *testing.T) {
 	requestCount := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

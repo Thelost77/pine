@@ -108,12 +108,12 @@ func testBookmark(title string, seconds float64) abs.Bookmark {
 
 // e2eServerState holds mutable state for the mock server.
 type e2eServerState struct {
-	mu             sync.Mutex
-	bookmarks      map[string][]abs.Bookmark // itemID → bookmarks
-	progressStatus map[string]int            // itemID → GET /api/me/progress status override
-	meStatus       int                       // GET /api/me status override
-	force401       bool                      // when true, next API call returns 401
-	noTrackEpisode map[string]bool           // itemID|episodeID → return play session without tracks
+	mu              sync.Mutex
+	bookmarks       map[string][]abs.Bookmark // itemID → bookmarks
+	bookmarksStatus map[string]int            // itemID → GET /api/me/bookmarks status override
+	meStatus        int                       // GET /api/me status override
+	force401        bool                      // when true, next API call returns 401
+	noTrackEpisode  map[string]bool           // itemID|episodeID → return play session without tracks
 }
 
 func (s *e2eServerState) shouldReturnNoTracks(itemID, episodeID string) bool {
@@ -161,13 +161,13 @@ func (s *e2eServerState) allBookmarks() []abs.Bookmark {
 	return all
 }
 
-func (s *e2eServerState) getProgressStatus(itemID string) int {
+func (s *e2eServerState) getBookmarksStatus(itemID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.progressStatus == nil {
+	if s.bookmarksStatus == nil {
 		return http.StatusOK
 	}
-	if status, ok := s.progressStatus[itemID]; ok {
+	if status, ok := s.bookmarksStatus[itemID]; ok {
 		return status
 	}
 	return http.StatusOK
@@ -333,24 +333,17 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"item not found"}`))
 
-		// --- Bookmarks (via progress endpoint) ---
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/progress/"):
-			itemID := strings.TrimPrefix(r.URL.Path, "/api/me/progress/")
-			status := state.getProgressStatus(itemID)
-			if status != http.StatusOK {
-				if status == http.StatusNotFound {
-					http.Error(w, `{"error":"not found"}`, status)
-				} else {
-					http.Error(w, `{"error":"boom"}`, status)
-				}
+		// --- Bookmarks of one item. The progress of an item has no bookmarks. ---
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/bookmarks/"):
+			itemID := strings.TrimPrefix(r.URL.Path, "/api/me/bookmarks/")
+			if status := state.getBookmarksStatus(itemID); status != http.StatusOK {
+				http.Error(w, `{"error":"boom"}`, status)
 				return
 			}
-			bms := state.getBookmarks(itemID)
-			resp := abs.MediaProgressWithBookmarks{
-				LibraryItemID: itemID,
-				CurrentTime:   42.0,
-				Progress:      0.0117,
-				Bookmarks:     bms,
+			resp := struct {
+				Bookmarks []abs.Bookmark `json:"bookmarks"`
+			}{
+				Bookmarks: state.getBookmarks(itemID),
 			}
 			_ = json.NewEncoder(w).Encode(resp)
 

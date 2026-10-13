@@ -9,25 +9,26 @@ import (
 	"testing"
 )
 
+// TestGetBookmarksHTTP verifies that GetBookmarks reads the route of the
+// bookmarks. The server answers as ABS 2.37.1 does: the progress of an item
+// has no bookmarks.
 func TestGetBookmarksHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me/progress/li-001" {
-			t.Errorf("path = %q, want /api/me/progress/li-001", r.URL.Path)
-		}
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"libraryItemId": "li-001",
-			"currentTime": 0,
-			"progress": 0,
-			"isFinished": false,
-			"bookmarks": [
-				{"libraryItemId": "li-001", "title": "Great passage", "time": 300.5, "createdAt": 1700000000000},
-				{"libraryItemId": "li-001", "title": "Important quote", "time": 1500.0, "createdAt": 1700001000000}
-			]
-		}`))
+		switch r.URL.Path {
+		case "/api/me/bookmarks/li-001":
+			_, _ = w.Write([]byte(`{"bookmarks": [
+				{"libraryItemId": "li-001", "time": 300.5, "title": "Great passage", "createdAt": 1700000000000},
+				{"libraryItemId": "li-001", "time": 1500, "title": "Important quote", "createdAt": 1700001000000}
+			]}`))
+		case "/api/me/progress/li-001":
+			_, _ = w.Write([]byte(`{"id": "mp-001", "libraryItemId": "li-001", "episodeId": null, "duration": 3600, "progress": 0.1, "currentTime": 360, "isFinished": false}`))
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer srv.Close()
 
@@ -44,6 +45,34 @@ func TestGetBookmarksHTTP(t *testing.T) {
 	}
 	if bookmarks[1].Time != 1500.0 {
 		t.Errorf("bookmark[1] time = %f, want 1500.0", bookmarks[1].Time)
+	}
+}
+
+// TestGetBookmarksReadsUserBeforeABS236 verifies that GetBookmarks reads the
+// bookmarks of the item from the user, if the server has no route for the
+// bookmarks of one item. ABS before 2.36.0 answers 404 for that route.
+func TestGetBookmarksReadsUserBeforeABS236(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "usr-001", "bookmarks": [
+			{"libraryItemId": "li-001", "time": 300.5, "title": "Great passage", "createdAt": 1700000000000},
+			{"libraryItemId": "li-002", "time": 10, "title": "Other book", "createdAt": 1700000500000},
+			{"libraryItemId": "li-001", "time": 1500, "title": "Important quote", "createdAt": 1700001000000}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	bookmarks, err := c.GetBookmarks(context.Background(), "li-001")
+	if err != nil {
+		t.Fatalf("GetBookmarks() error: %v", err)
+	}
+	if len(bookmarks) != 2 || bookmarks[0].Title != "Great passage" || bookmarks[1].Title != "Important quote" {
+		t.Errorf("bookmarks = %+v, want the two bookmarks of li-001", bookmarks)
 	}
 }
 
@@ -160,7 +189,7 @@ func TestDeleteBookmarkHTTPPreservesBookmarkPrecision(t *testing.T) {
 func TestGetBookmarksEmptyResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"libraryItemId":"li-002","currentTime":0,"progress":0,"isFinished":false,"bookmarks":[]}`))
+		_, _ = w.Write([]byte(`{"bookmarks":[]}`))
 	}))
 	defer srv.Close()
 
@@ -203,7 +232,7 @@ func TestGetBookmarksServerErrorReturnsError(t *testing.T) {
 func TestGetBookmarksMalformedResponseReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"libraryItemId":`))
+		_, _ = w.Write([]byte(`{"bookmarks":`))
 	}))
 	defer srv.Close()
 

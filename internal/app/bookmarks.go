@@ -132,14 +132,11 @@ func (m Model) fetchBookmarksCmd(itemID string) tea.Cmd {
 	}
 	client := m.client
 	return func() tea.Msg {
-		progress, err := client.GetMediaProgress(context.Background(), itemID)
+		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
 		if err != nil {
-			if abs.IsHTTPStatus(err, 404) {
-				return detail.BookmarksUpdatedMsg{Bookmarks: nil}
-			}
 			return detail.BookmarksUpdatedMsg{Err: err}
 		}
-		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
+		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
 	}
 }
 
