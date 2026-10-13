@@ -13,6 +13,7 @@ import (
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
+	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -75,7 +76,7 @@ func main() {
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)
 	logger.Info("starting TUI")
-	finalModel, err := p.Run()
+	finalModel, err := ui.RunProgram(p)
 	if err != nil {
 		logger.Error("program exited with error", "err", err)
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

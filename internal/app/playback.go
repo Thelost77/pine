@@ -75,11 +75,13 @@ func (m Model) clock() time.Time {
 }
 
 // trackListeningTime adds the time since the last position tick to the
-// listening time, if the player played at that tick and plays now. The
-// listening time is the time of the clock. It is not the change of the
-// position: at the speed 2.0, the position moves two seconds in each second.
-func (m *Model) trackListeningTime(paused bool) {
-	if paused {
+// listening time, if the player played at that tick and plays now. A player
+// that is paused or idle does not play: mpv reports no pause while it waits
+// for data. The listening time is the time of the clock. It is not the change
+// of the position: at the speed 2.0, the position moves two seconds in each
+// second.
+func (m *Model) trackListeningTime(playing bool) {
+	if !playing {
 		m.lastPlayingTick = time.Time{}
 		return
 	}
@@ -98,12 +100,19 @@ func (m Model) hasUnsyncedProgress() bool {
 	return m.timeListened >= syncMinChange || math.Abs(m.player.Position-m.lastSyncPos) >= syncMinChange
 }
 
-func (m Model) isFiltering() bool {
+// capturesKeys returns true if the screen gets each key: a text input or a
+// confirmation dialog is active. Update then gives the key to the screen, and
+// the global keys and the playback keys have no function.
+func (m Model) capturesKeys() bool {
 	switch m.screen {
+	case ScreenLogin, ScreenMetadataEdit:
+		return true
 	case ScreenHome:
 		return m.home.IsFiltering()
 	case ScreenLibrary:
 		return m.library.IsFiltering()
+	case ScreenDetail:
+		return m.detail.EditingBookmark() || m.detail.ConfirmOverlayVisible()
 	case ScreenSeries:
 		return m.series.IsFiltering()
 	case ScreenSeriesList:
@@ -342,7 +351,9 @@ func loadCaptionsCmd(client *cache.Client, itemID, audioFilename, ino string, ge
 	}
 }
 
-// handlePlayerReady starts the position tick and sync tick.
+// handlePlayerReady starts the position tick and sync tick. It sets the speed
+// of the model in the player: each launch makes a new player, which plays at
+// the speed 1.0.
 // Stale PlayerReadyMsg events (from a superseded play session) are ignored so
 // duplicate polling ticks don't race with the active session.
 func (m Model) handlePlayerReady(msg player.PlayerReadyMsg) (Model, tea.Cmd) {
@@ -353,6 +364,7 @@ func (m Model) handlePlayerReady(msg player.PlayerReadyMsg) (Model, tea.Cmd) {
 	logger.Info("player ready, starting position ticks", "generation", m.playGeneration)
 	m.propertyUnavailableCount = 0
 	return m, tea.Batch(
+		player.SetSpeedCmd(m.mpv, m.player.Speed),
 		player.TickCmd(m.mpv, m.playGeneration),
 		syncTickCmd(),
 	)
@@ -394,7 +406,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			}
 			interval := 500 * time.Millisecond << shift
 			logger.Debug("mpv properties not ready yet, backing off", "attempt", m.propertyUnavailableCount, "nextTick", interval)
-			return m, tickCmd(m.mpv, m.playGeneration, interval)
+			return m, player.TickAfterCmd(m.mpv, m.playGeneration, interval)
 		}
 		m.propertyUnavailableCount = 0
 
@@ -405,7 +417,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	m.propertyUnavailableCount = 0
-	m.trackListeningTime(msg.Paused)
+	m.trackListeningTime(!msg.Paused && !msg.Idle)
 
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
@@ -1146,28 +1158,6 @@ func (m Model) Cleanup() {
 func syncTickCmd() tea.Cmd {
 	return tea.Tick(syncInterval, func(_ time.Time) tea.Msg {
 		return SyncTickMsg{}
-	})
-}
-
-// tickCmd returns a command that polls mpv position after the given interval.
-func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd {
-	return tea.Tick(interval, func(_ time.Time) tea.Msg {
-		pos, posErr := p.GetPosition()
-		dur, durErr := p.GetDuration()
-		paused, pauseErr := p.GetPaused()
-
-		for _, err := range []error{posErr, durErr, pauseErr} {
-			if err != nil {
-				return player.PositionMsg{Err: err, Generation: generation}
-			}
-		}
-
-		return player.PositionMsg{
-			Position:   pos,
-			Duration:   dur,
-			Paused:     paused,
-			Generation: generation,
-		}
 	})
 }
 

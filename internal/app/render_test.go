@@ -6,7 +6,9 @@ import (
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/captions"
+	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/screens/library"
+	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -185,6 +187,32 @@ func TestPaletteDoesNotHidePlaybackFooter(t *testing.T) {
 	lastLine := lines[len(lines)-1]
 	if !containsString(lastLine, "My Book") {
 		t.Fatalf("playback footer should remain visible below palette, got last line %q", lastLine)
+	}
+}
+
+// TestHintsShowNoKeyThatTheScreenCaptures verifies that the hint line shows no
+// global key and no playback key while a text input or a dialog gets the keys.
+func TestHintsShowNoKeyThatTheScreenCaptures(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.sessionID = "sess-123"
+	m.player.Playing = true
+	m.width = 160
+	item := abs.LibraryItem{ID: "item-1", MediaType: "book"}
+
+	m.screen = ScreenMetadataEdit
+	m.metadataEdit = metadataedit.New(m.styles, item)
+	hints := m.viewHints()
+	if !strings.Contains(hints, "save") || strings.Contains(hints, "help") || strings.Contains(hints, "pause") {
+		t.Errorf("hints of the metadata editor = %q, want the keys of the editor only", hints)
+	}
+
+	m.screen = ScreenDetail
+	m.detail = detail.New(m.styles, item)
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = result.(Model)
+	hints = m.viewHints()
+	if strings.TrimSpace(hints) != "" || strings.Count(hints, "\n") != 0 {
+		t.Errorf("hints with the confirmation dialog open = %q, want one empty line", hints)
 	}
 }
 

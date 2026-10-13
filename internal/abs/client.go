@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/Thelost77/pine/internal/logger"
@@ -36,6 +37,9 @@ type Client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+	// noBookmarkRoute is true after the server answered 404 for the bookmarks
+	// of one item. See GetBookmarks.
+	noBookmarkRoute atomic.Bool
 }
 
 // NewClient creates a new ABS API client.

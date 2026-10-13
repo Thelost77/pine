@@ -90,8 +90,11 @@ type MarkFinishedMsg struct {
 	Progress *abs.UserMediaProgress
 }
 
-// BookmarksUpdatedMsg updates the bookmark list after an add/delete operation.
+// BookmarksUpdatedMsg updates the bookmark list after a load or an
+// add/delete operation. ItemID is the item of the bookmarks: the answer for an
+// item can come after the user opened a different item.
 type BookmarksUpdatedMsg struct {
+	ItemID    string
 	Bookmarks []abs.Bookmark
 	Err       error
 }
@@ -773,7 +776,9 @@ func (m *Model) startBookmarkEdit() tea.Cmd {
 
 func (m Model) updateBookmarkEditor(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keys.Back):
+	// Only esc cancels the edit. The left arrow, which also goes back on the
+	// detail screen, moves the cursor.
+	case msg.Type == tea.KeyEsc:
 		m.editingBookmark = false
 		m.bookmarkEditErr = ""
 		m.refreshContent()

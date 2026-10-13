@@ -11,6 +11,7 @@ import (
 	"github.com/Thelost77/pine/internal/spruce/app"
 	"github.com/Thelost77/pine/internal/spruce/buildinfo"
 	"github.com/Thelost77/pine/internal/spruce/config"
+	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -44,7 +45,7 @@ func main() {
 	p := tea.NewProgram(rootModel, tea.WithAltScreen())
 	rootModel.SetProgram(p)
 
-	finalModel, err := p.Run()
+	finalModel, err := ui.RunProgram(p)
 	if err != nil {
 		logger.Error("program exited with error", "err", err)
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

@@ -297,6 +297,38 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	}
 }
 
+// TestNewPlaybackGetsSpeedOfModel verifies that each new playback plays at the
+// speed of the model, which the footer shows. Each launch makes a new player,
+// and a new player plays at the speed 1.0. A new session and a track rollover
+// make a launch.
+func TestNewPlaybackGetsSpeedOfModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Player.Speed = 1.5
+	mp := &mockPlayer{}
+	m := NewWithPlayer(cfg, nil, nil, nil, mp)
+
+	for _, sessionID := range []string{"sess-first", "sess-next-track"} {
+		result, cmd := m.Update(PlaySessionMsg{
+			Session:   PlaySessionData{SessionID: sessionID, ItemID: "item-001", Duration: 3600},
+			StreamURL: "http://test/audio.mp3",
+		})
+		// The launch gives PlayerReadyMsg, and the model gives its commands.
+		var ready tea.Cmd
+		m, ready = feedCmd(result.(Model), cmd)
+		executeBatchCmds(ready)
+
+		mp.mu.Lock()
+		speed := mp.speed
+		mp.mu.Unlock()
+		if speed != 1.5 {
+			t.Errorf("speed of the player in the session %s = %v, want 1.5", sessionID, speed)
+		}
+		if m.player.Speed != 1.5 {
+			t.Errorf("speed of the model in the session %s = %v, want 1.5", sessionID, m.player.Speed)
+		}
+	}
+}
+
 func TestPlayEpisodeCmdUsesSessionDurationWhenEpisodeDurationMissing(t *testing.T) {
 	log := &apiLog{}
 	srv := newMockABSServer(log)

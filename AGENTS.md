@@ -60,7 +60,7 @@ The Architecture Map below describes pine and the shared packages.
 | `bookmarks.go` | Bookmark CRUD, chapter next/prev, seek logic (in-track vs cross-track), fetchBookmarksCmd/fetchEpisodesCmd/fetchBookDetailCmd |
 | `metadata.go` | Metadata editor save flow: server PATCH, cache eviction, detail refresh |
 | `messages.go` | Screen enum, PlaySessionMsg, PlaySessionData, QueueEntry, all root-level message types |
-| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, chapters, sleep, command palette). Key names for the player model. |
+| `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, sleep, command palette). Key names for the player model. |
 | `help.go` | Help overlay groups for pine |
 | `queue.go` | Queue entry enqueue/dequeue with dedup, clone helpers |
 | `mpris_state.go` | MPRIS bridge message conversion between player state and D-Bus adapter |
@@ -69,9 +69,9 @@ The Architecture Map below describes pine and the shared packages.
 
 | File | Responsibility |
 |------|---------------|
-| `mpv.go` | Mpv struct: Launch (creates a libmpv handle and loads the file), GetPosition/GetDuration/GetPaused, Seek, SetSpeed/SetVolume, Quit. `ErrClosed` and `ErrPropertyUnavailable`. Writes the warnings and errors of mpv to the app log, without URL queries. Runtime directory for the media cache. |
+| `mpv.go` | Mpv struct: Launch (creates a libmpv handle and loads the file), GetPosition/GetDuration/GetPaused/GetIdle, Seek, SetSpeed/SetVolume, Quit. `ErrClosed` and `ErrPropertyUnavailable`. Writes the warnings and errors of mpv to the app log, without URL queries. Runtime directory for the media cache. |
 | `libmpv.go`, `libmpv_unix.go`, `libmpv_windows.go` | Binding to libmpv through purego, with no cgo. The library loads on the first Launch. Library search order for each system. |
-| `commands.go` | tea.Cmd factories: TickCmd (500ms poll), LaunchCmd, SetPauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd. WatchEvents returns PlayerEndMsg at the end of a playback. |
+| `commands.go` | tea.Cmd factories: TickCmd (500ms poll), TickAfterCmd (poll after an interval), LaunchCmd, SetPauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd. A command for the pause state, the speed, or the volume returns CommandErrMsg if the player does not accept the value. WatchEvents returns PlayerEndMsg at the end of a playback. |
 | `model.go` | Player sub-model: Position/Duration/Speed/Volume state, key handling (play/pause, seek, speed, volume) |
 | `view.go` | Player footer bar: icon + title + time + speed + optional volume/sleep |
 | `cache.go`, `group.go` | Session media cache and player group for simultaneous playback. Only spruce uses them. |
@@ -116,8 +116,8 @@ The server is written from the MPRIS 2.2 specification. The Go MPRIS server libr
 | `types.go` | All ABS data types. Custom UnmarshalJSON for MediaMetadata.Series (handles both object and array). |
 | `libraries.go` | GetLibraries, GetPersonalized, GetLibraryItems (paginated), GetLibraryItemsBatch (10 concurrent), GetLibrarySeries, GetSeriesContents, FilterAudioLibraries (sample-based audio detection) |
 | `playback.go` | StartPlaySession, StartEpisodePlaySession, SyncSession, CloseSession, CloseSessionNoSync (sends no position) |
-| `progress.go`, `me.go` | UpdateProgress, UpdatePosition (no `isFinished` key), GetMediaProgress (with bookmarks), UpdateEpisodeProgress, GetMe (user + all media progress) |
-| `bookmarks.go` | CreateBookmark, UpdateBookmark, DeleteBookmark, GetBookmarks |
+| `progress.go`, `me.go` | UpdateProgress, UpdatePosition (no `isFinished` key), GetMediaProgress (ABS gives no bookmarks with the progress), UpdateEpisodeProgress, GetMe (user + all media progress) |
+| `bookmarks.go` | CreateBookmark, UpdateBookmark, DeleteBookmark, GetBookmarks (`GET /api/me/bookmarks/{id}`, or `GET /api/me` for ABS before 2.36.0) |
 
 ### Data (internal/db/)
 
@@ -129,7 +129,7 @@ TOML config with defaults. Theme (Everforest Dark palette), player (speed, seek)
 
 ### UI (internal/ui/, shared)
 
-Styles from theme config. Format helpers (timestamps, durations). Components: HelpOverlay (the app supplies the groups), ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette, and the filter, flash, and skeleton helpers.
+Styles from theme config. Format helpers (timestamps, durations). `RunProgram` runs a Bubble Tea program and quits it at SIGHUP. Components: HelpOverlay (the app supplies the groups), ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette, and the filter, flash, and skeleton helpers.
 
 ## Key Patterns to Follow
 
@@ -139,11 +139,14 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - `tea.Batch` for concurrent async operations
 - Skeleton loading with generation-gated reveal delays (home: 500ms, library: 150ms)
 - Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
-- `q` always quits, `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only
+- `q` quits, and `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only. These keys have no global function while a text input or a dialog gets the keys (`capturesKeys`).
 - A quit (`q` or ctrl+c) returns only `tea.Quit` and keeps the session in the model. `Cleanup` sends the last position, and `main` waits for it. Bubble Tea does not wait for a command at a quit, so a quit must not send the position in a command.
-- `ctrl+p` opens the global command palette from any screen
+- The `main` of pine and the `main` of spruce run the program with `ui.RunProgram`, which quits the program at SIGHUP, the close of the terminal, so that `Cleanup` runs. Bubble Tea quits the program at SIGTERM.
+- `ctrl+p` opens the global command palette from each screen, but not while a text input or a dialog gets the keys
+- A text input or a confirmation dialog of a screen gets each key, except ctrl+c. `capturesKeys` in `playback.go` is true for the login screen, the metadata editor, a list filter, and the bookmark title editor. It is also true for the confirmation dialog of the detail screen. `Update` in `model.go` then gives the key to the screen, before the global keys, the chapter overlay, the error banner, and the playback keys. The help overlay and the command palette get the keys first while they are open. If you add a text input or a dialog to a screen, add it to `capturesKeys`.
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
-- The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A test moves the clock with `Model.now`.
+- Each launch makes a new mpv handle, which plays at the speed 1.0. `handlePlayerReady` sets the speed of the model in the new player.
+- The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A player that is paused or idle does not play. mpv reports no pause while it waits for data, so a position tick also reads the mpv property `core-idle` (`GetIdle`, `PositionMsg.Idle`). A test moves the clock with `Model.now`.
 - pine finds the end of a track through `errors.Is(err, player.ErrClosed)` on a position tick. spruce uses `PlayerEndMsg`, and a tick with `ErrClosed` can arrive before it. Do not match the text of a player error.
 
 ## Testing
@@ -152,6 +155,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - E2E tests in `internal/app/e2e_test.go` + `e2e_helpers_test.go` use mock HTTP server + mock player
 - E2E tests drive the bubbletea Update loop programmatically (no real TUI)
 - `internal/app/model_test.go`, `playback_test.go`, `bookmarks_test.go`, `render_test.go` for app-level tests
+- `internal/ui/program_unix_test.go` starts the test program again as a child process, sends SIGHUP to it, and checks that it gets to the place where a `main` calls `Cleanup`. The child runs its program with `ui.RunProgram`, as each `main` does. It does not run on Windows.
 - `internal/cache/*_test.go` for cache store and helper behavior
 - `internal/mpris/mpris_test.go` for the D-Bus adapter and bridge
 - `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.

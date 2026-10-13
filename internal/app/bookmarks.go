@@ -24,6 +24,14 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		m.propagateSize()
 		return m, cmd
 	}
+	// The bookmark gets the position of the player, so it is for the item
+	// that plays only.
+	if m.itemID != msg.Item.ID {
+		logger.Warn("bookmark skipped: a different item plays", "itemID", msg.Item.ID, "playingItemID", m.itemID)
+		cmd := m.err.SetError(fmt.Errorf("can only add bookmarks to the currently playing item"))
+		m.propagateSize()
+		return m, cmd
+	}
 	client := m.client
 	itemID := msg.Item.ID
 	currentTime := m.player.Position
@@ -46,7 +54,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: time.Now().UnixMilli()}
 		updated := append(append([]abs.Bookmark{}, existing...), newBm)
 		logger.Info("bookmark added locally", "itemID", itemID, "count", len(updated))
-		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: updated}
 	}
 }
 
@@ -88,7 +96,7 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 			}
 		}
 		logger.Info("bookmark deleted locally", "itemID", itemID, "count", len(updated))
-		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: updated}
 	}
 }
 
@@ -121,7 +129,7 @@ func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cm
 			}
 		}
 		logger.Info("bookmark updated locally", "itemID", itemID, "count", len(updated))
-		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: updated}
 	}
 }
 
@@ -132,14 +140,11 @@ func (m Model) fetchBookmarksCmd(itemID string) tea.Cmd {
 	}
 	client := m.client
 	return func() tea.Msg {
-		progress, err := client.GetMediaProgress(context.Background(), itemID)
+		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
 		if err != nil {
-			if abs.IsHTTPStatus(err, 404) {
-				return detail.BookmarksUpdatedMsg{Bookmarks: nil}
-			}
-			return detail.BookmarksUpdatedMsg{Err: err}
+			return detail.BookmarksUpdatedMsg{ItemID: itemID, Err: err}
 		}
-		return detail.BookmarksUpdatedMsg{Bookmarks: progress.Bookmarks}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: bookmarks}
 	}
 }
 

@@ -91,7 +91,6 @@ Some keys are context-specific.
 | `space` / `p` | Play / pause |
 | `a` / `A` | Add to queue / play next |
 | `>` | Play next queued item |
-| `n` / `N` | Next / previous chapter |
 | `+` / `-` | Speed up / down |
 | `]` / `[` | Volume up / down |
 | `c` | Toggle captions during playback |
@@ -127,8 +126,6 @@ speed_up = "+"
 speed_down = "-"
 volume_up = "]"
 volume_down = "["
-next_chapter = "n"
-prev_chapter = "N"
 sleep_timer = "S"
 
 [theme]

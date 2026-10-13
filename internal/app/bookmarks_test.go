@@ -39,6 +39,7 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 
 	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
+	m.itemID = "item-001"
 	m.player.Position = 120
 	m.detail.SetBookmarks([]abs.Bookmark{
 		{LibraryItemID: "item-001", Title: "Existing", Time: 60, CreatedAt: 1700000000000},
@@ -56,6 +57,9 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 	}
 	if updateMsg.Err != nil {
 		t.Fatalf("unexpected error: %v", updateMsg.Err)
+	}
+	if updateMsg.ItemID != "item-001" {
+		t.Errorf("ItemID = %q, want item-001", updateMsg.ItemID)
 	}
 	if len(updateMsg.Bookmarks) != 2 {
 		t.Fatalf("expected 2 bookmarks, got %d", len(updateMsg.Bookmarks))
@@ -79,6 +83,7 @@ func TestHandleAddBookmarkReturnsPlaybackErrorOnFailure(t *testing.T) {
 
 	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
+	m.itemID = "item-001"
 	m.player.Position = 120
 
 	_, cmd := m.handleAddBookmark(detail.AddBookmarkCmd{Item: testBookmarkItem("item-001")})
@@ -113,6 +118,7 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 
 	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
+	m.itemID = "item-001"
 	m.episodeID = "ep-001"
 	m.player.Title = "Episode 2199"
 	m.player.Position = 120
@@ -162,6 +168,9 @@ func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *tes
 	if updateMsg.Err != nil {
 		t.Fatalf("expected empty bookmark update, got error %v", updateMsg.Err)
 	}
+	if updateMsg.ItemID != "item-001" {
+		t.Errorf("ItemID = %q, want item-001", updateMsg.ItemID)
+	}
 	if len(updateMsg.Bookmarks) != 0 {
 		t.Fatalf("expected empty bookmarks after delete, got %d", len(updateMsg.Bookmarks))
 	}
@@ -202,6 +211,9 @@ func TestHandleUpdateBookmarkUpdatesTitle(t *testing.T) {
 	}
 	if updateMsg.Err != nil {
 		t.Fatalf("expected no refresh error, got %v", updateMsg.Err)
+	}
+	if updateMsg.ItemID != "item-001" {
+		t.Errorf("ItemID = %q, want item-001", updateMsg.ItemID)
 	}
 	if len(updateMsg.Bookmarks) != 1 {
 		t.Fatalf("expected 1 bookmark, got %d", len(updateMsg.Bookmarks))

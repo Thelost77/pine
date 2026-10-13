@@ -3,6 +3,8 @@ package player
 import (
 	"fmt"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestLaunchCmdPropagatesGenerationToLaunchError verifies that LaunchCmd
@@ -84,6 +86,7 @@ func (launchFailPlayer) Launch(url, startTime string, paused bool, httpHeaders [
 func (launchFailPlayer) GetPosition() (float64, error)      { return 0, nil }
 func (launchFailPlayer) GetDuration() (float64, error)      { return 0, nil }
 func (launchFailPlayer) GetPaused() (bool, error)           { return false, nil }
+func (launchFailPlayer) GetIdle() (bool, error)             { return false, nil }
 func (launchFailPlayer) SetPause(paused bool) error         { return nil }
 func (launchFailPlayer) Seek(seconds float64) error         { return nil }
 func (launchFailPlayer) SeekRelative(seconds float64) error { return nil }
@@ -97,3 +100,32 @@ var errLaunchSentinel = &sentinelError{"launch failed"}
 type sentinelError struct{ s string }
 
 func (e *sentinelError) Error() string { return e.s }
+
+// stateFailPlayer implements Player and fails SetPause, SetSpeed, and
+// SetVolume.
+type stateFailPlayer struct{ launchFailPlayer }
+
+func (stateFailPlayer) SetPause(paused bool) error   { return errStateSentinel }
+func (stateFailPlayer) SetSpeed(speed float64) error { return errStateSentinel }
+func (stateFailPlayer) SetVolume(vol int) error      { return errStateSentinel }
+
+var errStateSentinel = &sentinelError{"state not accepted"}
+
+// TestStateCommandsReportFailure verifies that a command for the pause state,
+// the speed, or the volume reports a failure of the player as CommandErrMsg.
+// The failure is not a position tick: an app ignores a tick that has no
+// generation.
+func TestStateCommandsReportFailure(t *testing.T) {
+	p := stateFailPlayer{}
+	cmds := map[string]tea.Cmd{
+		"pause":  SetPauseCmd(p, true),
+		"speed":  SetSpeedCmd(p, 1.5),
+		"volume": SetVolumeCmd(p, 50),
+	}
+	for name, cmd := range cmds {
+		msg, ok := cmd().(CommandErrMsg)
+		if !ok || msg.Err != error(errStateSentinel) {
+			t.Errorf("%s: the command returned %#v, want CommandErrMsg with the error of the player", name, cmd())
+		}
+	}
+}

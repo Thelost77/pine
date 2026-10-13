@@ -14,8 +14,6 @@ type KeyMap struct {
 	ChapterOverlay key.Binding
 	Captions       key.Binding
 	NextInQueue    key.Binding
-	NextChapter    key.Binding
-	PrevChapter    key.Binding
 	SleepTimer     key.Binding
 	GlobalPalette  key.Binding
 }
@@ -46,14 +44,6 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 		NextInQueue: key.NewBinding(
 			key.WithKeys(cfg.NextInQueue),
 			key.WithHelp(">", "next queued"),
-		),
-		NextChapter: key.NewBinding(
-			key.WithKeys(cfg.NextChapter),
-			key.WithHelp("n", "next chapter"),
-		),
-		PrevChapter: key.NewBinding(
-			key.WithKeys(cfg.PrevChapter),
-			key.WithHelp("N", "prev chapter"),
 		),
 		SleepTimer: key.NewBinding(
 			key.WithKeys(cfg.SleepTimer),

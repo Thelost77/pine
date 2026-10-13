@@ -30,8 +30,6 @@ type KeybindsConfig struct {
 	SpeedDown    string `toml:"speed_down"`
 	VolumeUp     string `toml:"volume_up"`
 	VolumeDown   string `toml:"volume_down"`
-	NextChapter  string `toml:"next_chapter"`
-	PrevChapter  string `toml:"prev_chapter"`
 	SleepTimer   string `toml:"sleep_timer"`
 	Back         string `toml:"back"`
 }
@@ -61,8 +59,6 @@ func Default() Config {
 			SpeedDown:    "-",
 			VolumeUp:     "]",
 			VolumeDown:   "[",
-			NextChapter:  "n",
-			PrevChapter:  "N",
 			SleepTimer:   "S",
 			Back:         "esc",
 		},

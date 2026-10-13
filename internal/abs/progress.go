@@ -50,8 +50,8 @@ func (c *Client) UpdatePosition(ctx context.Context, itemID, episodeID string, c
 	return nil
 }
 
-// GetMediaProgress returns the user's media progress (including bookmarks)
-// for a specific library item.
+// GetMediaProgress returns the user's media progress for a specific library
+// item. ABS gives no bookmarks in this response: GetBookmarks reads them.
 func (c *Client) GetMediaProgress(ctx context.Context, itemID string) (*MediaProgressWithBookmarks, error) {
 	path := fmt.Sprintf("/api/me/progress/%s", itemID)
 	resp, err := c.do(ctx, http.MethodGet, path, nil)

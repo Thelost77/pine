@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -590,6 +591,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleUpdateBookmark(msg)
 
 	case detail.BookmarksUpdatedMsg:
+		if msg.ItemID != "" && msg.ItemID != m.detail.ItemID() {
+			return m, nil
+		}
 		m.detail, _ = m.detail.Update(msg)
 		return m, nil
 
@@ -656,6 +660,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case player.PlayerQuitMsg:
 		return m, nil
+
+	case player.CommandErrMsg:
+		// A player that is closed has no state. The next launch sets the
+		// speed and the volume.
+		if errors.Is(msg.Err, player.ErrClosed) {
+			return m, nil
+		}
+		cmd := m.err.SetError(msg.Err)
+		m.propagateSize()
+		return m, cmd
 
 	// --- MPRIS control messages ---
 
@@ -752,7 +766,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
-		if !m.isFiltering() && key.Matches(msg, m.keys.Help) {
+		if (m.help.Visible() || !m.capturesKeys()) && key.Matches(msg, m.keys.Help) {
 			m.help.Toggle()
 			return m, nil
 		}
@@ -776,7 +790,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.updateScreen(msg)
 		}
-		if m.screen == ScreenMetadataEdit {
+		// A text input or a confirmation dialog of the screen gets each key.
+		if m.capturesKeys() {
 			return m.updateScreen(msg)
 		}
 		if m.chapterOverlayVisible {
@@ -815,49 +830,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.propagateSize()
 			return m, nil
 		}
-		if !m.isFiltering() && key.Matches(msg, m.keys.GlobalPalette) {
+		if key.Matches(msg, m.keys.GlobalPalette) {
 			m.openGlobalPalette()
 			return m, nil
 		}
-		if !m.isFiltering() && key.Matches(msg, m.keys.ChapterOverlay) {
+		if key.Matches(msg, m.keys.ChapterOverlay) {
 			if m.canOpenChapterOverlay() {
 				m.openChapterOverlay()
 			}
 			return m, nil
 		}
-		if !m.isFiltering() && m.isPlaying() && len(m.captionCues) > 0 && key.Matches(msg, m.keys.Captions) {
+		if m.isPlaying() && len(m.captionCues) > 0 && key.Matches(msg, m.keys.Captions) {
 			m.toggleCaptions()
 			return m, nil
 		}
-		// Global quit: q always quits the app. The session stays in the model:
+		// Global quit: q quits the app. The session stays in the model:
 		// main calls Cleanup on the final model, and Cleanup waits until the
 		// server has the last position. The program does not wait for a
 		// command, so the request of a command can be lost.
-		if !m.isFiltering() && m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
+		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
 		}
 		// Global back: esc/left goes back but never quits.
-		if m.screen != ScreenLogin && !m.isFiltering() && !m.hasActiveFilter() {
-			isConfirmVisible := m.screen == ScreenDetail && m.detail.ConfirmOverlayVisible()
-			if !isConfirmVisible && key.Matches(msg, m.keys.Back) {
-				if len(m.backStack) > 0 {
-					return m.back()
-				}
-				return m, nil
+		if !m.hasActiveFilter() && key.Matches(msg, m.keys.Back) {
+			if len(m.backStack) > 0 {
+				return m.back()
 			}
+			return m, nil
 		}
 		// When playing, playback keys take priority over screen keys.
-		if !m.isFiltering() && m.isPlaying() {
+		if m.isPlaying() {
 			if key.Matches(msg, m.keys.NextInQueue) {
 				return m.skipToNextQueued()
-			}
-			if len(m.chapters) > 0 {
-				if key.Matches(msg, m.keys.NextChapter) {
-					return m.seekToChapter(m.nextChapter())
-				}
-				if key.Matches(msg, m.keys.PrevChapter) {
-					return m.seekToChapter(m.prevChapter())
-				}
 			}
 			if key.Matches(msg, m.keys.SleepTimer) {
 				return m.cycleSleepTimer()

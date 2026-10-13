@@ -49,7 +49,6 @@ func helpGroups() []components.HelpGroup {
 				{Key: "] / [", Desc: "volume up / down"},
 				{Key: "C", Desc: "open chapters"},
 				{Key: "c", Desc: "toggle captions"},
-				{Key: "n / N", Desc: "next / prev chapter"},
 				{Key: "S", Desc: "sleep timer"},
 			},
 		},

@@ -620,6 +620,101 @@ func TestE2E_BookmarkTitleEdit(t *testing.T) {
 	}
 }
 
+// e2eDetailWithBookmark returns a model at the detail screen of an item that
+// plays, has chapters, and has one bookmark with the title "Old". The bookmark
+// list has the focus.
+func e2eDetailWithBookmark(t *testing.T) (Model, *e2eServerState) {
+	t.Helper()
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-001"] = []abs.Bookmark{
+		testBookmark("Old", 300.0),
+	}
+	srv := newFullMockABSServer(&apiLog{}, state)
+	t.Cleanup(srv.Close)
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{position: 100, duration: 3600})
+	m = e2eSetSize(m, 120, 40)
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: testLibraryItem("item-001", "The Great Gatsby")})
+	m = feedCmdChain(res.(Model), cmd, 5)
+
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 1800, Title: "Chapter 1"},
+		{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
+	}
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	return m, state
+}
+
+// e2eSaveBookmarkTitle presses enter in the bookmark title editor, and returns
+// the title that the server has.
+func e2eSaveBookmarkTitle(m Model, state *e2eServerState) string {
+	m, cmd := e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	_ = feedCmdChain(m, cmd, 3)
+	return state.getBookmarks("item-001")[0].Title
+}
+
+// TestE2E_BookmarkTitleEditGetsEachKey verifies that the bookmark title editor
+// gets each key during a playback. Outside the editor, these keys have a
+// global function or a playback function.
+func TestE2E_BookmarkTitleEditGetsEachKey(t *testing.T) {
+	m, state := e2eDetailWithBookmark(t)
+
+	// esc cancels the edit. It does not go back to the previous screen.
+	m, _ = e2ePressKey(m, 'e')
+	m, _ = e2ePressSpecial(m, tea.KeyEsc)
+	assertScreen(t, m, ScreenDetail)
+	if m.detail.EditingBookmark() {
+		t.Fatal("after esc, the bookmark editor is open")
+	}
+
+	m, _ = e2ePressKey(m, 'e')
+	const typed = "nNqC?lhpS>+-[] c"
+	m = e2eTypeString(m, typed)
+	if !m.detail.EditingBookmark() {
+		t.Fatalf("after the keys %q, the bookmark editor is not open", typed)
+	}
+	if m.player.Position != 100.0 || !m.player.Playing {
+		t.Errorf("after the keys %q, position = %v and playing = %v, want 100 and true", typed, m.player.Position, m.player.Playing)
+	}
+	if got := e2eSaveBookmarkTitle(m, state); got != "Old"+typed {
+		t.Fatalf("server bookmark title = %q, want %q", got, "Old"+typed)
+	}
+}
+
+// TestE2E_BookmarkTitleEditGetsKeysOfBannerAndChapterList verifies that the
+// bookmark title editor gets each key while the error banner shows, and while
+// the chapter list is open. Outside the editor, a key closes the banner, and
+// the chapter list has the keys j, k, and enter.
+func TestE2E_BookmarkTitleEditGetsKeysOfBannerAndChapterList(t *testing.T) {
+	tests := map[string]func(m Model) Model{
+		"error banner": func(m Model) Model {
+			m, _ = e2ePressKey(m, 'e')
+			res, _ := m.Update(components.ErrMsg{Err: fmt.Errorf("failure")})
+			return res.(Model)
+		},
+		"chapter list": func(m Model) Model {
+			m, _ = e2ePressKey(m, 'C')
+			m, _ = e2ePressKey(m, 'e')
+			return m
+		},
+	}
+	for name, openEditor := range tests {
+		t.Run(name, func(t *testing.T) {
+			m, state := e2eDetailWithBookmark(t)
+			m = e2eTypeString(openEditor(m), "jk")
+			if got := e2eSaveBookmarkTitle(m, state); got != "Oldjk" {
+				t.Fatalf("server bookmark title = %q, want Oldjk", got)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E2E: Bookmarks fetched on detail entry
 // ---------------------------------------------------------------------------
@@ -650,11 +745,68 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	// Execute the bookmark fetch
 	m = feedCmdChain(m, cmd, 5)
 
-	assertAPICallMade(t, log, "GET", "/api/me")
+	assertAPICallMade(t, log, "GET", "/api/me/bookmarks/item-001")
 
 	// Verify bookmarks are on the detail screen
 	if len(m.detail.Bookmarks()) != 2 {
 		t.Errorf("detail bookmarks = %d, want 2", len(m.detail.Bookmarks()))
+	}
+}
+
+// TestE2E_NoBookmarkForItemThatDoesNotPlay verifies that b on the detail
+// screen of an item makes no bookmark while a different item plays. The
+// bookmark would have the position of the item that plays.
+func TestE2E_NoBookmarkForItemThatDoesNotPlay(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{position: 100, duration: 3600})
+	m = e2eSetSize(m, 120, 40)
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.detail = detail.New(m.styles, testLibraryItem("item-002", "Other Book"))
+	m, _ = m.navigate(ScreenDetail)
+	m = e2eSetSize(m, 120, 40)
+
+	m, cmd := e2ePressKey(m, 'b')
+	m = feedCmdChain(m, cmd, 3)
+
+	if n := log.count("POST", "/api/me/item/"); n != 0 {
+		t.Errorf("%d bookmark requests for an item that does not play, want 0: %+v", n, log.get())
+	}
+	if !m.err.HasError() {
+		t.Error("the error banner is not visible")
+	}
+}
+
+// TestE2E_DetailIgnoresBookmarksOfOtherItem verifies that the detail screen
+// ignores the bookmarks of an item that it does not show. The answer for an
+// item can come after the user opened a different item.
+func TestE2E_DetailIgnoresBookmarksOfOtherItem(t *testing.T) {
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-001"] = []abs.Bookmark{
+		testBookmark("Bookmark of the first item", 300.0),
+	}
+	srv := newFullMockABSServer(&apiLog{}, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+
+	res, firstCmd := m.Update(home.NavigateDetailMsg{Item: testLibraryItem("item-001", "First")})
+	res, _ = res.(Model).Update(BackMsg{})
+	res, secondCmd := res.(Model).Update(home.NavigateDetailMsg{Item: testLibraryItem("item-002", "Second")})
+	m = feedCmdChain(res.(Model), secondCmd, 5)
+	// The answers for the first item come last.
+	m = feedCmdChain(m, firstCmd, 5)
+
+	if m.detail.ItemID() != "item-002" || len(m.detail.Bookmarks()) != 0 {
+		t.Fatalf("detail of %s has the bookmarks %+v, want item-002 and no bookmarks", m.detail.ItemID(), m.detail.Bookmarks())
 	}
 }
 
@@ -689,8 +841,8 @@ func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForNoBookmarks(t *testing.
 func TestE2E_BookmarkFetchOnDetailEntryShowsBookmarkErrorForServerFailure(t *testing.T) {
 	log := &apiLog{}
 	state := &e2eServerState{
-		bookmarks:      make(map[string][]abs.Bookmark),
-		progressStatus: map[string]int{"item-001": http.StatusInternalServerError},
+		bookmarks:       make(map[string][]abs.Bookmark),
+		bookmarksStatus: map[string]int{"item-001": http.StatusInternalServerError},
 	}
 	srv := newFullMockABSServer(log, state)
 	defer srv.Close()
@@ -1477,17 +1629,27 @@ func TestE2E_ChapterNavigation(t *testing.T) {
 		t.Fatalf("expected 2 chapters from play session, got %d", len(m.chapters))
 	}
 
-	// Position is 42 (in chapter 1: 0-1800)
-	// Press 'n' → next chapter start (1800)
-	m, _ = e2ePressKey(m, 'n')
-	if m.player.Position != 1800.0 {
-		t.Errorf("after 'n', position = %f, want 1800.0", m.player.Position)
+	// The command palette offers the two chapter actions.
+	offered := map[components.PaletteAction]bool{}
+	playerItems, _ := m.buildStaticPaletteItems()
+	for _, item := range playerItems {
+		offered[item.Action] = true
+	}
+	if !offered[components.ActionNextChapter] || !offered[components.ActionPrevChapter] {
+		t.Fatalf("palette items = %+v, want Next Chapter and Previous Chapter", playerItems)
 	}
 
-	// Press 'N' → previous chapter start (0)
-	m, _ = e2ePressKey(m, 'N')
+	// Position is 42 (in chapter 1: 0-1800)
+	// Palette action "Next Chapter" → next chapter start (1800)
+	m, _ = m.handlePaletteAction(components.ActionNextChapter, "", "", "", nil)
+	if m.player.Position != 1800.0 {
+		t.Errorf("after Next Chapter, position = %f, want 1800.0", m.player.Position)
+	}
+
+	// Palette action "Previous Chapter" → previous chapter start (0)
+	m, _ = m.handlePaletteAction(components.ActionPrevChapter, "", "", "", nil)
 	if m.player.Position != 0.0 {
-		t.Errorf("after 'N', position = %f, want 0.0", m.player.Position)
+		t.Errorf("after Previous Chapter, position = %f, want 0.0", m.player.Position)
 	}
 }
 
@@ -1733,14 +1895,14 @@ func TestE2E_WithinTrackSeek(t *testing.T) {
 		t.Errorf("expected no new API calls for within-track seek, got %d new calls", apiCallsAfter-apiCallsBefore)
 	}
 
-	// Press 'n' (next chapter) — chapter 2 starts at 900, within same track
-	m, cmd = e2ePressKey(m, 'n')
+	// Palette action "Next Chapter" — chapter 2 starts at 900, within same track
+	m, cmd = m.handlePaletteAction(components.ActionNextChapter, "", "", "", nil)
 	if cmd != nil {
 		m = feedCmdChain(m, cmd, 3)
 	}
 
 	if m.player.Position != 900.0 {
-		t.Errorf("position after 'n' = %f, want 900.0", m.player.Position)
+		t.Errorf("position after Next Chapter = %f, want 900.0", m.player.Position)
 	}
 
 	mp.mu.Lock()
@@ -1825,9 +1987,9 @@ func TestE2E_CrossTrackChapterSeek(t *testing.T) {
 		{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
 	}
 
-	// Press 'n' → chapter 2 at position 2000 is beyond current track (0-1800)
+	// Palette action "Next Chapter" → chapter 2 at position 2000 is beyond current track (0-1800)
 	// This should trigger a cross-track restart
-	m, cmd := e2ePressKey(m, 'n')
+	m, cmd := m.handlePaletteAction(components.ActionNextChapter, "", "", "", nil)
 
 	// Feed the cross-track restart command chain
 	m = feedCmdChain(m, cmd, 10)

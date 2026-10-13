@@ -10,9 +10,12 @@ import (
 
 // PositionMsg carries the current playback position polled from mpv.
 type PositionMsg struct {
-	Position   float64
-	Duration   float64
-	Paused     bool
+	Position float64
+	Duration float64
+	Paused   bool
+	// Idle is true if no audio plays now. A player that waits for data is
+	// idle and not paused.
+	Idle       bool
 	Err        error
 	Generation uint64 // ties this tick to a specific play session
 }
@@ -26,17 +29,32 @@ type PlayerEndMsg struct {
 	Err        error
 }
 
+// CommandErrMsg reports that the player did not accept a new pause state, a
+// new speed, or a new volume. The app then shows a state that the player does
+// not have. A seek that fails needs no message: the next position tick has
+// the position of the player.
+type CommandErrMsg struct {
+	Err error
+}
+
 // TickCmd returns a command that fires twice per second and polls mpv state.
 // The generation parameter ties the tick to a specific play session so stale
 // ticks from a previous session can be safely ignored.
 func TickCmd(p Player, generation uint64) tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg {
+	return TickAfterCmd(p, generation, 500*time.Millisecond)
+}
+
+// TickAfterCmd returns a command that polls mpv state after the interval. An
+// app uses it to wait longer while mpv has no position yet.
+func TickAfterCmd(p Player, generation uint64, interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(_ time.Time) tea.Msg {
 		pos, posErr := p.GetPosition()
 		dur, durErr := p.GetDuration()
 		paused, pauseErr := p.GetPaused()
+		idle, idleErr := p.GetIdle()
 
 		// Return first error encountered
-		for _, err := range []error{posErr, durErr, pauseErr} {
+		for _, err := range []error{posErr, durErr, pauseErr, idleErr} {
 			if err != nil {
 				return PositionMsg{Err: err, Generation: generation}
 			}
@@ -46,6 +64,7 @@ func TickCmd(p Player, generation uint64) tea.Cmd {
 			Position:   pos,
 			Duration:   dur,
 			Paused:     paused,
+			Idle:       idle,
 			Generation: generation,
 		}
 	})
@@ -56,7 +75,7 @@ func SetPauseCmd(p Player, paused bool) tea.Cmd {
 	return func() tea.Msg {
 		err := p.SetPause(paused)
 		if err != nil {
-			return PositionMsg{Err: err}
+			return CommandErrMsg{Err: err}
 		}
 		return nil
 	}
@@ -67,7 +86,7 @@ func SetSpeedCmd(p Player, speed float64) tea.Cmd {
 	return func() tea.Msg {
 		err := p.SetSpeed(speed)
 		if err != nil {
-			return PositionMsg{Err: err}
+			return CommandErrMsg{Err: err}
 		}
 		return nil
 	}
@@ -78,7 +97,7 @@ func SetVolumeCmd(p Player, vol int) tea.Cmd {
 	return func() tea.Msg {
 		err := p.SetVolume(vol)
 		if err != nil {
-			return PositionMsg{Err: err}
+			return CommandErrMsg{Err: err}
 		}
 		return nil
 	}

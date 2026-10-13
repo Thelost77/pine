@@ -33,13 +33,17 @@ type mockPlayer struct {
 	position  float64
 	duration  float64
 	paused    bool
+	idle      bool
+	speed     float64
 	launchErr error
 }
 
+// Launch starts a new playback, which has the speed 1.0, as a new mpv handle.
 func (p *mockPlayer) Launch(url, startTime string, paused bool, httpHeaders []string, volume int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launched = true
+	p.speed = 1.0
 	return p.launchErr
 }
 func (p *mockPlayer) GetPosition() (float64, error) {
@@ -56,6 +60,11 @@ func (p *mockPlayer) GetPaused() (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.paused, nil
+}
+func (p *mockPlayer) GetIdle() (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.idle, nil
 }
 func (p *mockPlayer) SetPause(paused bool) error {
 	p.mu.Lock()
@@ -75,9 +84,14 @@ func (p *mockPlayer) SeekRelative(seconds float64) error {
 	p.position += seconds
 	return nil
 }
-func (p *mockPlayer) SetSpeed(speed float64) error { return nil }
-func (p *mockPlayer) SetVolume(vol int) error      { return nil }
-func (p *mockPlayer) GetVolume() (int, error)      { return 100, nil }
+func (p *mockPlayer) SetSpeed(speed float64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.speed = speed
+	return nil
+}
+func (p *mockPlayer) SetVolume(vol int) error { return nil }
+func (p *mockPlayer) GetVolume() (int, error) { return 100, nil }
 func (p *mockPlayer) Quit() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -436,6 +450,134 @@ func TestMetadataEditorCapturesPlaybackShortcutKeys(t *testing.T) {
 	}
 	if m.ActiveScreen() != ScreenMetadataEdit {
 		t.Fatalf("ActiveScreen() = %v, want ScreenMetadataEdit", m.ActiveScreen())
+	}
+}
+
+// TestMetadataEditorCapturesHelpKey verifies that the metadata editor gets the
+// key of the help overlay.
+func TestMetadataEditorCapturesHelpKey(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.screen = ScreenMetadataEdit
+	m.metadataEdit = metadataedit.New(m.styles, abs.LibraryItem{
+		ID:        "item-1",
+		MediaType: "book",
+		Media: abs.Media{Metadata: abs.MediaMetadata{
+			Title: "Old Title",
+		}},
+	})
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = result.(Model)
+	if m.help.Visible() {
+		t.Fatal("after ?, the help overlay is open")
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("cmd = nil, want SaveCmd")
+	}
+	save, ok := cmd().(metadataedit.SaveCmd)
+	if !ok || save.Request.Metadata.Title == nil || *save.Request.Metadata.Title != "Old Title?" {
+		t.Fatalf("save = %+v, want a SaveCmd with the title %q", save, "Old Title?")
+	}
+}
+
+// TestLoginCapturesGlobalKeys verifies that a field of the login screen gets
+// the keys that have a global function on the other screens.
+func TestLoginCapturesGlobalKeys(t *testing.T) {
+	m := newTestModel()
+
+	const typed = "?Cq"
+	for _, r := range typed {
+		result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = result.(Model)
+	}
+	if m.help.Visible() {
+		t.Error("after ?, the help overlay is open")
+	}
+	if got := m.login.ServerURL(); got != typed {
+		t.Errorf("server field = %q, want %q", got, typed)
+	}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = result.(Model)
+	if m.palette.Visible() {
+		t.Error("after ctrl+p, the command palette is open")
+	}
+}
+
+// TestHelpKeyClosesHelpOnLoginScreen verifies that ? closes the help overlay
+// on a screen that gets each key. A 401 moves to the login screen while the
+// overlay is open.
+func TestHelpKeyClosesHelpOnLoginScreen(t *testing.T) {
+	m := newTestModelAuthenticated()
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	result, _ = result.(Model).Update(components.ErrMsg{Err: errors.New("status 401")})
+	m = result.(Model)
+	if m.ActiveScreen() != ScreenLogin || !m.help.Visible() {
+		t.Fatalf("ActiveScreen() = %v, help open = %v, want ScreenLogin and true", m.ActiveScreen(), m.help.Visible())
+	}
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if result.(Model).help.Visible() {
+		t.Fatal("after ?, the help overlay is open")
+	}
+}
+
+// TestDetailConfirmCapturesQuitAndBackKeys verifies that q and esc cancel the
+// confirmation dialog of the detail screen. They do not quit the program, and
+// they do not go back to the previous screen.
+func TestDetailConfirmCapturesQuitAndBackKeys(t *testing.T) {
+	keys := map[string]tea.KeyMsg{
+		"q":   {Type: tea.KeyRunes, Runes: []rune{'q'}},
+		"esc": {Type: tea.KeyEsc},
+	}
+	for name, key := range keys {
+		t.Run(name, func(t *testing.T) {
+			m := newTestModelAuthenticated()
+			m.detail = detail.New(m.styles, abs.LibraryItem{ID: "item-1", MediaType: "book"})
+			m.screen = ScreenDetail
+			m.backStack = []Screen{ScreenHome}
+
+			result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+			m = result.(Model)
+			if !m.detail.ConfirmOverlayVisible() {
+				t.Fatal("after D, the confirmation dialog is not open")
+			}
+
+			result, cmd := m.Update(key)
+			m = result.(Model)
+			if cmd != nil {
+				if _, quit := cmd().(tea.QuitMsg); quit {
+					t.Fatal("the key quits the program")
+				}
+			}
+			if m.detail.ConfirmOverlayVisible() {
+				t.Error("after the key, the confirmation dialog is open")
+			}
+			if m.ActiveScreen() != ScreenDetail {
+				t.Errorf("ActiveScreen() = %v, want ScreenDetail", m.ActiveScreen())
+			}
+		})
+	}
+}
+
+// TestPlayerCommandErrorShowsErrorBanner verifies that the model shows the
+// error of a player that did not accept a new speed. A player that is closed
+// has no state, so its error has no banner.
+func TestPlayerCommandErrorShowsErrorBanner(t *testing.T) {
+	m := newTestModelAuthenticated()
+
+	result, _ := m.Update(player.CommandErrMsg{Err: fmt.Errorf("set speed: %w", player.ErrClosed)})
+	m = result.(Model)
+	if m.err.HasError() {
+		t.Fatal("the error banner is visible for a player that is closed")
+	}
+
+	result, _ = m.Update(player.CommandErrMsg{Err: errors.New("set speed: not accepted")})
+	m = result.(Model)
+	if !m.err.HasError() {
+		t.Fatal("the error banner is not visible")
 	}
 }
 
