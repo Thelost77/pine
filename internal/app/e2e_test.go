@@ -1086,13 +1086,13 @@ func TestE2E_FullJourney(t *testing.T) {
 	}
 
 	// === Phase 11: Quit from Home (stops playback and exits) ===
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	res, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
 		t.Fatal("'q' on Home with empty back stack should quit")
 	}
 
-	// Should batch stop commands with quit
-	executeBatchCmds(cmd)
+	// main calls Cleanup on the final model, which closes the session.
+	res.(Model).Cleanup()
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/close")
 
 	// === Verify API call sequence ===
@@ -1669,13 +1669,13 @@ func TestE2E_QQuitsAndStopsPlayback(t *testing.T) {
 	m.player.Duration = 3600.0
 
 	// Press q — should quit and stop playback
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	res, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
 		t.Fatal("q should return a command")
 	}
 
-	// Execute the batch — should include stop + quit
-	executeBatchCmds(cmd)
+	// main calls Cleanup on the final model, which closes the session.
+	res.(Model).Cleanup()
 
 	// Verify close session API was called
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/close")

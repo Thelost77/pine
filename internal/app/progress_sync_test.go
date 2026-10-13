@@ -377,13 +377,10 @@ func TestMarkFinishedSendsExplicitFlag(t *testing.T) {
 // book, the server starts that session at the position 0, and it reads each
 // position that is not at the end as "not finished".
 func TestStopOfUntouchedSessionSendsNoProgress(t *testing.T) {
-	stops := map[string]func(m Model){
-		"quit": func(m Model) {
-			_, cmd := e2ePressKey(m, 'q')
-			executeBatchCmds(cmd)
-		},
-		"cleanup": func(m Model) { m.Cleanup() },
-		"play of a different item": func(m Model) {
+	stops := map[string]func(t *testing.T, m Model){
+		"quit":    func(t *testing.T, m Model) { quitProgram(t, m, quitKeys["q"])() },
+		"cleanup": func(_ *testing.T, m Model) { m.Cleanup() },
+		"play of a different item": func(_ *testing.T, m Model) {
 			_, cmd := m.handlePlayCmd(detail.PlayCmd{Item: testLibraryItem("item-002", "1984")})
 			executeBatchCmds(cmd)
 		},
@@ -402,7 +399,7 @@ func TestStopOfUntouchedSessionSendsNoProgress(t *testing.T) {
 			}
 			result, _ := m.Update(player.PositionMsg{Duration: 3600, Paused: true, Generation: m.playGeneration})
 
-			stop(result.(Model))
+			stop(t, result.(Model))
 
 			if n := len(requestsTo(log, http.MethodPatch, "/api/me/progress/item-001")); n != 0 {
 				t.Errorf("%d progress updates, want 0", n)
@@ -560,6 +557,97 @@ func TestOldSessionClosesBeforeNextPlay(t *testing.T) {
 			}
 			if playedBeforeClose {
 				t.Error("the play request of the next item went out before the close of the old session completed")
+			}
+		})
+	}
+}
+
+// quitProgram sends the key of a quit to the model, and then does what the
+// program does at a quit. Bubble Tea runs each command of a batch in its own
+// goroutine, and it returns at the QuitMsg: it does not wait for the other
+// commands. main then calls Cleanup on the final model, and the process ends.
+// quitProgram returns at that moment. The function that it returns waits for
+// the commands that still run.
+func quitProgram(t *testing.T, m Model, key tea.KeyMsg) (wait func()) {
+	t.Helper()
+	result, cmd := m.Update(key)
+
+	var running sync.WaitGroup
+	var once sync.Once
+	quit := make(chan struct{})
+	var run func(cmd tea.Cmd)
+	run = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		running.Add(1)
+		go func() {
+			defer running.Done()
+			switch msg := cmd().(type) {
+			case tea.BatchMsg:
+				for _, c := range msg {
+					run(c)
+				}
+			case tea.QuitMsg:
+				once.Do(func() { close(quit) })
+			}
+		}()
+	}
+	run(cmd)
+
+	select {
+	case <-quit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no QuitMsg in 5 seconds")
+	}
+	result.(Model).Cleanup()
+	return running.Wait
+}
+
+// quitKeys are the keys that quit pine.
+var quitKeys = map[string]tea.KeyMsg{
+	"q":      {Type: tea.KeyRunes, Runes: []rune{'q'}},
+	"ctrl+c": {Type: tea.KeyCtrlC},
+}
+
+// TestQuitWaitsForLastPosition verifies that the server has the last position
+// and the listening time of a session when the process of a quit ends. A
+// request that a command of the quit sends is lost if the process ends before
+// the server gets it.
+func TestQuitWaitsForLastPosition(t *testing.T) {
+	for name, key := range quitKeys {
+		t.Run(name, func(t *testing.T) {
+			// The server needs 100 ms for each request.
+			answered := &apiLog{}
+			log, client := newFakeABS(t, nil, func(method, path string) int {
+				time.Sleep(100 * time.Millisecond)
+				answered.record(method, path, nil)
+				return 0
+			})
+			m := newSyncTestModel(client)
+			m.player.Position = 130
+			m.timeListened = 30
+
+			wait := quitProgram(t, m, key)
+			atEnd := summarizeRequests(answered.get())
+			wait()
+
+			for _, want := range []string{"POST /api/session/sess-abc/close", "PATCH /api/me/progress/item-001"} {
+				found := false
+				for _, got := range atEnd {
+					found = found || got == want
+				}
+				if !found {
+					t.Errorf("requests that the server answered before the end of the process = %v, want %s", atEnd, want)
+				}
+			}
+			closes := requestsTo(log, http.MethodPost, "/api/session/sess-abc/close")
+			if len(closes) == 0 {
+				t.Fatal("no close of the session")
+			}
+			want := map[string]interface{}{"currentTime": 130.0, "timeListened": 30.0}
+			if !reflect.DeepEqual(closes[0].Body, want) {
+				t.Errorf("close of the session = %v, want %v", closes[0].Body, want)
 			}
 		})
 	}

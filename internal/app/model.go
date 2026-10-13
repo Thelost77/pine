@@ -827,12 +827,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleCaptions()
 			return m, nil
 		}
-		// Global quit: q always quits the app.
+		// Global quit: q always quits the app. The session stays in the model:
+		// main calls Cleanup on the final model, and Cleanup waits until the
+		// server has the last position. The program does not wait for a
+		// command, so the request of a command can be lost.
 		if !m.isFiltering() && m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
-			if m.isPlaying() {
-				m, stopCmd := m.stopPlayback()
-				return m, tea.Batch(stopCmd, tea.Quit)
-			}
 			return m, tea.Quit
 		}
 		// Global back: esc/left goes back but never quits.
