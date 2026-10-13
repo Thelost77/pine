@@ -378,8 +378,9 @@ func TestMarkFinishedSendsExplicitFlag(t *testing.T) {
 // position that is not at the end as "not finished".
 func TestStopOfUntouchedSessionSendsNoProgress(t *testing.T) {
 	stops := map[string]func(t *testing.T, m Model){
-		"quit":    func(t *testing.T, m Model) { quitProgram(t, m, quitKeys["q"])() },
-		"cleanup": func(_ *testing.T, m Model) { m.Cleanup() },
+		"quit with q":      func(t *testing.T, m Model) { quitProgram(t, m, quitKeys["q"])() },
+		"quit with ctrl+c": func(t *testing.T, m Model) { quitProgram(t, m, quitKeys["ctrl+c"])() },
+		"cleanup":          func(_ *testing.T, m Model) { m.Cleanup() },
 		"play of a different item": func(_ *testing.T, m Model) {
 			_, cmd := m.handlePlayCmd(detail.PlayCmd{Item: testLibraryItem("item-002", "1984")})
 			executeBatchCmds(cmd)
@@ -648,6 +649,29 @@ func TestQuitWaitsForLastPosition(t *testing.T) {
 			want := map[string]interface{}{"currentTime": 130.0, "timeListened": 30.0}
 			if !reflect.DeepEqual(closes[0].Body, want) {
 				t.Errorf("close of the session = %v, want %v", closes[0].Body, want)
+			}
+		})
+	}
+}
+
+// TestQuitSendsLastPositionOnce verifies that a quit sends the close of the
+// session and the progress update one time. The server adds the timeListened
+// of each close to the session.
+func TestQuitSendsLastPositionOnce(t *testing.T) {
+	for name, key := range quitKeys {
+		t.Run(name, func(t *testing.T) {
+			log, client := newFakeABS(t, nil, nil)
+			m := newSyncTestModel(client)
+			m.player.Position = 130
+			m.timeListened = 30
+
+			quitProgram(t, m, key)()
+
+			if got := timesListened(log, "/api/session/sess-abc/close"); !reflect.DeepEqual(got, []float64{30}) {
+				t.Errorf("timeListened of the closes = %v, want [30]", got)
+			}
+			if n := len(requestsTo(log, http.MethodPatch, "/api/me/progress/item-001")); n != 1 {
+				t.Errorf("%d progress updates, want 1", n)
 			}
 		})
 	}

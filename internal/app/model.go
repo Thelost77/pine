@@ -743,11 +743,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// A quit sends no command for the session: Cleanup sends the last
+		// position. See the quit with q below.
 		if msg.Type == tea.KeyCtrlC {
-			if m.isPlaying() {
-				_, stopCmd := m.stopPlayback()
-				return m, tea.Batch(stopCmd, tea.Quit)
-			}
 			return m, tea.Quit
 		}
 		if !m.isFiltering() && key.Matches(msg, m.keys.Help) {

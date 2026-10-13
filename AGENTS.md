@@ -140,6 +140,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - Skeleton loading with generation-gated reveal delays (home: 500ms, library: 150ms)
 - Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
 - `q` always quits, `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only
+- A quit (`q` or ctrl+c) returns only `tea.Quit` and keeps the session in the model. `Cleanup` sends the last position, and `main` waits for it. Bubble Tea does not wait for a command at a quit, so a quit must not send the position in a command.
 - `ctrl+p` opens the global command palette from any screen
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
 - pine finds the end of a track through `errors.Is(err, player.ErrClosed)` on a position tick. spruce uses `PlayerEndMsg`, and a tick with `ErrClosed` can arrive before it. Do not match the text of a player error.
