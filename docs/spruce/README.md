@@ -191,7 +191,7 @@ Commit the notes and all release changes. Push them to `main`. Then use the
 release script:
 
 ```sh
-./scripts/release.sh v0.8.2
+./scripts/release.sh v0.8.3
 ```
 
 The script verifies the repository, creates and pushes the exact annotated tag,
