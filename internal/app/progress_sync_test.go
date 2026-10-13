@@ -720,11 +720,11 @@ func TestQuitSendsLastPositionOnce(t *testing.T) {
 // speed 2.0, the position moves two seconds in each second. The server adds
 // the timeListened of each sync to the listening time of the user.
 func TestListeningTimeIsTimeOfPlay(t *testing.T) {
-	// pausedTick moves the clock by seconds, and then sends a position tick
-	// of a paused player.
-	pausedTick := func(m Model, seconds float64) Model {
+	// idleTick moves the clock by seconds, and then sends a position tick of
+	// a player that does not play: it is paused, or it waits for data.
+	idleTick := func(m Model, seconds float64, paused bool) Model {
 		m = advanceClock(m, seconds)
-		result, _ := m.Update(player.PositionMsg{Position: m.player.Position, Duration: m.player.Duration, Paused: true})
+		result, _ := m.Update(player.PositionMsg{Position: m.player.Position, Duration: m.player.Duration, Paused: paused, Idle: true})
 		return result.(Model)
 	}
 	tests := []struct {
@@ -747,9 +747,21 @@ func TestListeningTimeIsTimeOfPlay(t *testing.T) {
 			play: func(m Model) Model {
 				m = listen(m, 110)
 				for i := 0; i < 120; i++ {
-					m = pausedTick(m, 0.5)
+					m = idleTick(m, 0.5, true)
 				}
 				// The tick after the pause starts the count again.
+				return listen(playTick(m, 0.5, 110), 120)
+			},
+			want: map[string]interface{}{"currentTime": 120.0, "timeListened": 20.0},
+		},
+		{
+			name: "one minute of a player that waits for data",
+			play: func(m Model) Model {
+				m = listen(m, 110)
+				for i := 0; i < 120; i++ {
+					m = idleTick(m, 0.5, false)
+				}
+				// The tick after the wait starts the count again.
 				return listen(playTick(m, 0.5, 110), 120)
 			},
 			want: map[string]interface{}{"currentTime": 120.0, "timeListened": 20.0},
@@ -778,6 +790,37 @@ func TestListeningTimeIsTimeOfPlay(t *testing.T) {
 			}
 			if m.timeListened != 0 {
 				t.Errorf("timeListened = %v, want 0 after an accepted sync", m.timeListened)
+			}
+		})
+	}
+}
+
+// TestStalledPlayerAddsNoListeningTime verifies that the time during which
+// the player waits for data is not listening time. mpv reports no pause while
+// it fills its cache: its position does not move, and it is idle.
+func TestStalledPlayerAddsNoListeningTime(t *testing.T) {
+	mp := &mockPlayer{position: 100, duration: 3600, idle: true}
+	ticks := map[string]func(generation uint64) tea.Cmd{
+		"position tick": func(generation uint64) tea.Cmd {
+			return player.TickCmd(mp, generation)
+		},
+		"position tick after a property that was not ready": func(generation uint64) tea.Cmd {
+			return tickCmd(mp, generation, time.Millisecond)
+		},
+	}
+	for name, tick := range ticks {
+		t.Run(name, func(t *testing.T) {
+			_, client := newFakeABS(t, nil, nil)
+			m := advanceClock(newSyncTestModel(client), 1)
+
+			result, _ := m.Update(tick(m.playGeneration)())
+			m = result.(Model)
+
+			if m.timeListened != 0 {
+				t.Errorf("timeListened = %v after one second of a player that waits for data, want 0", m.timeListened)
+			}
+			if !m.player.Playing {
+				t.Error("the model shows a pause for a player that waits for data")
 			}
 		})
 	}

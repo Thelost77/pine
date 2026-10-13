@@ -75,11 +75,13 @@ func (m Model) clock() time.Time {
 }
 
 // trackListeningTime adds the time since the last position tick to the
-// listening time, if the player played at that tick and plays now. The
-// listening time is the time of the clock. It is not the change of the
-// position: at the speed 2.0, the position moves two seconds in each second.
-func (m *Model) trackListeningTime(paused bool) {
-	if paused {
+// listening time, if the player played at that tick and plays now. A player
+// that is paused or idle does not play: mpv reports no pause while it waits
+// for data. The listening time is the time of the clock. It is not the change
+// of the position: at the speed 2.0, the position moves two seconds in each
+// second.
+func (m *Model) trackListeningTime(playing bool) {
+	if !playing {
 		m.lastPlayingTick = time.Time{}
 		return
 	}
@@ -408,7 +410,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	m.propertyUnavailableCount = 0
-	m.trackListeningTime(msg.Paused)
+	m.trackListeningTime(!msg.Paused && !msg.Idle)
 
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
@@ -1158,8 +1160,9 @@ func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd
 		pos, posErr := p.GetPosition()
 		dur, durErr := p.GetDuration()
 		paused, pauseErr := p.GetPaused()
+		idle, idleErr := p.GetIdle()
 
-		for _, err := range []error{posErr, durErr, pauseErr} {
+		for _, err := range []error{posErr, durErr, pauseErr, idleErr} {
 			if err != nil {
 				return player.PositionMsg{Err: err, Generation: generation}
 			}
@@ -1169,6 +1172,7 @@ func tickCmd(p player.Player, generation uint64, interval time.Duration) tea.Cmd
 			Position:   pos,
 			Duration:   dur,
 			Paused:     paused,
+			Idle:       idle,
 			Generation: generation,
 		}
 	})

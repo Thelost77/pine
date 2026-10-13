@@ -84,6 +84,7 @@ func (launchFailPlayer) Launch(url, startTime string, paused bool, httpHeaders [
 func (launchFailPlayer) GetPosition() (float64, error)      { return 0, nil }
 func (launchFailPlayer) GetDuration() (float64, error)      { return 0, nil }
 func (launchFailPlayer) GetPaused() (bool, error)           { return false, nil }
+func (launchFailPlayer) GetIdle() (bool, error)             { return false, nil }
 func (launchFailPlayer) SetPause(paused bool) error         { return nil }
 func (launchFailPlayer) Seek(seconds float64) error         { return nil }
 func (launchFailPlayer) SeekRelative(seconds float64) error { return nil }

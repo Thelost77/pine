@@ -10,9 +10,12 @@ import (
 
 // PositionMsg carries the current playback position polled from mpv.
 type PositionMsg struct {
-	Position   float64
-	Duration   float64
-	Paused     bool
+	Position float64
+	Duration float64
+	Paused   bool
+	// Idle is true if no audio plays now. A player that waits for data is
+	// idle and not paused.
+	Idle       bool
 	Err        error
 	Generation uint64 // ties this tick to a specific play session
 }
@@ -34,9 +37,10 @@ func TickCmd(p Player, generation uint64) tea.Cmd {
 		pos, posErr := p.GetPosition()
 		dur, durErr := p.GetDuration()
 		paused, pauseErr := p.GetPaused()
+		idle, idleErr := p.GetIdle()
 
 		// Return first error encountered
-		for _, err := range []error{posErr, durErr, pauseErr} {
+		for _, err := range []error{posErr, durErr, pauseErr, idleErr} {
 			if err != nil {
 				return PositionMsg{Err: err, Generation: generation}
 			}
@@ -46,6 +50,7 @@ func TickCmd(p Player, generation uint64) tea.Cmd {
 			Position:   pos,
 			Duration:   dur,
 			Paused:     paused,
+			Idle:       idle,
 			Generation: generation,
 		}
 	})

@@ -33,6 +33,7 @@ type mockPlayer struct {
 	position  float64
 	duration  float64
 	paused    bool
+	idle      bool
 	speed     float64
 	launchErr error
 }
@@ -59,6 +60,11 @@ func (p *mockPlayer) GetPaused() (bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.paused, nil
+}
+func (p *mockPlayer) GetIdle() (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.idle, nil
 }
 func (p *mockPlayer) SetPause(paused bool) error {
 	p.mu.Lock()

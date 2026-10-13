@@ -77,6 +77,7 @@ type Player interface {
 	GetPosition() (float64, error)
 	GetDuration() (float64, error)
 	GetPaused() (bool, error)
+	GetIdle() (bool, error)
 	SetPause(paused bool) error
 	Seek(seconds float64) error
 	SeekRelative(seconds float64) error
@@ -329,15 +330,13 @@ func (m *Mpv) GetDuration() (float64, error) {
 
 // GetPaused returns whether playback is paused.
 func (m *Mpv) GetPaused() (bool, error) {
-	var paused bool
-	err := m.withHandle("get pause", func(h mpvHandle) (err error) {
-		paused, err = h.getFlag("pause")
-		return err
-	})
-	if err != nil {
-		logger.Debug("failed to query mpv property", "property", "pause", "err", err)
-	}
-	return paused, err
+	return m.getFlag("pause")
+}
+
+// GetIdle returns whether no audio plays now. It is true for a paused player,
+// and for a player that is not paused but waits for data, starts, or seeks.
+func (m *Mpv) GetIdle() (bool, error) {
+	return m.getFlag("core-idle")
 }
 
 // SetPause pauses or resumes playback.
@@ -432,6 +431,18 @@ func describeStreamURL(rawURL string) streamLogInfo {
 		Path:     parsed.EscapedPath(),
 		HasToken: parsed.Query().Has("token") || parsed.Query().Has("api_key") || parsed.Query().Has("ApiKey"),
 	}
+}
+
+func (m *Mpv) getFlag(property string) (bool, error) {
+	var value bool
+	err := m.withHandle("get "+property, func(h mpvHandle) (err error) {
+		value, err = h.getFlag(property)
+		return err
+	})
+	if err != nil {
+		logger.Debug("failed to query mpv property", "property", property, "err", err)
+	}
+	return value, err
 }
 
 func (m *Mpv) getFloat(property string) (float64, error) {

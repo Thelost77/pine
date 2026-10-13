@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -316,6 +317,67 @@ func TestMpvControls(t *testing.T) {
 	if paused, err := m.GetPaused(); err != nil || paused {
 		t.Errorf("GetPaused() = %v, %v, want false", paused, err)
 	}
+}
+
+// TestMpvIsIdleWhileItWaitsForData verifies that GetIdle separates a player
+// that plays from a player that waits for data. The two are not paused.
+func TestMpvIsIdleWhileItWaitsForData(t *testing.T) {
+	// state returns an error until the player has a position, is not paused,
+	// and has the idle state want.
+	state := func(m *Mpv, want bool) (position float64, err error) {
+		if position, err = m.GetPosition(); err != nil {
+			return 0, err
+		}
+		paused, err := m.GetPaused()
+		if err != nil {
+			return 0, err
+		}
+		idle, err := m.GetIdle()
+		if err != nil {
+			return 0, err
+		}
+		if paused || idle != want {
+			return 0, fmt.Errorf("paused = %v, idle = %v at the position %.1f", paused, idle, position)
+		}
+		return position, nil
+	}
+
+	srv := newAudioServer(t)
+	m := newTestMpv(t)
+	if err := m.Launch(srv.URL+"/long.wav", "0", false, []string{testAuthHeader}, 100); err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+	eventually(t, "a player that plays is not idle", func() error {
+		_, err := state(m, false)
+		return err
+	})
+
+	// The server sends the first 100 seconds of the file, and then nothing.
+	const sent = 100
+	wav := silentWAV(120)
+	release := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(wav)))
+		_, _ = w.Write(wav[:44+8000*sent])
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	t.Cleanup(stalled.Close)
+	t.Cleanup(func() { close(release) })
+	if err := m.Launch(stalled.URL+"/stalled.wav", "0", false, nil, 100); err != nil {
+		t.Fatalf("Launch() error: %v", err)
+	}
+	// At this speed, the player needs one second for the data that it has.
+	if err := m.SetSpeed(100); err != nil {
+		t.Fatalf("SetSpeed() error: %v", err)
+	}
+	eventually(t, "a player that waits for data is idle", func() error {
+		position, err := state(m, true)
+		if err == nil && position < sent/2 {
+			return fmt.Errorf("idle at the position %.1f, before the end of the data", position)
+		}
+		return err
+	})
 }
 
 func TestMpvEndOfFileGivesEOFAndClosesThePlayer(t *testing.T) {

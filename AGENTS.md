@@ -69,7 +69,7 @@ The Architecture Map below describes pine and the shared packages.
 
 | File | Responsibility |
 |------|---------------|
-| `mpv.go` | Mpv struct: Launch (creates a libmpv handle and loads the file), GetPosition/GetDuration/GetPaused, Seek, SetSpeed/SetVolume, Quit. `ErrClosed` and `ErrPropertyUnavailable`. Writes the warnings and errors of mpv to the app log, without URL queries. Runtime directory for the media cache. |
+| `mpv.go` | Mpv struct: Launch (creates a libmpv handle and loads the file), GetPosition/GetDuration/GetPaused/GetIdle, Seek, SetSpeed/SetVolume, Quit. `ErrClosed` and `ErrPropertyUnavailable`. Writes the warnings and errors of mpv to the app log, without URL queries. Runtime directory for the media cache. |
 | `libmpv.go`, `libmpv_unix.go`, `libmpv_windows.go` | Binding to libmpv through purego, with no cgo. The library loads on the first Launch. Library search order for each system. |
 | `commands.go` | tea.Cmd factories: TickCmd (500ms poll), LaunchCmd, SetPauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd. WatchEvents returns PlayerEndMsg at the end of a playback. |
 | `model.go` | Player sub-model: Position/Duration/Speed/Volume state, key handling (play/pause, seek, speed, volume) |
@@ -144,7 +144,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - `ctrl+p` opens the global command palette from any screen
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
 - Each launch makes a new mpv handle, which plays at the speed 1.0. `handlePlayerReady` sets the speed of the model in the new player.
-- The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A test moves the clock with `Model.now`.
+- The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A player that is paused or idle does not play. mpv reports no pause while it waits for data, so a position tick also reads the mpv property `core-idle` (`GetIdle`, `PositionMsg.Idle`). A test moves the clock with `Model.now`.
 - pine finds the end of a track through `errors.Is(err, player.ErrClosed)` on a position tick. spruce uses `PlayerEndMsg`, and a tick with `ErrClosed` can arrive before it. Do not match the text of a player error.
 
 ## Testing
