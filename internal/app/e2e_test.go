@@ -753,6 +753,37 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	}
 }
 
+// TestE2E_NoBookmarkForItemThatDoesNotPlay verifies that b on the detail
+// screen of an item makes no bookmark while a different item plays. The
+// bookmark would have the position of the item that plays.
+func TestE2E_NoBookmarkForItemThatDoesNotPlay(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{position: 100, duration: 3600})
+	m = e2eSetSize(m, 120, 40)
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.detail = detail.New(m.styles, testLibraryItem("item-002", "Other Book"))
+	m, _ = m.navigate(ScreenDetail)
+	m = e2eSetSize(m, 120, 40)
+
+	m, cmd := e2ePressKey(m, 'b')
+	m = feedCmdChain(m, cmd, 3)
+
+	if n := log.count("POST", "/api/me/item/"); n != 0 {
+		t.Errorf("%d bookmark requests for an item that does not play, want 0: %+v", n, log.get())
+	}
+	if !m.err.HasError() {
+		t.Error("the error banner is not visible")
+	}
+}
+
 // TestE2E_DetailIgnoresBookmarksOfOtherItem verifies that the detail screen
 // ignores the bookmarks of an item that it does not show. The answer for an
 // item can come after the user opened a different item.

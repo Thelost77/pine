@@ -39,6 +39,7 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 
 	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
+	m.itemID = "item-001"
 	m.player.Position = 120
 	m.detail.SetBookmarks([]abs.Bookmark{
 		{LibraryItemID: "item-001", Title: "Existing", Time: 60, CreatedAt: 1700000000000},
@@ -82,6 +83,7 @@ func TestHandleAddBookmarkReturnsPlaybackErrorOnFailure(t *testing.T) {
 
 	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
+	m.itemID = "item-001"
 	m.player.Position = 120
 
 	_, cmd := m.handleAddBookmark(detail.AddBookmarkCmd{Item: testBookmarkItem("item-001")})
@@ -116,6 +118,7 @@ func TestHandleAddBookmarkUsesEpisodeTitleForPodcastBookmarks(t *testing.T) {
 
 	m := New(config.Default(), nil, cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 	m.sessionID = "sess-001"
+	m.itemID = "item-001"
 	m.episodeID = "ep-001"
 	m.player.Title = "Episode 2199"
 	m.player.Position = 120

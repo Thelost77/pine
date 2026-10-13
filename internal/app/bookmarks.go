@@ -24,6 +24,14 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		m.propagateSize()
 		return m, cmd
 	}
+	// The bookmark gets the position of the player, so it is for the item
+	// that plays only.
+	if m.itemID != msg.Item.ID {
+		logger.Warn("bookmark skipped: a different item plays", "itemID", msg.Item.ID, "playingItemID", m.itemID)
+		cmd := m.err.SetError(fmt.Errorf("can only add bookmarks to the currently playing item"))
+		m.propagateSize()
+		return m, cmd
+	}
 	client := m.client
 	itemID := msg.Item.ID
 	currentTime := m.player.Position
