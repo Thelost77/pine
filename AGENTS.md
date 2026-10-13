@@ -154,6 +154,7 @@ Styles from theme config. Format helpers (timestamps, durations). `RunProgram` r
 - Unit tests per package
 - E2E tests in `internal/app/e2e_test.go` + `e2e_helpers_test.go` use mock HTTP server + mock player
 - E2E tests drive the bubbletea Update loop programmatically (no real TUI)
+- `feedCmd` in `e2e_helpers_test.go` skips a command that needs more than 200 ms, so that a test does not wait for a `tea.Tick`. A request to an address with no server, or a load that writes to a database file, can need more on Windows in CI. For such a command, use `feedCmdWithin` with `slowCmdWait`.
 - `internal/app/model_test.go`, `playback_test.go`, `bookmarks_test.go`, `render_test.go` for app-level tests
 - `internal/ui/program_unix_test.go` starts the test program again as a child process, sends SIGHUP to it, and checks that it gets to the place where a `main` calls `Cleanup`. The child runs its program with `ui.RunProgram`, as each `main` does. It does not run on Windows.
 - `internal/cache/*_test.go` for cache store and helper behavior

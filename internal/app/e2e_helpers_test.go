@@ -515,10 +515,27 @@ func newE2EModelUnauthWithDB(t *testing.T, srv *httptest.Server, mp *mockPlayer)
 // E2E helpers — driving the Update→Cmd→Msg loop
 // ---------------------------------------------------------------------------
 
+// feedCmdWait is the time that feedCmd waits for a command.
+const feedCmdWait = 200 * time.Millisecond
+
+// slowCmdWait is the time that feedCmdWithin waits for a command that a test
+// needs and that can be slow. It is longer than the timeout of one request of
+// abs.Client, which is 10 seconds.
+const slowCmdWait = 15 * time.Second
+
 // feedCmd executes a tea.Cmd, feeds the resulting message back into Update,
 // and returns the new model + the cmd returned by Update.
-// Commands that block longer than 200ms (e.g. tea.Tick) are skipped.
+// Commands that block longer than feedCmdWait (e.g. tea.Tick) are skipped.
 func feedCmd(m Model, cmd tea.Cmd) (Model, tea.Cmd) {
+	return feedCmdWithin(m, cmd, feedCmdWait)
+}
+
+// feedCmdWithin is feedCmd with a wait of its own. Use slowCmdWait for a
+// command that the test must not skip and that can need more than feedCmdWait
+// on a slow machine, for example on Windows in CI: a request to an address
+// with no server, or a load that writes to a database file. A tea.Tick that
+// is shorter than the wait is not skipped.
+func feedCmdWithin(m Model, cmd tea.Cmd, wait time.Duration) (Model, tea.Cmd) {
 	if cmd == nil {
 		return m, nil
 	}
@@ -543,13 +560,13 @@ func feedCmd(m Model, cmd tea.Cmd) (Model, tea.Cmd) {
 		if batch, ok := r.msg.(tea.BatchMsg); ok {
 			var lastCmd tea.Cmd
 			for _, c := range batch {
-				m, lastCmd = feedCmd(m, c)
+				m, lastCmd = feedCmdWithin(m, c, wait)
 			}
 			return m, lastCmd
 		}
 		res, nextCmd := m.Update(r.msg)
 		return res.(Model), nextCmd
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(wait):
 		// Drain the channel in case the goroutine completes after timeout
 		go func() { <-ch; <-done }()
 		return m, nil

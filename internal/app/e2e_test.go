@@ -103,8 +103,9 @@ func TestE2E_LoginFailure(t *testing.T) {
 	// Press enter
 	m, cmd := e2ePressSpecial(m, tea.KeyEnter)
 
-	// Execute login command — should fail (unreachable)
-	m, _ = feedCmd(m, cmd)
+	// Execute login command — should fail (unreachable). A refused connection
+	// can need more than feedCmdWait on Windows.
+	m, _ = feedCmdWithin(m, cmd, slowCmdWait)
 
 	// Should still be on login with error
 	assertScreen(t, m, ScreenLogin)
@@ -2264,7 +2265,10 @@ func TestE2E_CacheSurvivesRestart(t *testing.T) {
 	m1 := NewWithPlayer(cfg, store, cachedClient, cacheStore, mp)
 	m1 = e2eSetSize(m1, 120, 40)
 
-	m1 = feedCmdChain(m1, m1.Init(), 5)
+	// The load of the home screen sends its requests and writes to the
+	// database file in one command, which can need more than feedCmdWait.
+	m1, cmd := feedCmdWithin(m1, m1.Init(), slowCmdWait)
+	m1 = feedCmdChain(m1, cmd, 4)
 
 	if m1.home.Loading() {
 		t.Fatal("home should not be loading after first init")
@@ -2279,7 +2283,8 @@ func TestE2E_CacheSurvivesRestart(t *testing.T) {
 	m2 := NewWithPlayer(cfg, store, cachedClient, cacheStore, mp)
 	m2 = e2eSetSize(m2, 120, 40)
 
-	m2 = feedCmdChain(m2, m2.Init(), 5)
+	m2, cmd = feedCmdWithin(m2, m2.Init(), slowCmdWait)
+	m2 = feedCmdChain(m2, cmd, 4)
 
 	if m2.home.Loading() {
 		t.Fatal("home should not be loading after second init (cache should serve data)")
