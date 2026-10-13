@@ -62,6 +62,7 @@ type PlaySessionData struct {
 	ItemID           string
 	EpisodeID        string
 	CurrentTime      float64
+	SyncedTime       float64 // book position that the server has
 	Duration         float64
 	Title            string
 	Authors          []string
@@ -80,6 +81,17 @@ type QueueEntry struct {
 
 // SyncTickMsg fires every 30 seconds to sync playback progress with ABS.
 type SyncTickMsg struct{}
+
+// SessionSyncedMsg carries the result of a sync of the playback session.
+// NewSessionID is the session that pine opened because the server did not
+// have the session SessionID.
+type SessionSyncedMsg struct {
+	SessionID    string
+	NewSessionID string
+	CurrentTime  float64
+	TimeListened float64
+	Err          error
+}
 
 // PlaybackErrorMsg carries an error from the playback lifecycle.
 type PlaybackErrorMsg struct {

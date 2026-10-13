@@ -55,6 +55,7 @@ type Model struct {
 	itemID                   string
 	episodeID                string
 	timeListened             float64
+	lastPlayingTick          time.Time
 	lastSyncPos              float64
 	playGeneration           uint64
 	chapters                 []abs.Chapter
@@ -100,6 +101,9 @@ type Model struct {
 	lastPlayedItemID  string
 	lastPlayedAuthors []string
 	currentAuthors    []string
+
+	// now replaces time.Now in a test.
+	now func() time.Time
 }
 
 // New creates a new root model. If client is non-nil (authenticated),
@@ -636,6 +640,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case SessionSyncedMsg:
+		return m.handleSessionSynced(msg), nil
+
 	case player.PlayerLaunchErrMsg:
 		if msg.Generation != m.playGeneration {
 			logger.Debug("ignoring stale player launch error", "msgGen", msg.Generation, "currentGen", m.playGeneration)
@@ -740,11 +747,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// A quit sends no command for the session: Cleanup sends the last
+		// position. See the quit with q below.
 		if msg.Type == tea.KeyCtrlC {
-			if m.isPlaying() {
-				_, stopCmd := m.stopPlayback()
-				return m, tea.Batch(stopCmd, tea.Quit)
-			}
 			return m, tea.Quit
 		}
 		if !m.isFiltering() && key.Matches(msg, m.keys.Help) {
@@ -824,12 +829,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleCaptions()
 			return m, nil
 		}
-		// Global quit: q always quits the app.
+		// Global quit: q always quits the app. The session stays in the model:
+		// main calls Cleanup on the final model, and Cleanup waits until the
+		// server has the last position. The program does not wait for a
+		// command, so the request of a command can be lost.
 		if !m.isFiltering() && m.screen != ScreenLogin && key.Matches(msg, m.keys.Quit) {
-			if m.isPlaying() {
-				m, stopCmd := m.stopPlayback()
-				return m, tea.Batch(stopCmd, tea.Quit)
-			}
 			return m, tea.Quit
 		}
 		// Global back: esc/left goes back but never quits.

@@ -89,7 +89,8 @@ func (c *Client) SyncSession(ctx context.Context, sessionID string, currentTime,
 	return nil
 }
 
-// CloseSession closes an active playback session.
+// CloseSession closes an active playback session. The server stores the
+// position and the listening time before it closes the session.
 func (c *Client) CloseSession(ctx context.Context, sessionID string, currentTime, timeListened float64) error {
 	path := fmt.Sprintf("/api/session/%s/close", sessionID)
 	body := syncSessionRequest{
@@ -98,6 +99,18 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string, currentTime
 	}
 	logger.Debug("closing playback session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 	_, err := c.do(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return fmt.Errorf("close session: %w", err)
+	}
+	return nil
+}
+
+// CloseSessionNoSync closes an active playback session and sends no position,
+// so the server keeps the progress that it has.
+func (c *Client) CloseSessionNoSync(ctx context.Context, sessionID string) error {
+	path := fmt.Sprintf("/api/session/%s/close", sessionID)
+	logger.Debug("closing playback session with no sync", "sessionID", sessionID)
+	_, err := c.do(ctx, http.MethodPost, path, nil)
 	if err != nil {
 		return fmt.Errorf("close session: %w", err)
 	}

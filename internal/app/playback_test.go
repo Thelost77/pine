@@ -216,6 +216,8 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	mp.position = 52.0
 	mp.duration = 3600.0
 
+	// The first tick of the player, and then 10 seconds of play to 52.0
+	m = advanceClock(listen(playTick(m, 0, 42.0), 51.0), 1)
 	result, cmd = m.Update(player.PositionMsg{
 		Position:   52.0,
 		Duration:   3600.0,
@@ -227,7 +229,7 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	if m.player.Position != 52.0 {
 		t.Errorf("player position = %f, want 52.0", m.player.Position)
 	}
-	// Delta from 42.0 to 52.0 = 10.0 seconds listened
+	// 10 seconds of play from 42.0 to 52.0
 	if m.timeListened != 10.0 {
 		t.Errorf("timeListened = %f, want 10.0", m.timeListened)
 	}
@@ -235,14 +237,8 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 		t.Error("PositionMsg should reschedule TickCmd")
 	}
 
-	// Another tick: advance to 57.0
-	result, _ = m.Update(player.PositionMsg{
-		Position:   57.0,
-		Duration:   3600.0,
-		Paused:     false,
-		Generation: 1,
-	})
-	m = result.(Model)
+	// 5 more seconds of play: advance to 57.0
+	m = listen(m, 57.0)
 
 	if m.player.Position != 57.0 {
 		t.Errorf("player position = %f, want 57.0", m.player.Position)
@@ -255,15 +251,16 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	result, cmd = m.Update(SyncTickMsg{})
 	m = result.(Model)
 
-	if m.lastSyncPos != 57.0 {
-		t.Errorf("lastSyncPos = %f, want 57.0", m.lastSyncPos)
-	}
 	if cmd == nil {
 		t.Fatal("SyncTickMsg should return batch of sync cmds")
 	}
 
 	// Execute sync commands to trigger API calls
-	executeBatchCmds(cmd)
+	m, _ = feedCmd(m, cmd)
+
+	if m.lastSyncPos != 57.0 {
+		t.Errorf("lastSyncPos = %f, want 57.0", m.lastSyncPos)
+	}
 
 	// Verify SyncSession was called
 	reqs = log.get()
@@ -408,8 +405,8 @@ func TestPlayCmdPrefersLongerMediaMetadataChapters(t *testing.T) {
 	}
 }
 
-// TestPlaybackSeekBackwardThenForward tests that backward seeks don't inflate timeListened,
-// and subsequent forward movement resumes tracking.
+// TestPlaybackSeekBackwardThenForward tests that timeListened is the time of play
+// before and after a backward seek, and not the change of the position.
 func TestPlaybackSeekBackwardThenForward(t *testing.T) {
 	log := &apiLog{}
 	srv := newMockABSServer(log)
@@ -428,26 +425,24 @@ func TestPlaybackSeekBackwardThenForward(t *testing.T) {
 	m.player.Position = 100.0
 	m.player.Duration = 3600.0
 	m.timeListened = 0
+	m = playingNow(m)
 
-	// Forward: 100 → 110, adds 10s
-	result, _ := m.Update(player.PositionMsg{Position: 110.0, Duration: 3600.0})
-	m = result.(Model)
+	// Forward: 100 → 110 in 10s of play, adds 10s
+	m = listen(m, 110.0)
 	if m.timeListened != 10.0 {
 		t.Errorf("timeListened = %f, want 10.0", m.timeListened)
 	}
 
-	// Backward seek: 110 → 80, should NOT add time
-	result, _ = m.Update(player.PositionMsg{Position: 80.0, Duration: 3600.0})
-	m = result.(Model)
-	if m.timeListened != 10.0 {
-		t.Errorf("timeListened = %f, want 10.0 (no change after backward seek)", m.timeListened)
+	// Backward seek: 110 → 80 in a tick of 500ms, adds the 500ms of play
+	m = playTick(m, 0.5, 80.0)
+	if m.timeListened != 10.5 {
+		t.Errorf("timeListened = %f, want 10.5 (the time of the tick)", m.timeListened)
 	}
 
-	// Forward again: 80 → 90, adds 10s
-	result, _ = m.Update(player.PositionMsg{Position: 90.0, Duration: 3600.0})
-	m = result.(Model)
-	if m.timeListened != 20.0 {
-		t.Errorf("timeListened = %f, want 20.0", m.timeListened)
+	// Forward again: 80 → 90 in 10s of play, adds 10s
+	m = listen(m, 90.0)
+	if m.timeListened != 20.5 {
+		t.Errorf("timeListened = %f, want 20.5", m.timeListened)
 	}
 }
 
@@ -1254,11 +1249,10 @@ func TestPlaybackMultipleSyncCycles(t *testing.T) {
 
 	// Second sync tick
 	result, cmd = m.Update(SyncTickMsg{})
-	m = result.(Model)
+	m, _ = feedCmd(result.(Model), cmd)
 	if m.lastSyncPos != 130.0 {
 		t.Errorf("lastSyncPos = %f, want 130.0", m.lastSyncPos)
 	}
-	executeBatchCmds(cmd)
 
 	// Verify two sync calls were made
 	reqs := log.get()

@@ -115,8 +115,8 @@ The server is written from the MPRIS 2.2 specification. The Go MPRIS server libr
 | `client.go` | HTTP client with 10s timeout, 50MB response limit, auth header, request logging |
 | `types.go` | All ABS data types. Custom UnmarshalJSON for MediaMetadata.Series (handles both object and array). |
 | `libraries.go` | GetLibraries, GetPersonalized, GetLibraryItems (paginated), GetLibraryItemsBatch (10 concurrent), GetLibrarySeries, GetSeriesContents, FilterAudioLibraries (sample-based audio detection) |
-| `playback.go` | StartPlaySession, StartEpisodePlaySession, SyncSession, CloseSession |
-| `progress.go`, `me.go` | UpdateProgress, GetMediaProgress (with bookmarks), UpdateEpisodeProgress, GetMe (user + all media progress) |
+| `playback.go` | StartPlaySession, StartEpisodePlaySession, SyncSession, CloseSession, CloseSessionNoSync (sends no position) |
+| `progress.go`, `me.go` | UpdateProgress, UpdatePosition (no `isFinished` key), GetMediaProgress (with bookmarks), UpdateEpisodeProgress, GetMe (user + all media progress) |
 | `bookmarks.go` | CreateBookmark, UpdateBookmark, DeleteBookmark, GetBookmarks |
 
 ### Data (internal/db/)
@@ -140,8 +140,10 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - Skeleton loading with generation-gated reveal delays (home: 500ms, library: 150ms)
 - Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
 - `q` always quits, `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only
+- A quit (`q` or ctrl+c) returns only `tea.Quit` and keeps the session in the model. `Cleanup` sends the last position, and `main` waits for it. Bubble Tea does not wait for a command at a quit, so a quit must not send the position in a command.
 - `ctrl+p` opens the global command palette from any screen
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
+- The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A test moves the clock with `Model.now`.
 - pine finds the end of a track through `errors.Is(err, player.ErrClosed)` on a position tick. spruce uses `PlayerEndMsg`, and a tick with `ErrClosed` can arrive before it. Do not match the text of a player error.
 
 ## Testing

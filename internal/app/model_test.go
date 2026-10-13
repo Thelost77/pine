@@ -857,12 +857,7 @@ func TestPositionMsgUpdatesPlayer(t *testing.T) {
 	m.player.Playing = true
 	m.player.Position = 10.0
 
-	result, _ := m.Update(player.PositionMsg{
-		Position: 20.0,
-		Duration: 3600.0,
-		Paused:   false,
-	})
-	rm := result.(Model)
+	rm := listen(playingNow(m), 20.0)
 
 	if rm.player.Position != 20.0 {
 		t.Errorf("player position = %f, want 20.0", rm.player.Position)
@@ -896,8 +891,8 @@ func TestSyncTickWhenPlaying(t *testing.T) {
 	result, cmd := m.Update(SyncTickMsg{})
 	rm := result.(Model)
 
-	if rm.lastSyncPos != 100.0 {
-		t.Errorf("lastSyncPos = %f, want 100.0", rm.lastSyncPos)
+	if rm.timeListened != 0 {
+		t.Errorf("timeListened = %f, want 0 (the sync takes it)", rm.timeListened)
 	}
 	if cmd == nil {
 		t.Error("expected batch cmd from sync tick")
@@ -1640,32 +1635,29 @@ func TestPositionMsgTracksTimeListened(t *testing.T) {
 	m.player.Position = 100.0
 	m.timeListened = 0
 
-	// Position advances by 5 seconds
-	result, _ := m.Update(player.PositionMsg{Position: 105.0, Duration: 3600.0, Paused: false})
-	rm := result.(Model)
+	// The player plays for 5 seconds
+	rm := listen(playingNow(m), 105.0)
 	if rm.timeListened != 5.0 {
 		t.Errorf("timeListened = %f, want 5.0", rm.timeListened)
 	}
 
-	// Position advances by 3 more seconds
-	result, _ = rm.Update(player.PositionMsg{Position: 108.0, Duration: 3600.0, Paused: false})
-	rm = result.(Model)
+	// The player plays for 3 more seconds
+	rm = listen(rm, 108.0)
 	if rm.timeListened != 8.0 {
 		t.Errorf("timeListened = %f, want 8.0", rm.timeListened)
 	}
 }
 
-func TestPositionMsgBackwardSeekDoesNotAddTime(t *testing.T) {
+func TestPositionMsgBackwardSeekAddsOnlyTimeOfPlay(t *testing.T) {
 	m := newPlaybackTestModel()
 	m.sessionID = "sess-123"
 	m.player.Position = 100.0
 	m.timeListened = 5.0
 
-	// Seek backward should not add time
-	result, _ := m.Update(player.PositionMsg{Position: 80.0, Duration: 3600.0, Paused: false})
-	rm := result.(Model)
-	if rm.timeListened != 5.0 {
-		t.Errorf("timeListened = %f, want 5.0 (unchanged after backward)", rm.timeListened)
+	// In one second of play, the position moves backward by 20 seconds
+	rm := playTick(playingNow(m), 1, 80.0)
+	if rm.timeListened != 6.0 {
+		t.Errorf("timeListened = %f, want 6.0 (the second of play)", rm.timeListened)
 	}
 }
 

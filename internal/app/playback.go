@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -22,6 +23,18 @@ import (
 const (
 	trackEndRolloverSlack            = 2.0
 	propertyUnavailableMaxBackoffExp = 2 // 500ms << 2 = 2s
+
+	// maxListeningTick is the longest time between two position ticks that
+	// pine counts as listening time. The ticks are 500 ms apart. After a longer
+	// time, for example a suspend of the machine, pine does not know how long
+	// the player played.
+	maxListeningTick = 5 * time.Second
+
+	// syncMinChange is the smallest change of the position or of the
+	// listening time, in seconds, that pine sends to the server. A paused
+	// player can report a position that is a fraction of a second away from
+	// the position that the session started at.
+	syncMinChange = 1.0
 )
 
 func pineVersion() string {
@@ -51,6 +64,38 @@ func (m Model) playbackDevice() abs.DeviceInfo {
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
 	return m.sessionID != ""
+}
+
+// clock returns the current time.
+func (m Model) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// trackListeningTime adds the time since the last position tick to the
+// listening time, if the player played at that tick and plays now. The
+// listening time is the time of the clock. It is not the change of the
+// position: at the speed 2.0, the position moves two seconds in each second.
+func (m *Model) trackListeningTime(paused bool) {
+	if paused {
+		m.lastPlayingTick = time.Time{}
+		return
+	}
+	now := m.clock()
+	if !m.lastPlayingTick.IsZero() {
+		if played := now.Sub(m.lastPlayingTick); played > 0 && played <= maxListeningTick {
+			m.timeListened += played.Seconds()
+		}
+	}
+	m.lastPlayingTick = now
+}
+
+// hasUnsyncedProgress returns true if the position or the listening time has
+// a change that the server does not have.
+func (m Model) hasUnsyncedProgress() bool {
+	return m.timeListened >= syncMinChange || math.Abs(m.player.Position-m.lastSyncPos) >= syncMinChange
 }
 
 func (m Model) isFiltering() bool {
@@ -101,10 +146,10 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 	}
 
 	// Different item playing → stop it first
-	var stopCmd tea.Cmd
+	var closeCmd, stopCmd tea.Cmd
 	if m.isPlaying() {
 		logger.Info("switching playback", "from", m.itemID, "to", msg.Item.ID)
-		m, stopCmd = m.stopPlayback()
+		m, closeCmd, stopCmd = m.stopPlaybackCmds()
 	}
 
 	m.setSeriesContext(msg.Item)
@@ -133,7 +178,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 	}
 
 	if stopCmd != nil {
-		return m, tea.Batch(stopCmd, startCmd)
+		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
 	}
 	return m, startCmd
 }
@@ -159,10 +204,10 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 	}
 
 	// Different item/episode playing → stop it first
-	var stopCmd tea.Cmd
+	var closeCmd, stopCmd tea.Cmd
 	if m.isPlaying() {
 		logger.Info("switching playback", "from", m.itemID+"/"+m.episodeID, "to", msg.Item.ID+"/"+msg.Episode.ID)
-		m, stopCmd = m.stopPlayback()
+		m, closeCmd, stopCmd = m.stopPlaybackCmds()
 	}
 
 	item := msg.Item
@@ -187,6 +232,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				ItemID:           item.ID,
 				EpisodeID:        episode.ID,
 				CurrentTime:      session.CurrentTime,
+				SyncedTime:       session.CurrentTime,
 				Duration:         resolveEpisodeDuration(episode, session),
 				Title:            episode.Title,
 				Authors:          mprisAuthors(item),
@@ -202,7 +248,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 	}
 
 	if stopCmd != nil {
-		return m, tea.Batch(stopCmd, startCmd)
+		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
 	}
 	return m, startCmd
 }
@@ -219,10 +265,11 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.trackStartOffset = msg.Session.TrackStartOffset
 	m.trackDuration = msg.Session.TrackDuration
 	m.timeListened = 0
+	m.lastPlayingTick = time.Time{}
 	m.currentAuthors = msg.Session.Authors
 
 	bookPos := msg.Session.CurrentTime + m.trackStartOffset
-	m.lastSyncPos = bookPos
+	m.lastSyncPos = msg.Session.SyncedTime
 
 	// Update player model title/state
 	m.player, _ = m.player.Update(player.StartPlayMsg{Title: msg.Session.Title})
@@ -320,6 +367,9 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	if msg.Err != nil {
+		// pine does not know if the player plays, so the time until the next
+		// tick is not listening time.
+		m.lastPlayingTick = time.Time{}
 		if targetPos, ok := m.trackEndRolloverTarget(msg.Err); ok {
 			if m.player.Duration > 0 && targetPos >= m.player.Duration-trackEndRolloverSlack {
 				m.player.Position = m.player.Duration
@@ -355,6 +405,7 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	}
 
 	m.propertyUnavailableCount = 0
+	m.trackListeningTime(msg.Paused)
 
 	// Convert track-relative position to book-global
 	bookPos := msg.Position + m.trackStartOffset
@@ -380,11 +431,6 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
 		}
 		return m, tea.Batch(mprisCmds...)
-	}
-
-	// Track time listened (delta from last position)
-	if bookPos > m.player.Position {
-		m.timeListened += bookPos - m.player.Position
 	}
 
 	m.player.Position = bookPos
@@ -444,6 +490,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	sessionID := m.sessionID
 	currentTime := m.player.Position
 	timeListened := m.timeListened
+	changed := m.hasUnsyncedProgress()
 	duration := m.player.Duration
 	title := m.player.Title
 	authors := m.currentAuthors
@@ -462,7 +509,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 
 	return m, func() tea.Msg {
 		if client != nil && sessionID != "" {
-			_ = client.CloseSession(context.Background(), sessionID, currentTime, timeListened)
+			_ = closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed)
 			evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 		}
 		if mpvPlayer != nil {
@@ -610,6 +657,7 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 					ItemID:           item.ID,
 					EpisodeID:        episode.ID,
 					CurrentTime:      session.CurrentTime,
+					SyncedTime:       session.CurrentTime,
 					Duration:         resolveEpisodeDuration(episode, session),
 					Title:            episode.Title,
 					Authors:          mprisAuthors(item),
@@ -633,15 +681,15 @@ func (m Model) handlePlaybackCompleted() (Model, tea.Cmd) {
 	currentItemID := m.itemID
 	client := m.client
 
-	m, stopCmd := m.stopPlayback()
+	m, closeCmd, stopCmd := m.stopPlaybackCmds()
 	if hasNext {
-		return m.startQueuedEntry(next, stopCmd)
+		return m.startQueuedEntry(next, closeCmd, stopCmd)
 	}
 	if seriesID == "" || libraryID == "" || client == nil {
-		return m, stopCmd
+		return m, tea.Batch(closeCmd, stopCmd)
 	}
 	cmd := seriesContinueCmd(client, libraryID, seriesID, currentItemID)
-	return m, tea.Batch(stopCmd, cmd)
+	return m, tea.Batch(stopCmd, closeThen(closeCmd, cmd))
 }
 
 func (m Model) skipToNextQueued() (Model, tea.Cmd) {
@@ -652,11 +700,13 @@ func (m Model) skipToNextQueued() (Model, tea.Cmd) {
 	if !hasNext {
 		return m, nil
 	}
-	m, stopCmd := m.stopPlayback()
-	return m.startQueuedEntry(next, stopCmd)
+	m, closeCmd, stopCmd := m.stopPlaybackCmds()
+	return m.startQueuedEntry(next, closeCmd, stopCmd)
 }
 
-func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cmd) {
+// startQueuedEntry starts the next entry of the queue after closeCmd, the
+// close of the old session.
+func (m Model) startQueuedEntry(next QueueEntry, closeCmd, stopCmd tea.Cmd) (Model, tea.Cmd) {
 	var nextCmd tea.Cmd
 	if next.Episode != nil {
 		m, nextCmd = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
@@ -667,13 +717,7 @@ func (m Model) startQueuedEntry(next QueueEntry, stopCmd tea.Cmd) (Model, tea.Cm
 		m, nextCmd = m.handlePlayCmd(detail.PlayCmd{Item: next.Item})
 	}
 
-	if stopCmd == nil {
-		return m, nextCmd
-	}
-	if nextCmd == nil {
-		return m, stopCmd
-	}
-	return m, tea.Batch(stopCmd, nextCmd)
+	return m, tea.Batch(stopCmd, closeThen(closeCmd, nextCmd))
 }
 
 func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, itemID, title string, authors []string, duration, bookPos float64) (PlaySessionMsg, error) {
@@ -699,6 +743,7 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 			SessionID:        session.ID,
 			ItemID:           itemID,
 			CurrentTime:      seekTime,
+			SyncedTime:       session.CurrentTime,
 			Duration:         duration,
 			Title:            title,
 			Authors:          authors,
@@ -749,20 +794,8 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	duration := m.player.Duration
 	store := m.db
 
-	m.lastSyncPos = currentTime
-
 	cmds := []tea.Cmd{
 		syncTickCmd(),
-		func() tea.Msg {
-			if client != nil {
-				if err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened); err != nil {
-					logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
-				} else {
-					logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
-				}
-			}
-			return nil
-		},
 		func() tea.Msg {
 			if store != nil {
 				if err := store.SaveListeningSession(db.ListeningSession{
@@ -781,7 +814,67 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 		},
 	}
 
+	// A sync with an old position overwrites a newer position that a second
+	// device wrote. So no sync goes out while nothing changed.
+	if client != nil && m.hasUnsyncedProgress() {
+		// The server adds the timeListened of each sync to the session. So the
+		// sync takes the listening time, and handleSessionSynced gives it back
+		// if the sync fails.
+		m.timeListened = 0
+		cmds = append(cmds, syncSessionCmd(client, m.playbackDevice(), sessionID, itemID, episodeID, currentTime, timeListened))
+	}
+
 	return m, tea.Batch(cmds...)
+}
+
+// syncSessionCmd sends the position and the listening time of a session to
+// the server. The server answers 404 if it does not have the session: it
+// loses its open sessions in a restart, and it closes a session after 36
+// hours with no change. The command then opens a new session for the item,
+// and sends the position and the listening time to that session.
+func syncSessionCmd(client *cache.Client, device abs.DeviceInfo, sessionID, itemID, episodeID string, currentTime, timeListened float64) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		msg := SessionSyncedMsg{SessionID: sessionID, CurrentTime: currentTime, TimeListened: timeListened}
+		msg.Err = client.SyncSession(ctx, sessionID, currentTime, timeListened)
+		if abs.IsHTTPStatus(msg.Err, http.StatusNotFound) {
+			logger.Info("session is gone on the server, opening a new session", "sessionID", sessionID, "itemID", itemID, "episodeID", episodeID)
+			var session *abs.PlaySession
+			if episodeID != "" {
+				session, msg.Err = client.StartEpisodePlaySession(ctx, itemID, episodeID, device)
+			} else {
+				session, msg.Err = client.StartPlaySession(ctx, itemID, device)
+			}
+			if msg.Err == nil {
+				msg.NewSessionID = session.ID
+				msg.Err = client.SyncSession(ctx, session.ID, currentTime, timeListened)
+			}
+		}
+		if msg.Err != nil {
+			logger.Warn("failed to sync session", "sessionID", sessionID, "newSessionID", msg.NewSessionID, "currentTime", currentTime, "timeListened", timeListened, "err", msg.Err)
+		} else {
+			logger.Debug("session synced", "sessionID", sessionID, "newSessionID", msg.NewSessionID, "currentTime", currentTime, "timeListened", timeListened)
+		}
+		return msg
+	}
+}
+
+// handleSessionSynced records the result of a sync. An accepted sync gives the
+// position that the server has. A failed sync gives its listening time back to
+// the session, so that the next sync sends that time also.
+func (m Model) handleSessionSynced(msg SessionSyncedMsg) Model {
+	if msg.SessionID != m.sessionID {
+		return m
+	}
+	if msg.NewSessionID != "" {
+		m.sessionID = msg.NewSessionID
+	}
+	if msg.Err != nil {
+		m.timeListened += msg.TimeListened
+		return m
+	}
+	m.lastSyncPos = msg.CurrentTime
+	return m
 }
 
 // evictProgressCaches drops cached data that embeds user progress for an item:
@@ -854,8 +947,44 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	}
 }
 
+// closeSession closes a session on the server. The server reads a position in
+// a close as a progress update, and a position that is not at the end of a
+// finished book removes the finished mark. So the close sends the position
+// and the listening time only if changed is true: the server does not have
+// them.
+func closeSession(ctx context.Context, client *cache.Client, sessionID string, currentTime, timeListened float64, changed bool) error {
+	if !changed {
+		return client.CloseSessionNoSync(ctx, sessionID)
+	}
+	return client.CloseSession(ctx, sessionID, currentTime, timeListened)
+}
+
+// closeThen returns a command that runs closeCmd, the close of a session, and
+// then next. The server closes the open session of a device when that device
+// starts a session, and it then answers 404 to the close of pine: the
+// listening time that the close carries is lost. So a play request must not
+// go out before the close completes or fails.
+func closeThen(closeCmd, next tea.Cmd) tea.Cmd {
+	if next == nil {
+		return closeCmd
+	}
+	return func() tea.Msg {
+		closeCmd()
+		return next()
+	}
+}
+
 // stopPlayback fires all cleanup commands: update progress, close session, quit mpv.
+// It sends no position if the server has the position and the listening time.
 func (m Model) stopPlayback() (Model, tea.Cmd) {
+	m, closeCmd, stopCmd := m.stopPlaybackCmds()
+	return m, tea.Batch(closeCmd, stopCmd)
+}
+
+// stopPlaybackCmds stops the playback as stopPlayback does. It returns the
+// close of the session apart from the other cleanup commands, so that a
+// caller can run a play request after the close with closeThen.
+func (m Model) stopPlaybackCmds() (Model, tea.Cmd, tea.Cmd) {
 	logger.Info("stopping playback", "sessionID", m.sessionID, "itemID", m.itemID, "episodeID", m.episodeID, "position", m.player.Position, "duration", m.player.Duration, "timeListened", m.timeListened)
 	client := m.client
 	sessionID := m.sessionID
@@ -863,6 +992,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	episodeID := m.episodeID
 	currentTime := m.player.Position
 	timeListened := m.timeListened
+	changed := m.hasUnsyncedProgress()
 	duration := m.player.Duration
 	store := m.db
 	mpvPlayer := m.mpv
@@ -889,30 +1019,26 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 		evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
 	}
 
+	closeCmd := func() tea.Msg {
+		if client != nil && sessionID != "" {
+			if err := closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed); err != nil {
+				logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
+			} else {
+				logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
+			}
+		}
+		invalidateCache()
+		return nil
+	}
+
 	cmds := []tea.Cmd{
 		func() tea.Msg {
-			if client != nil && itemID != "" {
-				var err error
-				if episodeID != "" {
-					err = client.UpdateEpisodeProgress(context.Background(), itemID, episodeID, currentTime, progress, false)
-				} else {
-					err = client.UpdateProgress(context.Background(), itemID, currentTime, progress, false)
-				}
+			if changed && client != nil && itemID != "" {
+				err := client.UpdatePosition(context.Background(), itemID, episodeID, currentTime, progress)
 				if err != nil {
 					logger.Warn("failed to update progress on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress, "err", err)
 				} else {
 					logger.Debug("progress updated on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress)
-				}
-			}
-			invalidateCache()
-			return nil
-		},
-		func() tea.Msg {
-			if client != nil && sessionID != "" {
-				if err := client.CloseSession(context.Background(), sessionID, currentTime, timeListened); err != nil {
-					logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
-				} else {
-					logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
 				}
 			}
 			invalidateCache()
@@ -939,7 +1065,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 		m.mprisTitleCmd(),
 	}
 
-	return m, tea.Batch(cmds...)
+	return m, closeCmd, tea.Batch(cmds...)
 }
 
 func playSessionChapters(session *abs.PlaySession) []abs.Chapter {
@@ -967,6 +1093,7 @@ func (m Model) Cleanup() {
 
 	currentTime := m.player.Position
 	timeListened := m.timeListened
+	changed := m.hasUnsyncedProgress()
 	duration := m.player.Duration
 
 	var progress float64
@@ -982,21 +1109,16 @@ func (m Model) Cleanup() {
 	itemID := m.itemID
 
 	if m.client != nil && m.sessionID != "" {
-		if err := m.client.CloseSession(ctx, m.sessionID, currentTime, timeListened); err != nil {
-			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+		if err := closeSession(ctx, m.client, m.sessionID, currentTime, timeListened, changed); err != nil {
+			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
 		} else {
-			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened)
+			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
 		}
 		evictProgressCaches(m.cacheStore, itemID, libraryID, seriesID)
 	}
 
-	if m.client != nil && m.itemID != "" {
-		var err error
-		if m.episodeID != "" {
-			err = m.client.UpdateEpisodeProgress(ctx, m.itemID, m.episodeID, currentTime, progress, false)
-		} else {
-			err = m.client.UpdateProgress(ctx, m.itemID, currentTime, progress, false)
-		}
+	if changed && m.client != nil && m.itemID != "" {
+		err := m.client.UpdatePosition(ctx, m.itemID, m.episodeID, currentTime, progress)
 		if err != nil {
 			logger.Warn("cleanup: failed to update progress", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress, "err", err)
 		} else {

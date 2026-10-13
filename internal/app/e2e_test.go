@@ -245,12 +245,12 @@ func TestE2E_DetailToPlayback(t *testing.T) {
 	// The tick commands use time.After so they'll timeout in feedCmd — that's fine
 	m = feedCmdChain(m, cmd, 3)
 
-	// Simulate position updates
+	// Simulate position updates: the first tick of the player, and then 10
+	// seconds of play
 	mp.mu.Lock()
 	mp.position = 52.0
 	mp.mu.Unlock()
-	res, _ := m.Update(player.PositionMsg{Position: 52.0, Duration: 3600.0, Paused: false, Generation: 1})
-	m = res.(Model)
+	m = listen(playTick(m, 0, 42.0), 52.0)
 
 	if m.player.Position != 52.0 {
 		t.Errorf("position = %f, want 52.0", m.player.Position)
@@ -263,7 +263,7 @@ func TestE2E_DetailToPlayback(t *testing.T) {
 	assertViewContains(t, m, "The Great Gatsby")
 
 	// Trigger sync
-	res, cmd = m.Update(SyncTickMsg{})
+	res, cmd := m.Update(SyncTickMsg{})
 	m = res.(Model)
 	executeBatchCmds(cmd)
 
@@ -1048,11 +1048,10 @@ func TestE2E_FullJourney(t *testing.T) {
 	mp.mu.Lock()
 	mp.position = 60.0
 	mp.mu.Unlock()
-	res, _ := m.Update(player.PositionMsg{Position: 60.0, Duration: 3600.0, Paused: false, Generation: 1})
-	m = res.(Model)
+	m = playTick(playTick(m, 0, 59.0), 1, 60.0)
 
-	if m.timeListened == 0 {
-		t.Error("timeListened should be > 0 after position update")
+	if m.timeListened != 1.0 {
+		t.Errorf("timeListened = %f, want 1.0 after one second of play", m.timeListened)
 	}
 
 	// === Phase 7: Create bookmark ===
@@ -1062,7 +1061,7 @@ func TestE2E_FullJourney(t *testing.T) {
 	assertAPICallMade(t, log, "POST", "/api/me/item/")
 
 	// === Phase 8: Sync tick ===
-	res, cmd = m.Update(SyncTickMsg{})
+	res, cmd := m.Update(SyncTickMsg{})
 	m = res.(Model)
 	executeBatchCmds(cmd)
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/sync")
@@ -1086,13 +1085,13 @@ func TestE2E_FullJourney(t *testing.T) {
 	}
 
 	// === Phase 11: Quit from Home (stops playback and exits) ===
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	res, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
 		t.Fatal("'q' on Home with empty back stack should quit")
 	}
 
-	// Should batch stop commands with quit
-	executeBatchCmds(cmd)
+	// main calls Cleanup on the final model, which closes the session.
+	res.(Model).Cleanup()
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/close")
 
 	// === Verify API call sequence ===
@@ -1669,13 +1668,13 @@ func TestE2E_QQuitsAndStopsPlayback(t *testing.T) {
 	m.player.Duration = 3600.0
 
 	// Press q — should quit and stop playback
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	res, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
 		t.Fatal("q should return a command")
 	}
 
-	// Execute the batch — should include stop + quit
-	executeBatchCmds(cmd)
+	// main calls Cleanup on the final model, which closes the session.
+	res.(Model).Cleanup()
 
 	// Verify close session API was called
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/close")
