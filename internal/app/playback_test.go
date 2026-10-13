@@ -255,15 +255,16 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	result, cmd = m.Update(SyncTickMsg{})
 	m = result.(Model)
 
-	if m.lastSyncPos != 57.0 {
-		t.Errorf("lastSyncPos = %f, want 57.0", m.lastSyncPos)
-	}
 	if cmd == nil {
 		t.Fatal("SyncTickMsg should return batch of sync cmds")
 	}
 
 	// Execute sync commands to trigger API calls
-	executeBatchCmds(cmd)
+	m, _ = feedCmd(m, cmd)
+
+	if m.lastSyncPos != 57.0 {
+		t.Errorf("lastSyncPos = %f, want 57.0", m.lastSyncPos)
+	}
 
 	// Verify SyncSession was called
 	reqs = log.get()
@@ -1254,11 +1255,10 @@ func TestPlaybackMultipleSyncCycles(t *testing.T) {
 
 	// Second sync tick
 	result, cmd = m.Update(SyncTickMsg{})
-	m = result.(Model)
+	m, _ = feedCmd(result.(Model), cmd)
 	if m.lastSyncPos != 130.0 {
 		t.Errorf("lastSyncPos = %f, want 130.0", m.lastSyncPos)
 	}
-	executeBatchCmds(cmd)
 
 	// Verify two sync calls were made
 	reqs := log.get()

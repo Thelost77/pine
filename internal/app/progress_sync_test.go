@@ -63,13 +63,18 @@ func timesListened(log *apiLog, path string) []float64 {
 	return times
 }
 
+// syncTick runs one sync tick and its commands.
+func syncTick(m Model) Model {
+	result, cmd := m.Update(SyncTickMsg{})
+	m, _ = feedCmd(result.(Model), cmd)
+	return m
+}
+
 // listenAndSync moves the position of the player to pos, and then runs one
 // sync tick and its commands.
 func listenAndSync(m Model, pos float64) Model {
 	result, _ := m.Update(player.PositionMsg{Position: pos, Duration: m.player.Duration})
-	result, cmd := result.(Model).Update(SyncTickMsg{})
-	m, _ = feedCmd(result.(Model), cmd)
-	return m
+	return syncTick(result.(Model))
 }
 
 // newSyncTestModel returns a model that plays item-001 in the session sess-abc
@@ -145,5 +150,75 @@ func TestCloseSendsListeningTimeSinceLastSync(t *testing.T) {
 	want := []float64{5}
 	if got := timesListened(log, "/api/session/sess-abc/close"); !reflect.DeepEqual(got, want) {
 		t.Errorf("timeListened of the close = %v, want %v", got, want)
+	}
+}
+
+// TestSyncTickSendsNothingWhenNothingChanged verifies that a session sends no
+// sync while it has no change since the last sync that the server accepted. A
+// sync with an old position overwrites a newer position of a second device.
+func TestSyncTickSendsNothingWhenNothingChanged(t *testing.T) {
+	const syncPath = "/api/session/sess-abc/sync"
+	log, client := newFakeABS(t, nil, nil)
+	m := newSyncTestModel(client)
+
+	// The player is paused at the position that the server has.
+	result, _ := m.Update(player.PositionMsg{Position: 100, Duration: 3600, Paused: true})
+	result, cmd := result.(Model).Update(SyncTickMsg{})
+	if cmd == nil {
+		t.Fatal("the sync tick must continue while a session exists")
+	}
+	m, _ = feedCmd(result.(Model), cmd)
+	if n := len(requestsTo(log, http.MethodPost, syncPath)); n != 0 {
+		t.Fatalf("%d syncs with no change, want 0", n)
+	}
+
+	// The user moves the position. One sync sends the new position.
+	m, _ = m.handleSeek(200)
+	m = syncTick(m)
+	m = syncTick(m)
+	syncs := requestsTo(log, http.MethodPost, syncPath)
+	if len(syncs) != 1 {
+		t.Fatalf("%d syncs after one seek, want 1", len(syncs))
+	}
+	if got := syncs[0].Body["currentTime"]; got != 300.0 {
+		t.Errorf("currentTime of the sync = %v, want 300", got)
+	}
+	if m.lastSyncPos != 300 {
+		t.Errorf("lastSyncPos = %v, want 300", m.lastSyncPos)
+	}
+}
+
+// TestSyncSendsPositionOfSeekToOtherTrack verifies that a session that starts
+// at a position that the server does not have sends that position.
+func TestSyncSendsPositionOfSeekToOtherTrack(t *testing.T) {
+	log, client := newFakeABS(t, map[string]abs.PlaySession{
+		"/api/items/item-001/play": {
+			ID: "sess-next",
+			AudioTracks: []abs.AudioTrack{
+				{Index: 0, StartOffset: 0, ContentURL: "/track0.mp3", Duration: 1800},
+				{Index: 1, StartOffset: 1800, ContentURL: "/track1.mp3", Duration: 1800},
+			},
+			CurrentTime: 100,
+		},
+	}, nil)
+	m := newSyncTestModel(client)
+	m.trackDuration = 1800
+
+	m, cmd := m.handleSeek(1800)
+	m, _ = feedCmd(m, cmd)
+	if m.sessionID != "sess-next" {
+		t.Fatalf("sessionID = %q, want sess-next", m.sessionID)
+	}
+	m = syncTick(m)
+
+	syncs := requestsTo(log, http.MethodPost, "/api/session/sess-next/sync")
+	if len(syncs) != 1 {
+		t.Fatalf("%d syncs after a seek to a different track, want 1", len(syncs))
+	}
+	if got := syncs[0].Body["currentTime"]; got != 1900.0 {
+		t.Errorf("currentTime of the sync = %v, want 1900", got)
+	}
+	if m.lastSyncPos != 1900 {
+		t.Errorf("lastSyncPos = %v, want 1900", m.lastSyncPos)
 	}
 }

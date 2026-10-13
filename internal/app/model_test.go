@@ -896,8 +896,8 @@ func TestSyncTickWhenPlaying(t *testing.T) {
 	result, cmd := m.Update(SyncTickMsg{})
 	rm := result.(Model)
 
-	if rm.lastSyncPos != 100.0 {
-		t.Errorf("lastSyncPos = %f, want 100.0", rm.lastSyncPos)
+	if rm.timeListened != 0 {
+		t.Errorf("timeListened = %f, want 0 (the sync takes it)", rm.timeListened)
 	}
 	if cmd == nil {
 		t.Error("expected batch cmd from sync tick")

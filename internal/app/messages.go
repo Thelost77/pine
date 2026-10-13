@@ -62,6 +62,7 @@ type PlaySessionData struct {
 	ItemID           string
 	EpisodeID        string
 	CurrentTime      float64
+	SyncedTime       float64 // book position that the server has
 	Duration         float64
 	Title            string
 	Authors          []string
@@ -84,6 +85,7 @@ type SyncTickMsg struct{}
 // SessionSyncedMsg carries the result of a sync of the playback session.
 type SessionSyncedMsg struct {
 	SessionID    string
+	CurrentTime  float64
 	TimeListened float64
 	Err          error
 }

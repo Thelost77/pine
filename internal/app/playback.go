@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -22,6 +23,12 @@ import (
 const (
 	trackEndRolloverSlack            = 2.0
 	propertyUnavailableMaxBackoffExp = 2 // 500ms << 2 = 2s
+
+	// syncMinChange is the smallest change of the position or of the
+	// listening time, in seconds, that pine sends to the server. A paused
+	// player can report a position that is a fraction of a second away from
+	// the position that the session started at.
+	syncMinChange = 1.0
 )
 
 func pineVersion() string {
@@ -51,6 +58,12 @@ func (m Model) playbackDevice() abs.DeviceInfo {
 // isPlaying returns true if there's an active playback session.
 func (m Model) isPlaying() bool {
 	return m.sessionID != ""
+}
+
+// hasUnsyncedProgress returns true if the position or the listening time has
+// a change that the server does not have.
+func (m Model) hasUnsyncedProgress() bool {
+	return m.timeListened >= syncMinChange || math.Abs(m.player.Position-m.lastSyncPos) >= syncMinChange
 }
 
 func (m Model) isFiltering() bool {
@@ -187,6 +200,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 				ItemID:           item.ID,
 				EpisodeID:        episode.ID,
 				CurrentTime:      session.CurrentTime,
+				SyncedTime:       session.CurrentTime,
 				Duration:         resolveEpisodeDuration(episode, session),
 				Title:            episode.Title,
 				Authors:          mprisAuthors(item),
@@ -222,7 +236,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.currentAuthors = msg.Session.Authors
 
 	bookPos := msg.Session.CurrentTime + m.trackStartOffset
-	m.lastSyncPos = bookPos
+	m.lastSyncPos = msg.Session.SyncedTime
 
 	// Update player model title/state
 	m.player, _ = m.player.Update(player.StartPlayMsg{Title: msg.Session.Title})
@@ -610,6 +624,7 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 					ItemID:           item.ID,
 					EpisodeID:        episode.ID,
 					CurrentTime:      session.CurrentTime,
+					SyncedTime:       session.CurrentTime,
 					Duration:         resolveEpisodeDuration(episode, session),
 					Title:            episode.Title,
 					Authors:          mprisAuthors(item),
@@ -699,6 +714,7 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 			SessionID:        session.ID,
 			ItemID:           itemID,
 			CurrentTime:      seekTime,
+			SyncedTime:       session.CurrentTime,
 			Duration:         duration,
 			Title:            title,
 			Authors:          authors,
@@ -749,28 +765,8 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	duration := m.player.Duration
 	store := m.db
 
-	m.lastSyncPos = currentTime
-	if client != nil {
-		// The server adds the timeListened of each sync to the session. So the
-		// sync takes the listening time, and handleSessionSynced gives it back
-		// if the sync fails.
-		m.timeListened = 0
-	}
-
 	cmds := []tea.Cmd{
 		syncTickCmd(),
-		func() tea.Msg {
-			if client == nil {
-				return nil
-			}
-			err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened)
-			if err != nil {
-				logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
-			} else {
-				logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
-			}
-			return SessionSyncedMsg{SessionID: sessionID, TimeListened: timeListened, Err: err}
-		},
 		func() tea.Msg {
 			if store != nil {
 				if err := store.SaveListeningSession(db.ListeningSession{
@@ -789,15 +785,39 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 		},
 	}
 
+	// A sync with an old position overwrites a newer position that a second
+	// device wrote. So no sync goes out while nothing changed.
+	if client != nil && m.hasUnsyncedProgress() {
+		// The server adds the timeListened of each sync to the session. So the
+		// sync takes the listening time, and handleSessionSynced gives it back
+		// if the sync fails.
+		m.timeListened = 0
+		cmds = append(cmds, func() tea.Msg {
+			err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened)
+			if err != nil {
+				logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+			} else {
+				logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
+			}
+			return SessionSyncedMsg{SessionID: sessionID, CurrentTime: currentTime, TimeListened: timeListened, Err: err}
+		})
+	}
+
 	return m, tea.Batch(cmds...)
 }
 
-// handleSessionSynced gives the listening time of a failed sync back to the
-// session, so that the next sync sends that time also.
+// handleSessionSynced records the result of a sync. An accepted sync gives the
+// position that the server has. A failed sync gives its listening time back to
+// the session, so that the next sync sends that time also.
 func (m Model) handleSessionSynced(msg SessionSyncedMsg) Model {
-	if msg.Err != nil && msg.SessionID == m.sessionID {
-		m.timeListened += msg.TimeListened
+	if msg.SessionID != m.sessionID {
+		return m
 	}
+	if msg.Err != nil {
+		m.timeListened += msg.TimeListened
+		return m
+	}
+	m.lastSyncPos = msg.CurrentTime
 	return m
 }
 
