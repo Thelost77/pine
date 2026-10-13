@@ -46,7 +46,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: time.Now().UnixMilli()}
 		updated := append(append([]abs.Bookmark{}, existing...), newBm)
 		logger.Info("bookmark added locally", "itemID", itemID, "count", len(updated))
-		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: updated}
 	}
 }
 
@@ -88,7 +88,7 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 			}
 		}
 		logger.Info("bookmark deleted locally", "itemID", itemID, "count", len(updated))
-		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: updated}
 	}
 }
 
@@ -121,7 +121,7 @@ func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cm
 			}
 		}
 		logger.Info("bookmark updated locally", "itemID", itemID, "count", len(updated))
-		return detail.BookmarksUpdatedMsg{Bookmarks: updated}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: updated}
 	}
 }
 
@@ -134,9 +134,9 @@ func (m Model) fetchBookmarksCmd(itemID string) tea.Cmd {
 	return func() tea.Msg {
 		bookmarks, err := client.GetBookmarks(context.Background(), itemID)
 		if err != nil {
-			return detail.BookmarksUpdatedMsg{Err: err}
+			return detail.BookmarksUpdatedMsg{ItemID: itemID, Err: err}
 		}
-		return detail.BookmarksUpdatedMsg{Bookmarks: bookmarks}
+		return detail.BookmarksUpdatedMsg{ItemID: itemID, Bookmarks: bookmarks}
 	}
 }
 

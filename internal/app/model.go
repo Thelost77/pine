@@ -590,6 +590,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleUpdateBookmark(msg)
 
 	case detail.BookmarksUpdatedMsg:
+		if msg.ItemID != "" && msg.ItemID != m.detail.ItemID() {
+			return m, nil
+		}
 		m.detail, _ = m.detail.Update(msg)
 		return m, nil
 

@@ -90,8 +90,11 @@ type MarkFinishedMsg struct {
 	Progress *abs.UserMediaProgress
 }
 
-// BookmarksUpdatedMsg updates the bookmark list after an add/delete operation.
+// BookmarksUpdatedMsg updates the bookmark list after a load or an
+// add/delete operation. ItemID is the item of the bookmarks: the answer for an
+// item can come after the user opened a different item.
 type BookmarksUpdatedMsg struct {
+	ItemID    string
 	Bookmarks []abs.Bookmark
 	Err       error
 }

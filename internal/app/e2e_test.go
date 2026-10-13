@@ -753,6 +753,32 @@ func TestE2E_BookmarkFetchOnDetailEntry(t *testing.T) {
 	}
 }
 
+// TestE2E_DetailIgnoresBookmarksOfOtherItem verifies that the detail screen
+// ignores the bookmarks of an item that it does not show. The answer for an
+// item can come after the user opened a different item.
+func TestE2E_DetailIgnoresBookmarksOfOtherItem(t *testing.T) {
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-001"] = []abs.Bookmark{
+		testBookmark("Bookmark of the first item", 300.0),
+	}
+	srv := newFullMockABSServer(&apiLog{}, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+
+	res, firstCmd := m.Update(home.NavigateDetailMsg{Item: testLibraryItem("item-001", "First")})
+	res, _ = res.(Model).Update(BackMsg{})
+	res, secondCmd := res.(Model).Update(home.NavigateDetailMsg{Item: testLibraryItem("item-002", "Second")})
+	m = feedCmdChain(res.(Model), secondCmd, 5)
+	// The answers for the first item come last.
+	m = feedCmdChain(m, firstCmd, 5)
+
+	if m.detail.ItemID() != "item-002" || len(m.detail.Bookmarks()) != 0 {
+		t.Fatalf("detail of %s has the bookmarks %+v, want item-002 and no bookmarks", m.detail.ItemID(), m.detail.Bookmarks())
+	}
+}
+
 func TestE2E_BookmarkFetchOnDetailEntryShowsEmptyStateForNoBookmarks(t *testing.T) {
 	log := &apiLog{}
 	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}

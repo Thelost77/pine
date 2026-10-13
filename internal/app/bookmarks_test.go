@@ -57,6 +57,9 @@ func TestHandleAddBookmarkAppendsOptimistically(t *testing.T) {
 	if updateMsg.Err != nil {
 		t.Fatalf("unexpected error: %v", updateMsg.Err)
 	}
+	if updateMsg.ItemID != "item-001" {
+		t.Errorf("ItemID = %q, want item-001", updateMsg.ItemID)
+	}
 	if len(updateMsg.Bookmarks) != 2 {
 		t.Fatalf("expected 2 bookmarks, got %d", len(updateMsg.Bookmarks))
 	}
@@ -162,6 +165,9 @@ func TestHandleDeleteBookmarkReturnsEmptyBookmarksWhenLastBookmarkRemoved(t *tes
 	if updateMsg.Err != nil {
 		t.Fatalf("expected empty bookmark update, got error %v", updateMsg.Err)
 	}
+	if updateMsg.ItemID != "item-001" {
+		t.Errorf("ItemID = %q, want item-001", updateMsg.ItemID)
+	}
 	if len(updateMsg.Bookmarks) != 0 {
 		t.Fatalf("expected empty bookmarks after delete, got %d", len(updateMsg.Bookmarks))
 	}
@@ -202,6 +208,9 @@ func TestHandleUpdateBookmarkUpdatesTitle(t *testing.T) {
 	}
 	if updateMsg.Err != nil {
 		t.Fatalf("expected no refresh error, got %v", updateMsg.Err)
+	}
+	if updateMsg.ItemID != "item-001" {
+		t.Errorf("ItemID = %q, want item-001", updateMsg.ItemID)
 	}
 	if len(updateMsg.Bookmarks) != 1 {
 		t.Fatalf("expected 1 bookmark, got %d", len(updateMsg.Bookmarks))
