@@ -463,6 +463,14 @@ func (m *Model) handlePlayerEvent(msg tea.Msg) (*Model, tea.Cmd, bool) {
 		newM, cmd := m.handlePositionMsg(msg)
 		return newM, cmd, true
 
+	case player.CommandErrMsg:
+		// A player that is closed has no state. The next launch sets the
+		// speed and the volume.
+		if errors.Is(msg.Err, player.ErrClosed) {
+			return m, nil, true
+		}
+		return m, m.err.SetError(msg.Err), true
+
 	case player.PlayerReadyMsg:
 		if msg.Generation != m.playGeneration {
 			if m.mpv != nil && (m.isSubliminalActive() || !m.IsPlaying()) {

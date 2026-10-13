@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -659,6 +660,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case player.PlayerQuitMsg:
 		return m, nil
+
+	case player.CommandErrMsg:
+		// A player that is closed has no state. The next launch sets the
+		// speed and the volume.
+		if errors.Is(msg.Err, player.ErrClosed) {
+			return m, nil
+		}
+		cmd := m.err.SetError(msg.Err)
+		m.propagateSize()
+		return m, cmd
 
 	// --- MPRIS control messages ---
 

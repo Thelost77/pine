@@ -253,6 +253,25 @@ func TestClosedPlayerTickDoesNotStopBeforeTheEndEvent(t *testing.T) {
 	}
 }
 
+// TestPlayerCommandErrorShowsErrorBanner verifies that the model shows the
+// error of a player that did not accept a new speed. A player that is closed
+// has no state, so its error has no banner.
+func TestPlayerCommandErrorShowsErrorBanner(t *testing.T) {
+	m := New(nil, nil)
+
+	updated, _ := m.Update(player.CommandErrMsg{Err: fmt.Errorf("set speed: %w", player.ErrClosed)})
+	m = updated.(*Model)
+	if m.err.HasError() {
+		t.Fatal("the error banner is visible for a player that is closed")
+	}
+
+	updated, _ = m.Update(player.CommandErrMsg{Err: errors.New("set speed: not accepted")})
+	m = updated.(*Model)
+	if !m.err.HasError() {
+		t.Fatal("the error banner is not visible")
+	}
+}
+
 func TestMPRISSeekAbsoluteSeeksTheCurrentTrack(t *testing.T) {
 	m := New(nil, player.NewMpv())
 	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}}

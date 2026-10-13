@@ -71,7 +71,7 @@ The Architecture Map below describes pine and the shared packages.
 |------|---------------|
 | `mpv.go` | Mpv struct: Launch (creates a libmpv handle and loads the file), GetPosition/GetDuration/GetPaused/GetIdle, Seek, SetSpeed/SetVolume, Quit. `ErrClosed` and `ErrPropertyUnavailable`. Writes the warnings and errors of mpv to the app log, without URL queries. Runtime directory for the media cache. |
 | `libmpv.go`, `libmpv_unix.go`, `libmpv_windows.go` | Binding to libmpv through purego, with no cgo. The library loads on the first Launch. Library search order for each system. |
-| `commands.go` | tea.Cmd factories: TickCmd (500ms poll), LaunchCmd, SetPauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd. WatchEvents returns PlayerEndMsg at the end of a playback. |
+| `commands.go` | tea.Cmd factories: TickCmd (500ms poll), LaunchCmd, SetPauseCmd, SetSpeedCmd, SetVolumeCmd, QuitCmd. A command for the pause state, the speed, or the volume returns CommandErrMsg if the player does not accept the value. WatchEvents returns PlayerEndMsg at the end of a playback. |
 | `model.go` | Player sub-model: Position/Duration/Speed/Volume state, key handling (play/pause, seek, speed, volume) |
 | `view.go` | Player footer bar: icon + title + time + speed + optional volume/sleep |
 | `cache.go`, `group.go` | Session media cache and player group for simultaneous playback. Only spruce uses them. |

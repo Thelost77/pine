@@ -29,6 +29,14 @@ type PlayerEndMsg struct {
 	Err        error
 }
 
+// CommandErrMsg reports that the player did not accept a new pause state, a
+// new speed, or a new volume. The app then shows a state that the player does
+// not have. A seek that fails needs no message: the next position tick has
+// the position of the player.
+type CommandErrMsg struct {
+	Err error
+}
+
 // TickCmd returns a command that fires twice per second and polls mpv state.
 // The generation parameter ties the tick to a specific play session so stale
 // ticks from a previous session can be safely ignored.
@@ -61,7 +69,7 @@ func SetPauseCmd(p Player, paused bool) tea.Cmd {
 	return func() tea.Msg {
 		err := p.SetPause(paused)
 		if err != nil {
-			return PositionMsg{Err: err}
+			return CommandErrMsg{Err: err}
 		}
 		return nil
 	}
@@ -72,7 +80,7 @@ func SetSpeedCmd(p Player, speed float64) tea.Cmd {
 	return func() tea.Msg {
 		err := p.SetSpeed(speed)
 		if err != nil {
-			return PositionMsg{Err: err}
+			return CommandErrMsg{Err: err}
 		}
 		return nil
 	}
@@ -83,7 +91,7 @@ func SetVolumeCmd(p Player, vol int) tea.Cmd {
 	return func() tea.Msg {
 		err := p.SetVolume(vol)
 		if err != nil {
-			return PositionMsg{Err: err}
+			return CommandErrMsg{Err: err}
 		}
 		return nil
 	}

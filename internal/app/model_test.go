@@ -562,6 +562,25 @@ func TestDetailConfirmCapturesQuitAndBackKeys(t *testing.T) {
 	}
 }
 
+// TestPlayerCommandErrorShowsErrorBanner verifies that the model shows the
+// error of a player that did not accept a new speed. A player that is closed
+// has no state, so its error has no banner.
+func TestPlayerCommandErrorShowsErrorBanner(t *testing.T) {
+	m := newTestModelAuthenticated()
+
+	result, _ := m.Update(player.CommandErrMsg{Err: fmt.Errorf("set speed: %w", player.ErrClosed)})
+	m = result.(Model)
+	if m.err.HasError() {
+		t.Fatal("the error banner is visible for a player that is closed")
+	}
+
+	result, _ = m.Update(player.CommandErrMsg{Err: errors.New("set speed: not accepted")})
+	m = result.(Model)
+	if !m.err.HasError() {
+		t.Fatal("the error banner is not visible")
+	}
+}
+
 func TestContentSearchContextUsesActiveLibraryScreen(t *testing.T) {
 	m := newTestModelAuthenticated()
 	m.home = home.New(m.styles, m.client)
