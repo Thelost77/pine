@@ -148,6 +148,8 @@ Styles from theme config. Format helpers (timestamps, durations). `RunProgram` r
 - Each launch makes a new mpv handle, which plays at the speed 1.0. `handlePlayerReady` sets the speed of the model in the new player.
 - The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A player that is paused or idle does not play. mpv reports no pause while it waits for data, so a position tick also reads the mpv property `core-idle` (`GetIdle`, `PositionMsg.Idle`). A test moves the clock with `Model.now`.
 - pine finds the end of a track through `errors.Is(err, player.ErrClosed)` on a position tick. spruce uses `PlayerEndMsg`, and a tick with `ErrClosed` can arrive before it. Do not match the text of a player error.
+- Enter on a bookmark (`handleSeekToBookmark`) seeks the player only if the book or the episode of the bookmark plays. If not, it stops the playback and starts that book or that episode at the time of the bookmark.
+- A bookmark of ABS has no episode ID. `handleAddBookmark` puts the episode title and `episodeTitleSeparator` before the title of a podcast bookmark, and `bookmarkEpisode` finds the episode from that title. The bookmarks on a server have that format, so do not change it.
 
 ## Testing
 

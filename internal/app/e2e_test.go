@@ -576,6 +576,223 @@ func TestE2E_BookmarkEnterStartsPlaybackWhenStopped(t *testing.T) {
 	}
 }
 
+func TestE2E_BookmarkEnterSwitchesToItemOfBookmark(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-002"] = []abs.Bookmark{
+		testBookmark("In the other book", 300.0),
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 50, duration: 3600}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up: item-001 plays
+	m.sessionID = "sess-other"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 50.0
+	m.player.Duration = 3600.0
+
+	// Open the detail screen of item-002 and select its bookmark
+	item := testLibraryItem("item-002", "1984")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+	m = feedCmdChain(m, cmd, 5)
+
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	if !m.detail.FocusBookmarks() {
+		t.Fatal("expected bookmark focus after Tab")
+	}
+
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
+
+	assertAPICallMade(t, log, "POST", "/api/session/sess-other/close")
+	assertAPICallMade(t, log, "POST", "/api/items/item-002/play")
+	if m.itemID != "item-002" {
+		t.Fatalf("itemID = %q, want item-002", m.itemID)
+	}
+	if m.sessionID != "sess-e2e" {
+		t.Fatalf("sessionID = %q, want sess-e2e", m.sessionID)
+	}
+	if m.player.Position != 300.0 {
+		t.Fatalf("player position = %f, want 300.0", m.player.Position)
+	}
+	if !mp.launched {
+		t.Fatal("expected player launch after bookmark enter")
+	}
+}
+
+func TestE2E_PodcastBookmarkEnterSwitchesToEpisodeOfBookmark(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["pod-001"] = []abs.Bookmark{
+		testBookmark("Episode 2 - Deep Dive — Bookmark at 5:00", 300.0),
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 50, duration: 3600}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up: a book plays
+	m.sessionID = "sess-other"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 50.0
+	m.player.Duration = 3600.0
+
+	// Open the detail screen of the podcast and select its bookmark
+	item := testPodcastItem("pod-001", "Tech Talk Daily")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+	m = feedCmdChain(m, cmd, 5)
+
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	if !m.detail.FocusBookmarks() {
+		t.Fatal("expected bookmark focus after Tab")
+	}
+
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
+
+	assertAPICallMade(t, log, "POST", "/api/session/sess-other/close")
+	assertAPICallMade(t, log, "POST", "/api/items/pod-001/play/pod-001-ep-002")
+	if m.itemID != "pod-001" || m.episodeID != "pod-001-ep-002" {
+		t.Fatalf("playing %q/%q, want pod-001/pod-001-ep-002", m.itemID, m.episodeID)
+	}
+	if m.player.Position != 300.0 {
+		t.Fatalf("player position = %f, want 300.0", m.player.Position)
+	}
+	if !mp.launched {
+		t.Fatal("expected player launch after bookmark enter")
+	}
+}
+
+func TestE2E_PodcastBookmarkEnterWithSamePodcastPlaying(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["pod-001"] = []abs.Bookmark{
+		testBookmark("Episode 1 - Pilot — Bookmark at 2:00", 120.0),
+		testBookmark("Episode 2 - Deep Dive — Bookmark at 5:00", 300.0),
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 50, duration: testEpisodeDuration}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up: episode 1 of the podcast plays
+	m.sessionID = "sess-ep-one"
+	m.itemID = "pod-001"
+	m.episodeID = "pod-001-ep-001"
+	m.player.Playing = true
+	m.player.Position = 50.0
+	m.player.Duration = testEpisodeDuration
+
+	item := testPodcastItem("pod-001", "Tech Talk Daily")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+	m = feedCmdChain(m, cmd, 5)
+
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	if !m.detail.FocusBookmarks() {
+		t.Fatal("expected bookmark focus after Tab")
+	}
+
+	// --- Bookmark of the episode that plays: seek ---
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
+
+	assertNoAPICall(t, log, "POST", "/api/items/pod-001/play")
+	if m.sessionID != "sess-ep-one" {
+		t.Fatalf("sessionID = %q, want sess-ep-one", m.sessionID)
+	}
+	mp.mu.Lock()
+	pos := mp.position
+	mp.mu.Unlock()
+	if pos != 120.0 {
+		t.Fatalf("mock player position = %f, want 120.0 (bookmark time)", pos)
+	}
+
+	// --- Bookmark of a different episode: start that episode ---
+	m, _ = e2ePressKey(m, 'j')
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
+
+	assertAPICallMade(t, log, "POST", "/api/session/sess-ep-one/close")
+	assertAPICallMade(t, log, "POST", "/api/items/pod-001/play/pod-001-ep-002")
+	if m.itemID != "pod-001" || m.episodeID != "pod-001-ep-002" {
+		t.Fatalf("playing %q/%q, want pod-001/pod-001-ep-002", m.itemID, m.episodeID)
+	}
+	if m.player.Position != 300.0 {
+		t.Fatalf("player position = %f, want 300.0", m.player.Position)
+	}
+}
+
+func TestE2E_PodcastBookmarkEnterWithUnknownEpisodeKeepsPlayback(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["pod-001"] = []abs.Bookmark{
+		testBookmark("A title with no episode", 300.0),
+	}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	mp := &mockPlayer{position: 50, duration: 3600}
+	m := newE2EModelAuthenticated(srv, mp)
+	m = e2eSetSize(m, 120, 40)
+
+	// Set up: a book plays
+	m.sessionID = "sess-other"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 50.0
+	m.player.Duration = 3600.0
+
+	item := testPodcastItem("pod-001", "Tech Talk Daily")
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: item})
+	m = res.(Model)
+	assertScreen(t, m, ScreenDetail)
+	m = feedCmdChain(m, cmd, 5)
+
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	if !m.detail.FocusBookmarks() {
+		t.Fatal("expected bookmark focus after Tab")
+	}
+
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
+
+	assertNoAPICall(t, log, "POST", "/api/session/sess-other/close")
+	assertNoAPICall(t, log, "POST", "/api/items/pod-001/play")
+	if m.sessionID != "sess-other" || m.itemID != "item-001" {
+		t.Fatalf("playing %q in session %q, want item-001 in sess-other", m.itemID, m.sessionID)
+	}
+	mp.mu.Lock()
+	pos := mp.position
+	mp.mu.Unlock()
+	if pos != 50.0 {
+		t.Fatalf("mock player position = %f, want 50.0 (no seek)", pos)
+	}
+	if !m.err.HasError() {
+		t.Fatal("expected an error for a bookmark with no known episode")
+	}
+}
+
 func TestE2E_BookmarkTitleEdit(t *testing.T) {
 	log := &apiLog{}
 	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}

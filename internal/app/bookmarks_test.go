@@ -288,3 +288,32 @@ func TestHandleSeekToBookmarkStartsPlaybackWhenStopped(t *testing.T) {
 		t.Errorf("expected no progress patch before starting playback, got %v", progressBody)
 	}
 }
+
+func TestBookmarkEpisode(t *testing.T) {
+	episodes := []abs.PodcastEpisode{
+		{ID: "ep-1", Title: "Pilot"},
+		{ID: "ep-2", Title: "Pilot — Part 2"},
+		{ID: "ep-3", Title: ""},
+	}
+
+	tests := []struct {
+		name   string
+		title  string
+		wantID string
+		wantOK bool
+	}{
+		{"title of handleAddBookmark", "Pilot — Bookmark at 2:00", "ep-1", true},
+		{"longest episode title", "Pilot — Part 2 — Bookmark at 2:00", "ep-2", true},
+		{"no episode title", "Bookmark at 2:00", "", false},
+		{"episode title with no separator", "Pilot", "", false},
+		{"empty episode title", " — Bookmark at 2:00", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			episode, ok := bookmarkEpisode(tt.title, episodes)
+			if ok != tt.wantOK || episode.ID != tt.wantID {
+				t.Errorf("bookmarkEpisode(%q) = %q, %v, want %q, %v", tt.title, episode.ID, ok, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}

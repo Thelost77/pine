@@ -228,32 +228,11 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
-		if len(session.AudioTracks) == 0 {
-			return PlaybackErrorMsg{Err: fmt.Errorf("no audio tracks")}
+		playMsg, err := buildEpisodePlaySessionMsg(client, session, item, episode, session.CurrentTime)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
 		}
-
-		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL
-		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
-
-		return PlaySessionMsg{
-			Session: PlaySessionData{
-				SessionID:        session.ID,
-				ItemID:           item.ID,
-				EpisodeID:        episode.ID,
-				CurrentTime:      session.CurrentTime,
-				SyncedTime:       session.CurrentTime,
-				Duration:         resolveEpisodeDuration(episode, session),
-				Title:            episode.Title,
-				Authors:          mprisAuthors(item),
-				Chapters:         playSessionChapters(session),
-				TrackStartOffset: session.AudioTracks[0].StartOffset,
-				TrackDuration:    session.AudioTracks[0].Duration,
-				TrackFilename:    session.AudioTracks[0].Metadata.Filename,
-				TranscriptIno:    session.TranscriptIno(session.AudioTracks[0].Metadata.Filename),
-			},
-			StreamURL: streamURL,
-			AuthToken: client.Token(),
-		}
+		return playMsg
 	}
 
 	if stopCmd != nil {
@@ -565,6 +544,22 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 	}
 }
 
+func (m Model) startEpisodePlaybackAtPositionCmd(item abs.LibraryItem, episode abs.PodcastEpisode, pos float64) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		device := m.playbackDevice()
+		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		playMsg, err := buildEpisodePlaySessionMsg(client, session, item, episode, pos)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		return playMsg
+	}
+}
+
 func (m Model) startRestorePlaybackCmd(msg RestoreSessionMsg) tea.Cmd {
 	if msg.Item == nil || m.client == nil {
 		return nil
@@ -759,6 +754,38 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 			Duration:         duration,
 			Title:            title,
 			Authors:          authors,
+			Chapters:         playSessionChapters(session),
+			TrackStartOffset: track.StartOffset,
+			TrackDuration:    track.Duration,
+			TrackFilename:    track.Metadata.Filename,
+			TranscriptIno:    session.TranscriptIno(track.Metadata.Filename),
+		},
+		StreamURL: streamURL,
+		AuthToken: client.Token(),
+	}, nil
+}
+
+// buildEpisodePlaySessionMsg makes the PlaySessionMsg that starts a podcast
+// episode at the position pos.
+func buildEpisodePlaySessionMsg(client *cache.Client, session *abs.PlaySession, item abs.LibraryItem, episode abs.PodcastEpisode, pos float64) (PlaySessionMsg, error) {
+	if len(session.AudioTracks) == 0 {
+		return PlaySessionMsg{}, fmt.Errorf("no audio tracks")
+	}
+
+	track := session.AudioTracks[0]
+	streamURL := client.BaseURL() + track.ContentURL
+	logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", pos)
+
+	return PlaySessionMsg{
+		Session: PlaySessionData{
+			SessionID:        session.ID,
+			ItemID:           item.ID,
+			EpisodeID:        episode.ID,
+			CurrentTime:      pos,
+			SyncedTime:       session.CurrentTime,
+			Duration:         resolveEpisodeDuration(episode, session),
+			Title:            episode.Title,
+			Authors:          mprisAuthors(item),
 			Chapters:         playSessionChapters(session),
 			TrackStartOffset: track.StartOffset,
 			TrackDuration:    track.Duration,
