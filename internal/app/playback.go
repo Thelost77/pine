@@ -100,12 +100,19 @@ func (m Model) hasUnsyncedProgress() bool {
 	return m.timeListened >= syncMinChange || math.Abs(m.player.Position-m.lastSyncPos) >= syncMinChange
 }
 
-func (m Model) isFiltering() bool {
+// capturesKeys returns true if the screen gets each key: a text input or a
+// confirmation dialog is active. Update then gives the key to the screen, and
+// the global keys and the playback keys have no function.
+func (m Model) capturesKeys() bool {
 	switch m.screen {
+	case ScreenLogin, ScreenMetadataEdit:
+		return true
 	case ScreenHome:
 		return m.home.IsFiltering()
 	case ScreenLibrary:
 		return m.library.IsFiltering()
+	case ScreenDetail:
+		return m.detail.EditingBookmark() || m.detail.ConfirmOverlayVisible()
 	case ScreenSeries:
 		return m.series.IsFiltering()
 	case ScreenSeriesList:

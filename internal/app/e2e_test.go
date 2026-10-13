@@ -620,6 +620,101 @@ func TestE2E_BookmarkTitleEdit(t *testing.T) {
 	}
 }
 
+// e2eDetailWithBookmark returns a model at the detail screen of an item that
+// plays, has chapters, and has one bookmark with the title "Old". The bookmark
+// list has the focus.
+func e2eDetailWithBookmark(t *testing.T) (Model, *e2eServerState) {
+	t.Helper()
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	state.bookmarks["item-001"] = []abs.Bookmark{
+		testBookmark("Old", 300.0),
+	}
+	srv := newFullMockABSServer(&apiLog{}, state)
+	t.Cleanup(srv.Close)
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{position: 100, duration: 3600})
+	m = e2eSetSize(m, 120, 40)
+	res, cmd := m.Update(home.NavigateDetailMsg{Item: testLibraryItem("item-001", "The Great Gatsby")})
+	m = feedCmdChain(res.(Model), cmd, 5)
+
+	m.sessionID = "sess-e2e"
+	m.itemID = "item-001"
+	m.player.Playing = true
+	m.player.Position = 100.0
+	m.player.Duration = 3600.0
+	m.chapters = []abs.Chapter{
+		{ID: 0, Start: 0, End: 1800, Title: "Chapter 1"},
+		{ID: 1, Start: 1800, End: 3600, Title: "Chapter 2"},
+	}
+	m, _ = e2ePressSpecial(m, tea.KeyTab)
+	return m, state
+}
+
+// e2eSaveBookmarkTitle presses enter in the bookmark title editor, and returns
+// the title that the server has.
+func e2eSaveBookmarkTitle(m Model, state *e2eServerState) string {
+	m, cmd := e2ePressSpecial(m, tea.KeyEnter)
+	m, cmd = feedCmd(m, cmd)
+	_ = feedCmdChain(m, cmd, 3)
+	return state.getBookmarks("item-001")[0].Title
+}
+
+// TestE2E_BookmarkTitleEditGetsEachKey verifies that the bookmark title editor
+// gets each key during a playback. Outside the editor, these keys have a
+// global function or a playback function.
+func TestE2E_BookmarkTitleEditGetsEachKey(t *testing.T) {
+	m, state := e2eDetailWithBookmark(t)
+
+	// esc cancels the edit. It does not go back to the previous screen.
+	m, _ = e2ePressKey(m, 'e')
+	m, _ = e2ePressSpecial(m, tea.KeyEsc)
+	assertScreen(t, m, ScreenDetail)
+	if m.detail.EditingBookmark() {
+		t.Fatal("after esc, the bookmark editor is open")
+	}
+
+	m, _ = e2ePressKey(m, 'e')
+	const typed = "nNqC?lhpS>+-[] c"
+	m = e2eTypeString(m, typed)
+	if !m.detail.EditingBookmark() {
+		t.Fatalf("after the keys %q, the bookmark editor is not open", typed)
+	}
+	if m.player.Position != 100.0 || !m.player.Playing {
+		t.Errorf("after the keys %q, position = %v and playing = %v, want 100 and true", typed, m.player.Position, m.player.Playing)
+	}
+	if got := e2eSaveBookmarkTitle(m, state); got != "Old"+typed {
+		t.Fatalf("server bookmark title = %q, want %q", got, "Old"+typed)
+	}
+}
+
+// TestE2E_BookmarkTitleEditGetsKeysOfBannerAndChapterList verifies that the
+// bookmark title editor gets each key while the error banner shows, and while
+// the chapter list is open. Outside the editor, a key closes the banner, and
+// the chapter list has the keys j, k, and enter.
+func TestE2E_BookmarkTitleEditGetsKeysOfBannerAndChapterList(t *testing.T) {
+	tests := map[string]func(m Model) Model{
+		"error banner": func(m Model) Model {
+			m, _ = e2ePressKey(m, 'e')
+			res, _ := m.Update(components.ErrMsg{Err: fmt.Errorf("failure")})
+			return res.(Model)
+		},
+		"chapter list": func(m Model) Model {
+			m, _ = e2ePressKey(m, 'C')
+			m, _ = e2ePressKey(m, 'e')
+			return m
+		},
+	}
+	for name, openEditor := range tests {
+		t.Run(name, func(t *testing.T) {
+			m, state := e2eDetailWithBookmark(t)
+			m = e2eTypeString(openEditor(m), "jk")
+			if got := e2eSaveBookmarkTitle(m, state); got != "Oldjk" {
+				t.Fatalf("server bookmark title = %q, want Oldjk", got)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E2E: Bookmarks fetched on detail entry
 // ---------------------------------------------------------------------------

@@ -139,10 +139,11 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - `tea.Batch` for concurrent async operations
 - Skeleton loading with generation-gated reveal delays (home: 500ms, library: 150ms)
 - Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
-- `q` always quits, `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only
+- `q` quits, and `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only. These keys have no global function while a text input or a dialog gets the keys (`capturesKeys`).
 - A quit (`q` or ctrl+c) returns only `tea.Quit` and keeps the session in the model. `Cleanup` sends the last position, and `main` waits for it. Bubble Tea does not wait for a command at a quit, so a quit must not send the position in a command.
 - `main` quits the program at SIGHUP, which is the close of the terminal (`quitOnHangup`), so that `Cleanup` runs. Bubble Tea quits the program at SIGTERM.
-- `ctrl+p` opens the global command palette from any screen
+- `ctrl+p` opens the global command palette from each screen, but not while a text input or a dialog gets the keys
+- A text input or a confirmation dialog of a screen gets each key, except ctrl+c. `capturesKeys` in `playback.go` is true for the login screen, the metadata editor, a list filter, and the bookmark title editor. It is also true for the confirmation dialog of the detail screen. `Update` in `model.go` then gives the key to the screen, before the global keys, the chapter overlay, the error banner, and the playback keys. The help overlay and the command palette get the keys first while they are open. If you add a text input or a dialog to a screen, add it to `capturesKeys`.
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
 - Each launch makes a new mpv handle, which plays at the speed 1.0. `handlePlayerReady` sets the speed of the model in the new player.
 - The listening time (`timeListened`) is the time of the clock between two position ticks of a player that plays (`trackListeningTime`). It is not the change of the position: at the speed 2.0, the position moves two seconds in each second. A player that is paused or idle does not play. mpv reports no pause while it waits for data, so a position tick also reads the mpv property `core-idle` (`GetIdle`, `PositionMsg.Idle`). A test moves the clock with `Model.now`.

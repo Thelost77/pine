@@ -258,6 +258,8 @@ func (m Model) viewHints() string {
 	}
 
 	var parts []string
+	// A screen that gets each key shows no global key and no playback key.
+	capturesKeys := m.capturesKeys()
 
 	switch m.screen {
 	case ScreenHome:
@@ -275,6 +277,10 @@ func (m Model) viewHints() string {
 		}
 		parts = append(parts, key("←/esc", "back"))
 	case ScreenDetail:
+		// The bookmark title editor and the confirmation dialog show their keys.
+		if capturesKeys {
+			break
+		}
 		parts = append(parts, key("enter/p", "play"))
 		parts = append(parts, key("b", "bookmark"))
 		if _, _, ok := m.detail.MetadataEditTarget(); ok {
@@ -299,7 +305,7 @@ func (m Model) viewHints() string {
 		return ""
 	}
 
-	if m.isPlaying() {
+	if m.isPlaying() && !capturesKeys {
 		parts = append(parts, key("space", "pause"))
 		parts = append(parts, key("h/l", "seek"))
 		parts = append(parts, key("-/+", "speed"))
@@ -318,7 +324,9 @@ func (m Model) viewHints() string {
 	if len(m.queue) > 0 {
 		parts = append(parts, m.styles.Muted.Render(fmt.Sprintf("%d queued", len(m.queue))))
 	}
-	parts = append(parts, key("?", "help"))
+	if !capturesKeys {
+		parts = append(parts, key("?", "help"))
+	}
 
 	style := m.styles.StatusBar
 	if m.width > 0 {
