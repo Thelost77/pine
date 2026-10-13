@@ -636,6 +636,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case SessionSyncedMsg:
+		return m.handleSessionSynced(msg), nil
+
 	case player.PlayerLaunchErrMsg:
 		if msg.Generation != m.playGeneration {
 			logger.Debug("ignoring stale player launch error", "msgGen", msg.Generation, "currentGen", m.playGeneration)

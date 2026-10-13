@@ -750,18 +750,26 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	store := m.db
 
 	m.lastSyncPos = currentTime
+	if client != nil {
+		// The server adds the timeListened of each sync to the session. So the
+		// sync takes the listening time, and handleSessionSynced gives it back
+		// if the sync fails.
+		m.timeListened = 0
+	}
 
 	cmds := []tea.Cmd{
 		syncTickCmd(),
 		func() tea.Msg {
-			if client != nil {
-				if err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened); err != nil {
-					logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
-				} else {
-					logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
-				}
+			if client == nil {
+				return nil
 			}
-			return nil
+			err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened)
+			if err != nil {
+				logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
+			} else {
+				logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
+			}
+			return SessionSyncedMsg{SessionID: sessionID, TimeListened: timeListened, Err: err}
 		},
 		func() tea.Msg {
 			if store != nil {
@@ -782,6 +790,15 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// handleSessionSynced gives the listening time of a failed sync back to the
+// session, so that the next sync sends that time also.
+func (m Model) handleSessionSynced(msg SessionSyncedMsg) Model {
+	if msg.Err != nil && msg.SessionID == m.sessionID {
+		m.timeListened += msg.TimeListened
+	}
+	return m
 }
 
 // evictProgressCaches drops cached data that embeds user progress for an item:

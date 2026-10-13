@@ -81,6 +81,13 @@ type QueueEntry struct {
 // SyncTickMsg fires every 30 seconds to sync playback progress with ABS.
 type SyncTickMsg struct{}
 
+// SessionSyncedMsg carries the result of a sync of the playback session.
+type SessionSyncedMsg struct {
+	SessionID    string
+	TimeListened float64
+	Err          error
+}
+
 // PlaybackErrorMsg carries an error from the playback lifecycle.
 type PlaybackErrorMsg struct {
 	Err error
