@@ -774,7 +774,8 @@ func TestE2E_PodcastBookmarkEnterWithUnknownEpisodeKeepsPlayback(t *testing.T) {
 	}
 
 	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
-	m, _ = feedCmd(m, cmd)
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 2)
 
 	assertNoAPICall(t, log, "POST", "/api/session/sess-other/close")
 	assertNoAPICall(t, log, "POST", "/api/items/pod-001/play")
