@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/app"
@@ -74,6 +76,7 @@ func main() {
 	model := app.New(cfg, store, cachedClient, cacheStore)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)
+	quitOnHangup(p)
 	logger.Info("starting TUI")
 	finalModel, err := p.Run()
 	if err != nil {
@@ -85,4 +88,17 @@ func main() {
 		m.Cleanup()
 	}
 	logger.Info("session ended")
+}
+
+// quitOnHangup quits the program when the process gets SIGHUP, which is the
+// close of its terminal. Without it, the process ends at the signal, and main
+// does not call Cleanup. Bubble Tea quits the program at SIGTERM.
+func quitOnHangup(p *tea.Program) {
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP)
+	go func() {
+		<-hangup
+		logger.Info("terminal closed, quitting")
+		p.Quit()
+	}()
 }

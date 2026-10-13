@@ -141,6 +141,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
 - `q` always quits, `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only
 - A quit (`q` or ctrl+c) returns only `tea.Quit` and keeps the session in the model. `Cleanup` sends the last position, and `main` waits for it. Bubble Tea does not wait for a command at a quit, so a quit must not send the position in a command.
+- `main` quits the program at SIGHUP, which is the close of the terminal (`quitOnHangup`), so that `Cleanup` runs. Bubble Tea quits the program at SIGTERM.
 - `ctrl+p` opens the global command palette from any screen
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
 - Each launch makes a new mpv handle, which plays at the speed 1.0. `handlePlayerReady` sets the speed of the model in the new player.
@@ -153,6 +154,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - E2E tests in `internal/app/e2e_test.go` + `e2e_helpers_test.go` use mock HTTP server + mock player
 - E2E tests drive the bubbletea Update loop programmatically (no real TUI)
 - `internal/app/model_test.go`, `playback_test.go`, `bookmarks_test.go`, `render_test.go` for app-level tests
+- `main_unix_test.go` starts the test program again as a child process, sends SIGHUP to it, and checks that it gets to the place where `main` calls `Cleanup`. It does not run on Windows.
 - `internal/cache/*_test.go` for cache store and helper behavior
 - `internal/mpris/mpris_test.go` for the D-Bus adapter and bridge
 - `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.
