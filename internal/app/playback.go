@@ -929,9 +929,9 @@ func closeSession(ctx context.Context, client *cache.Client, sessionID string, c
 
 // closeThen returns a command that runs closeCmd, the close of a session, and
 // then next. The server closes the open session of a device when that device
-// starts a session, and it then answers 404 to the close of pine: the last
-// position and the listening time of the old item are lost. So a play request
-// must not go out before the close completes or fails.
+// starts a session, and it then answers 404 to the close of pine: the
+// listening time that the close carries is lost. So a play request must not
+// go out before the close completes or fails.
 func closeThen(closeCmd, next tea.Cmd) tea.Cmd {
 	if next == nil {
 		return closeCmd

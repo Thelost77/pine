@@ -468,8 +468,8 @@ func runUntilPlaySession(t *testing.T, m Model, cmd tea.Cmd) {
 // TestOldSessionClosesBeforeNextPlay verifies that the play request of the
 // next item goes out after the close of the old session completes or fails.
 // A server closes the open session of a device when that device starts a
-// session, and it then answers 404 to the close: the last position and the
-// listening time of the old item are lost.
+// session, and it then answers 404 to the close: the listening time that the
+// close carries is lost.
 func TestOldSessionClosesBeforeNextPlay(t *testing.T) {
 	current := testLibraryItem("item-001", "The Great Gatsby")
 	current.LibraryID = "lib-001"
