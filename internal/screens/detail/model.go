@@ -776,7 +776,9 @@ func (m *Model) startBookmarkEdit() tea.Cmd {
 
 func (m Model) updateBookmarkEditor(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keys.Back):
+	// Only esc cancels the edit. The left arrow, which also goes back on the
+	// detail screen, moves the cursor.
+	case msg.Type == tea.KeyEsc:
 		m.editingBookmark = false
 		m.bookmarkEditErr = ""
 		m.refreshContent()

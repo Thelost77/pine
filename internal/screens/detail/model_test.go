@@ -627,6 +627,25 @@ func TestEKey_StartsBookmarkEdit(t *testing.T) {
 	}
 }
 
+// TestLeftKey_MovesCursorWhileEditingBookmark verifies that the left arrow
+// moves the cursor in the bookmark title editor. It does not cancel the edit.
+func TestLeftKey_MovesCursorWhileEditingBookmark(t *testing.T) {
+	m := newTestModelWithBookmarks()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m.bookmarkInput.SetValue("ac")
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+	if !m.EditingBookmark() {
+		t.Fatal("after the left arrow, the bookmark editor is not open")
+	}
+	if m.bookmarkInput.Value() != "abc" {
+		t.Fatalf("edit value = %q, want abc", m.bookmarkInput.Value())
+	}
+}
+
 func TestEnterKey_UpdatesBookmarkTitleWhileEditing(t *testing.T) {
 	m := newTestModelWithBookmarks()
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
