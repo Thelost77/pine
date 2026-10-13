@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -75,6 +76,47 @@ func TestUpdateProgressFinishedHTTP(t *testing.T) {
 	}
 	if body.Progress != 1.0 {
 		t.Errorf("progress = %f, want 1.0", body.Progress)
+	}
+}
+
+func TestUpdatePositionHTTP(t *testing.T) {
+	tests := []struct {
+		name      string
+		episodeID string
+		wantPath  string
+	}{
+		{name: "book", wantPath: "/api/me/progress/li-001"},
+		{name: "episode", episodeID: "ep-001", wantPath: "/api/me/progress/li-001/ep-001"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedBody []byte
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.wantPath {
+					t.Errorf("path = %q, want %s", r.URL.Path, tt.wantPath)
+				}
+				if r.Method != http.MethodPatch {
+					t.Errorf("method = %q, want PATCH", r.Method)
+				}
+				capturedBody, _ = io.ReadAll(r.Body)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "tok")
+			if err := c.UpdatePosition(context.Background(), "li-001", tt.episodeID, 500.5, 0.45); err != nil {
+				t.Fatalf("UpdatePosition() error: %v", err)
+			}
+
+			var body map[string]any
+			if err := json.Unmarshal(capturedBody, &body); err != nil {
+				t.Fatalf("failed to unmarshal request body: %v", err)
+			}
+			want := map[string]any{"currentTime": 500.5, "progress": 0.45}
+			if !reflect.DeepEqual(body, want) {
+				t.Errorf("body = %v, want %v (no isFinished key)", body, want)
+			}
+		})
 	}
 }
 

@@ -956,12 +956,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	cmds := []tea.Cmd{
 		func() tea.Msg {
 			if client != nil && itemID != "" {
-				var err error
-				if episodeID != "" {
-					err = client.UpdateEpisodeProgress(context.Background(), itemID, episodeID, currentTime, progress, false)
-				} else {
-					err = client.UpdateProgress(context.Background(), itemID, currentTime, progress, false)
-				}
+				err := client.UpdatePosition(context.Background(), itemID, episodeID, currentTime, progress)
 				if err != nil {
 					logger.Warn("failed to update progress on stop", "itemID", itemID, "episodeID", episodeID, "currentTime", currentTime, "progress", progress, "err", err)
 				} else {
@@ -1055,12 +1050,7 @@ func (m Model) Cleanup() {
 	}
 
 	if m.client != nil && m.itemID != "" {
-		var err error
-		if m.episodeID != "" {
-			err = m.client.UpdateEpisodeProgress(ctx, m.itemID, m.episodeID, currentTime, progress, false)
-		} else {
-			err = m.client.UpdateProgress(ctx, m.itemID, currentTime, progress, false)
-		}
+		err := m.client.UpdatePosition(ctx, m.itemID, m.episodeID, currentTime, progress)
 		if err != nil {
 			logger.Warn("cleanup: failed to update progress", "itemID", m.itemID, "episodeID", m.episodeID, "currentTime", currentTime, "progress", progress, "err", err)
 		} else {

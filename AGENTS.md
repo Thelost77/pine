@@ -116,7 +116,7 @@ The server is written from the MPRIS 2.2 specification. The Go MPRIS server libr
 | `types.go` | All ABS data types. Custom UnmarshalJSON for MediaMetadata.Series (handles both object and array). |
 | `libraries.go` | GetLibraries, GetPersonalized, GetLibraryItems (paginated), GetLibraryItemsBatch (10 concurrent), GetLibrarySeries, GetSeriesContents, FilterAudioLibraries (sample-based audio detection) |
 | `playback.go` | StartPlaySession, StartEpisodePlaySession, SyncSession, CloseSession |
-| `progress.go`, `me.go` | UpdateProgress, GetMediaProgress (with bookmarks), UpdateEpisodeProgress, GetMe (user + all media progress) |
+| `progress.go`, `me.go` | UpdateProgress, UpdatePosition (no `isFinished` key), GetMediaProgress (with bookmarks), UpdateEpisodeProgress, GetMe (user + all media progress) |
 | `bookmarks.go` | CreateBookmark, UpdateBookmark, DeleteBookmark, GetBookmarks |
 
 ### Data (internal/db/)

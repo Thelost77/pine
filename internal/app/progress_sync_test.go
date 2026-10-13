@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/player"
+	"github.com/Thelost77/pine/internal/screens/detail"
 )
 
 // newFakeABS starts a fake ABS server and returns its request log and a client
@@ -299,5 +301,68 @@ func TestSyncKeepsListeningTimeIfNewSessionFails(t *testing.T) {
 	}
 	if m.timeListened != 30 || m.lastSyncPos != 100 {
 		t.Errorf("timeListened = %v, lastSyncPos = %v, want 30 and 100", m.timeListened, m.lastSyncPos)
+	}
+}
+
+// TestStopSendsNoFinishedFlag verifies that the progress update of a stop has
+// no isFinished key. ABS reads "isFinished": false as "mark as not finished".
+// At the end of a book, that update removed the mark that the close of the
+// session set, and it set the position to 0.
+func TestStopSendsNoFinishedFlag(t *testing.T) {
+	stops := map[string]func(m Model){
+		"end of the book": func(m Model) {
+			_, cmd := m.Update(player.PositionMsg{Err: fmt.Errorf("get time-pos: %w", player.ErrClosed)})
+			executeBatchCmds(cmd)
+		},
+		"cleanup": func(m Model) { m.Cleanup() },
+	}
+	for name, stop := range stops {
+		t.Run(name, func(t *testing.T) {
+			log, client := newFakeABS(t, nil, nil)
+			m := newSyncTestModel(client)
+			m.player.Position = 3600
+			m.trackDuration = 3600
+
+			stop(m)
+
+			updates := requestsTo(log, http.MethodPatch, "/api/me/progress/item-001")
+			if len(updates) != 1 {
+				t.Fatalf("%d progress updates, want 1", len(updates))
+			}
+			want := map[string]interface{}{"currentTime": 3600.0, "progress": 1.0}
+			if !reflect.DeepEqual(updates[0].Body, want) {
+				t.Errorf("progress update = %v, want %v", updates[0].Body, want)
+			}
+		})
+	}
+}
+
+// TestMarkFinishedSendsExplicitFlag verifies that the actions "mark as
+// finished" and "mark as not finished" send the isFinished key.
+func TestMarkFinishedSendsExplicitFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		undo bool
+		want map[string]interface{}
+	}{
+		{name: "mark as finished", want: map[string]interface{}{"currentTime": 3600.0, "progress": 1.0, "isFinished": true}},
+		{name: "mark as not finished", undo: true, want: map[string]interface{}{"currentTime": 0.0, "progress": 0.0, "isFinished": false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, client := newFakeABS(t, nil, nil)
+			m := newSyncTestModel(client)
+
+			_, cmd := m.handleMarkFinished(detail.MarkFinishedCmd{Item: testLibraryItem("item-002", "1984"), Undo: tt.undo})
+			cmd()
+
+			updates := requestsTo(log, http.MethodPatch, "/api/me/progress/item-002")
+			if len(updates) != 1 {
+				t.Fatalf("%d progress updates, want 1", len(updates))
+			}
+			if !reflect.DeepEqual(updates[0].Body, tt.want) {
+				t.Errorf("progress update = %v, want %v", updates[0].Body, tt.want)
+			}
+		})
 	}
 }
