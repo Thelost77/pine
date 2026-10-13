@@ -83,8 +83,11 @@ type QueueEntry struct {
 type SyncTickMsg struct{}
 
 // SessionSyncedMsg carries the result of a sync of the playback session.
+// NewSessionID is the session that pine opened because the server did not
+// have the session SessionID.
 type SessionSyncedMsg struct {
 	SessionID    string
+	NewSessionID string
 	CurrentTime  float64
 	TimeListened float64
 	Err          error

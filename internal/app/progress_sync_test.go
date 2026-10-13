@@ -222,3 +222,82 @@ func TestSyncSendsPositionOfSeekToOtherTrack(t *testing.T) {
 		t.Errorf("lastSyncPos = %v, want 1900", m.lastSyncPos)
 	}
 }
+
+// sessionGone answers 404 to each sync of the session sess-abc, as a server
+// does after a restart, or after 36 hours with no change of the session.
+func sessionGone(_, path string) int {
+	if path == "/api/session/sess-abc/sync" {
+		return http.StatusNotFound
+	}
+	return 0
+}
+
+// TestSyncOpensNewSessionAfter404 verifies that pine opens a new session for
+// the item if the server does not have the session of a sync, and that the
+// new session gets the position and the listening time of that sync.
+func TestSyncOpensNewSessionAfter404(t *testing.T) {
+	tests := []struct {
+		name      string
+		episodeID string
+		playPath  string
+	}{
+		{name: "book", playPath: "/api/items/item-001/play"},
+		{name: "episode", episodeID: "ep-001", playPath: "/api/items/item-001/play/ep-001"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, client := newFakeABS(t, map[string]abs.PlaySession{
+				tt.playPath: {ID: "sess-new", AudioTracks: []abs.AudioTrack{{ContentURL: "/audio.mp3", Duration: 3600}}},
+			}, sessionGone)
+			m := newSyncTestModel(client)
+			m.episodeID = tt.episodeID
+
+			m = listenAndSync(m, 130)
+
+			want := []string{
+				"POST /api/session/sess-abc/sync",
+				"POST " + tt.playPath,
+				"POST /api/session/sess-new/sync",
+			}
+			if got := summarizeRequests(log.get()); !reflect.DeepEqual(got, want) {
+				t.Fatalf("requests = %v, want %v", got, want)
+			}
+			body := log.get()[2].Body
+			if body["currentTime"] != 130.0 || body["timeListened"] != 30.0 {
+				t.Errorf("sync of the new session = %v, want currentTime 130 and timeListened 30", body)
+			}
+			if m.sessionID != "sess-new" {
+				t.Errorf("sessionID = %q, want sess-new", m.sessionID)
+			}
+			if m.timeListened != 0 || m.lastSyncPos != 130 {
+				t.Errorf("timeListened = %v, lastSyncPos = %v, want 0 and 130", m.timeListened, m.lastSyncPos)
+			}
+
+			listenAndSync(m, 140)
+			if got := timesListened(log, "/api/session/sess-new/sync"); !reflect.DeepEqual(got, []float64{30, 10}) {
+				t.Errorf("timeListened of the syncs of the new session = %v, want [30 10]", got)
+			}
+		})
+	}
+}
+
+// TestSyncKeepsListeningTimeIfNewSessionFails verifies that the listening time
+// stays with the session if pine cannot open a new session after a 404.
+func TestSyncKeepsListeningTimeIfNewSessionFails(t *testing.T) {
+	_, client := newFakeABS(t, nil, func(method, path string) int {
+		if path == "/api/items/item-001/play" {
+			return http.StatusInternalServerError
+		}
+		return sessionGone(method, path)
+	})
+	m := newSyncTestModel(client)
+
+	m = listenAndSync(m, 130)
+
+	if m.sessionID != "sess-abc" {
+		t.Errorf("sessionID = %q, want sess-abc", m.sessionID)
+	}
+	if m.timeListened != 30 || m.lastSyncPos != 100 {
+		t.Errorf("timeListened = %v, lastSyncPos = %v, want 30 and 100", m.timeListened, m.lastSyncPos)
+	}
+}

@@ -792,18 +792,42 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 		// sync takes the listening time, and handleSessionSynced gives it back
 		// if the sync fails.
 		m.timeListened = 0
-		cmds = append(cmds, func() tea.Msg {
-			err := client.SyncSession(context.Background(), sessionID, currentTime, timeListened)
-			if err != nil {
-				logger.Warn("failed to sync session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "err", err)
-			} else {
-				logger.Debug("session synced", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
-			}
-			return SessionSyncedMsg{SessionID: sessionID, CurrentTime: currentTime, TimeListened: timeListened, Err: err}
-		})
+		cmds = append(cmds, syncSessionCmd(client, m.playbackDevice(), sessionID, itemID, episodeID, currentTime, timeListened))
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// syncSessionCmd sends the position and the listening time of a session to
+// the server. The server answers 404 if it does not have the session: it
+// loses its open sessions in a restart, and it closes a session after 36
+// hours with no change. The command then opens a new session for the item,
+// and sends the position and the listening time to that session.
+func syncSessionCmd(client *cache.Client, device abs.DeviceInfo, sessionID, itemID, episodeID string, currentTime, timeListened float64) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		msg := SessionSyncedMsg{SessionID: sessionID, CurrentTime: currentTime, TimeListened: timeListened}
+		msg.Err = client.SyncSession(ctx, sessionID, currentTime, timeListened)
+		if abs.IsHTTPStatus(msg.Err, http.StatusNotFound) {
+			logger.Info("session is gone on the server, opening a new session", "sessionID", sessionID, "itemID", itemID, "episodeID", episodeID)
+			var session *abs.PlaySession
+			if episodeID != "" {
+				session, msg.Err = client.StartEpisodePlaySession(ctx, itemID, episodeID, device)
+			} else {
+				session, msg.Err = client.StartPlaySession(ctx, itemID, device)
+			}
+			if msg.Err == nil {
+				msg.NewSessionID = session.ID
+				msg.Err = client.SyncSession(ctx, session.ID, currentTime, timeListened)
+			}
+		}
+		if msg.Err != nil {
+			logger.Warn("failed to sync session", "sessionID", sessionID, "newSessionID", msg.NewSessionID, "currentTime", currentTime, "timeListened", timeListened, "err", msg.Err)
+		} else {
+			logger.Debug("session synced", "sessionID", sessionID, "newSessionID", msg.NewSessionID, "currentTime", currentTime, "timeListened", timeListened)
+		}
+		return msg
+	}
 }
 
 // handleSessionSynced records the result of a sync. An accepted sync gives the
@@ -812,6 +836,9 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 func (m Model) handleSessionSynced(msg SessionSyncedMsg) Model {
 	if msg.SessionID != m.sessionID {
 		return m
+	}
+	if msg.NewSessionID != "" {
+		m.sessionID = msg.NewSessionID
 	}
 	if msg.Err != nil {
 		m.timeListened += msg.TimeListened
