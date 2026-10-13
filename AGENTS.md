@@ -129,7 +129,7 @@ TOML config with defaults. Theme (Everforest Dark palette), player (speed, seek)
 
 ### UI (internal/ui/, shared)
 
-Styles from theme config. Format helpers (timestamps, durations). Components: HelpOverlay (the app supplies the groups), ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette, and the filter, flash, and skeleton helpers.
+Styles from theme config. Format helpers (timestamps, durations). `RunProgram` runs a Bubble Tea program and quits it at SIGHUP. Components: HelpOverlay (the app supplies the groups), ErrorBanner (5s auto-dismiss), ConfirmOverlay, CommandPalette, and the filter, flash, and skeleton helpers.
 
 ## Key Patterns to Follow
 
@@ -141,7 +141,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - Cache-first data loading through `internal/cache.Client`: home and library views hit the persistent cache first; misses trigger a background rebuild
 - `q` quits, and `esc`/left goes back (never quits). `h`/`l` seek only, arrows navigate only. These keys have no global function while a text input or a dialog gets the keys (`capturesKeys`).
 - A quit (`q` or ctrl+c) returns only `tea.Quit` and keeps the session in the model. `Cleanup` sends the last position, and `main` waits for it. Bubble Tea does not wait for a command at a quit, so a quit must not send the position in a command.
-- `main` runs the program with `runProgram`, which quits the program at SIGHUP, the close of the terminal, so that `Cleanup` runs. Bubble Tea quits the program at SIGTERM.
+- The `main` of pine and the `main` of spruce run the program with `ui.RunProgram`, which quits the program at SIGHUP, the close of the terminal, so that `Cleanup` runs. Bubble Tea quits the program at SIGTERM.
 - `ctrl+p` opens the global command palette from each screen, but not while a text input or a dialog gets the keys
 - A text input or a confirmation dialog of a screen gets each key, except ctrl+c. `capturesKeys` in `playback.go` is true for the login screen, the metadata editor, a list filter, and the bookmark title editor. It is also true for the confirmation dialog of the detail screen. `Update` in `model.go` then gives the key to the screen, before the global keys, the chapter overlay, the error banner, and the playback keys. The help overlay and the command palette get the keys first while they are open. If you add a text input or a dialog to a screen, add it to `capturesKeys`.
 - Duration from ABS takes precedence over mpv-reported duration (streaming content reports 0)
@@ -155,7 +155,7 @@ Styles from theme config. Format helpers (timestamps, durations). Components: He
 - E2E tests in `internal/app/e2e_test.go` + `e2e_helpers_test.go` use mock HTTP server + mock player
 - E2E tests drive the bubbletea Update loop programmatically (no real TUI)
 - `internal/app/model_test.go`, `playback_test.go`, `bookmarks_test.go`, `render_test.go` for app-level tests
-- `main_unix_test.go` starts the test program again as a child process, sends SIGHUP to it, and checks that it gets to the place where `main` calls `Cleanup`. The child runs its program with `runProgram`, as `main` does. It does not run on Windows.
+- `internal/ui/program_unix_test.go` starts the test program again as a child process, sends SIGHUP to it, and checks that it gets to the place where a `main` calls `Cleanup`. The child runs its program with `ui.RunProgram`, as each `main` does. It does not run on Windows.
 - `internal/cache/*_test.go` for cache store and helper behavior
 - `internal/mpris/mpris_test.go` for the D-Bus adapter and bridge
 - `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.

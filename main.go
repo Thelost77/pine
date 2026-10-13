@@ -4,9 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/app"
@@ -15,6 +13,7 @@ import (
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
+	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -77,7 +76,7 @@ func main() {
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)
 	logger.Info("starting TUI")
-	finalModel, err := runProgram(p)
+	finalModel, err := ui.RunProgram(p)
 	if err != nil {
 		logger.Error("program exited with error", "err", err)
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -87,19 +86,4 @@ func main() {
 		m.Cleanup()
 	}
 	logger.Info("session ended")
-}
-
-// runProgram runs the program until it quits, and returns its final model. It
-// quits the program when the process gets SIGHUP, which is the close of its
-// terminal. Without that, the process ends at the signal, and main does not
-// call Cleanup. Bubble Tea quits the program at SIGTERM.
-func runProgram(p *tea.Program) (tea.Model, error) {
-	hangup := make(chan os.Signal, 1)
-	signal.Notify(hangup, syscall.SIGHUP)
-	go func() {
-		<-hangup
-		logger.Info("terminal closed, quitting")
-		p.Quit()
-	}()
-	return p.Run()
 }

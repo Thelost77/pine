@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package ui
 
 import (
 	"bufio"
@@ -15,7 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// hangupChildEnv marks the process that TestHangupRunsCleanup starts.
+// hangupChildEnv marks the process that TestRunProgramReturnsAtHangup starts.
 const hangupChildEnv = "PINE_TEST_HANGUP_CHILD"
 
 // waitModel is a program that waits. Its Init prints a line when the program
@@ -33,23 +33,24 @@ func (m waitModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return m, nil }
 
 func (waitModel) View() string { return "" }
 
-// runHangupChild runs a program with runProgram, as main does, and prints a
-// line at the place where main calls Cleanup.
+// runHangupChild runs a program with RunProgram, as the main of an app does,
+// and prints a line at the place where that main calls Cleanup.
 func runHangupChild() {
 	p := tea.NewProgram(waitModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard))
-	_, _ = runProgram(p)
+	_, _ = RunProgram(p)
 	fmt.Println("cleanup")
 	os.Exit(0)
 }
 
-// TestHangupRunsCleanup verifies that the process gets to the place after the
-// program when it gets SIGHUP, which is the close of the terminal. main calls
-// Cleanup there, which sends the last position and the listening time.
-func TestHangupRunsCleanup(t *testing.T) {
+// TestRunProgramReturnsAtHangup verifies that the process gets to the place
+// after the program when it gets SIGHUP, which is the close of the terminal.
+// The main of an app calls Cleanup there. The Cleanup of pine sends the last
+// position and the listening time.
+func TestRunProgramReturnsAtHangup(t *testing.T) {
 	if os.Getenv(hangupChildEnv) == "1" {
 		runHangupChild()
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestHangupRunsCleanup$")
+	child := exec.Command(os.Args[0], "-test.run=^TestRunProgramReturnsAtHangup$")
 	child.Env = append(os.Environ(), hangupChildEnv+"=1")
 	stdout, err := child.StdoutPipe()
 	if err != nil {
