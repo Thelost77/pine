@@ -342,7 +342,9 @@ func loadCaptionsCmd(client *cache.Client, itemID, audioFilename, ino string, ge
 	}
 }
 
-// handlePlayerReady starts the position tick and sync tick.
+// handlePlayerReady starts the position tick and sync tick. It sets the speed
+// of the model in the player: each launch makes a new player, which plays at
+// the speed 1.0.
 // Stale PlayerReadyMsg events (from a superseded play session) are ignored so
 // duplicate polling ticks don't race with the active session.
 func (m Model) handlePlayerReady(msg player.PlayerReadyMsg) (Model, tea.Cmd) {
@@ -353,6 +355,7 @@ func (m Model) handlePlayerReady(msg player.PlayerReadyMsg) (Model, tea.Cmd) {
 	logger.Info("player ready, starting position ticks", "generation", m.playGeneration)
 	m.propertyUnavailableCount = 0
 	return m, tea.Batch(
+		player.SetSpeedCmd(m.mpv, m.player.Speed),
 		player.TickCmd(m.mpv, m.playGeneration),
 		syncTickCmd(),
 	)

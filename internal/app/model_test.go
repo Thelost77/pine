@@ -33,13 +33,16 @@ type mockPlayer struct {
 	position  float64
 	duration  float64
 	paused    bool
+	speed     float64
 	launchErr error
 }
 
+// Launch starts a new playback, which has the speed 1.0, as a new mpv handle.
 func (p *mockPlayer) Launch(url, startTime string, paused bool, httpHeaders []string, volume int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.launched = true
+	p.speed = 1.0
 	return p.launchErr
 }
 func (p *mockPlayer) GetPosition() (float64, error) {
@@ -75,9 +78,14 @@ func (p *mockPlayer) SeekRelative(seconds float64) error {
 	p.position += seconds
 	return nil
 }
-func (p *mockPlayer) SetSpeed(speed float64) error { return nil }
-func (p *mockPlayer) SetVolume(vol int) error      { return nil }
-func (p *mockPlayer) GetVolume() (int, error)      { return 100, nil }
+func (p *mockPlayer) SetSpeed(speed float64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.speed = speed
+	return nil
+}
+func (p *mockPlayer) SetVolume(vol int) error { return nil }
+func (p *mockPlayer) GetVolume() (int, error) { return 100, nil }
 func (p *mockPlayer) Quit() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
