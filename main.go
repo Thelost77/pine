@@ -76,9 +76,8 @@ func main() {
 	model := app.New(cfg, store, cachedClient, cacheStore)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)
-	quitOnHangup(p)
 	logger.Info("starting TUI")
-	finalModel, err := p.Run()
+	finalModel, err := runProgram(p)
 	if err != nil {
 		logger.Error("program exited with error", "err", err)
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -90,10 +89,11 @@ func main() {
 	logger.Info("session ended")
 }
 
-// quitOnHangup quits the program when the process gets SIGHUP, which is the
-// close of its terminal. Without it, the process ends at the signal, and main
-// does not call Cleanup. Bubble Tea quits the program at SIGTERM.
-func quitOnHangup(p *tea.Program) {
+// runProgram runs the program until it quits, and returns its final model. It
+// quits the program when the process gets SIGHUP, which is the close of its
+// terminal. Without that, the process ends at the signal, and main does not
+// call Cleanup. Bubble Tea quits the program at SIGTERM.
+func runProgram(p *tea.Program) (tea.Model, error) {
 	hangup := make(chan os.Signal, 1)
 	signal.Notify(hangup, syscall.SIGHUP)
 	go func() {
@@ -101,4 +101,5 @@ func quitOnHangup(p *tea.Program) {
 		logger.Info("terminal closed, quitting")
 		p.Quit()
 	}()
+	return p.Run()
 }

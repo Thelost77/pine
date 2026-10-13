@@ -33,12 +33,11 @@ func (m waitModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return m, nil }
 
 func (waitModel) View() string { return "" }
 
-// runHangupChild runs a program as main does, and prints a line at the place
-// where main calls Cleanup.
+// runHangupChild runs a program with runProgram, as main does, and prints a
+// line at the place where main calls Cleanup.
 func runHangupChild() {
 	p := tea.NewProgram(waitModel{}, tea.WithInput(nil), tea.WithOutput(io.Discard))
-	quitOnHangup(p)
-	_, _ = p.Run()
+	_, _ = runProgram(p)
 	fmt.Println("cleanup")
 	os.Exit(0)
 }
