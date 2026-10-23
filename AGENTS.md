@@ -95,9 +95,8 @@ The Architecture Map below describes pine and the shared packages.
 
 | File | Responsibility |
 |------|---------------|
-| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly, falls back to API, and triggers background rebuilds. `fetchCached` returns the data of the server. A cache read or write error goes to the log and does not fail the request. |
-| `store.go` | SQLite-backed cache persistence and `ClearAll`. |
-| `helpers.go` | Cache key helpers and cache-aware filtering utilities. |
+| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly, falls back to API, and triggers background rebuilds. Each cached method calls `cached(c, key, ttl, fetch)`, which returns the data of the server. A cache read or write error goes to the log and does not fail the request. |
+| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v1-`). Raise it when the type of a cached value changes. |
 
 ### MPRIS (internal/mpris/, shared)
 
