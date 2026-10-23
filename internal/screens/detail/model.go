@@ -536,7 +536,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return AddBookmarkCmd{Item: item}
 			}
 		case key.Matches(msg, m.keys.AddToQueue):
-			item, episode, ok := m.queueTarget()
+			item, episode, ok := m.PlayTarget()
 			if !ok {
 				return m, nil
 			}
@@ -544,7 +544,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return AddToQueueCmd{Item: item, Episode: episode}
 			}
 		case key.Matches(msg, m.keys.PlayNext):
-			item, episode, ok := m.queueTarget()
+			item, episode, ok := m.PlayTarget()
 			if !ok {
 				return m, nil
 			}
@@ -723,7 +723,10 @@ func (m Model) hasSeries() bool {
 		m.item.Media.Metadata.Series.ID != ""
 }
 
-func (m Model) queueTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {
+// PlayTarget returns the book, or the podcast episode under the cursor: the
+// item that play, the queue, and the listening sessions use. ok is false for
+// a podcast with no episode under the cursor.
+func (m Model) PlayTarget() (abs.LibraryItem, *abs.PodcastEpisode, bool) {
 	if m.item.MediaType == "podcast" {
 		if !m.focusEpisodes || len(m.episodes) == 0 || m.selectedEpisode >= len(m.episodes) {
 			return m.item, nil, false
@@ -842,7 +845,7 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 		return nil
 	}
 
-	targetItem, targetEpisode, targetOk := m.queueTarget()
+	targetItem, targetEpisode, targetOk := m.PlayTarget()
 	if !targetOk && item.MediaType != "podcast" {
 		targetItem = item
 	}
@@ -861,6 +864,7 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 			{Label: "Add Bookmark", Action: components.ActionAddBookmark, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Add to Queue", Action: components.ActionQueueItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
+			{Label: "Listening Sessions", Action: components.ActionShowSessions, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Mark Finished", Action: components.ActionMarkFinished, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: entry},
 			{Label: "Delete Item from Server", Action: components.ActionDeleteItem, LibraryID: targetItem.LibraryID, ItemID: targetItem.ID, Data: ShowDeleteConfirmMsg{Target: "delete_item"}},
 		}

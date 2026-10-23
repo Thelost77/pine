@@ -16,6 +16,7 @@ type KeyMap struct {
 	NextInQueue    key.Binding
 	SleepTimer     key.Binding
 	GlobalPalette  key.Binding
+	Sessions       key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings using the given config.
@@ -52,6 +53,10 @@ func DefaultKeyMap(cfg config.KeybindsConfig) KeyMap {
 		GlobalPalette: key.NewBinding(
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "command palette"),
+		),
+		Sessions: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "listening sessions"),
 		),
 	}
 }

@@ -55,13 +55,14 @@ The Architecture Map below describes pine and the shared packages.
 |------|---------------|
 | `model.go` | Root Model struct, Update dispatcher, sleep timer, chapter overlay, command palette, 401 handling |
 | `playback.go` | Playback lifecycle: handlePlayCmd → handlePlaySessionMsg → handlePlayerReady → handlePositionMsg → handleSyncTick → stopPlayback → Cleanup. Track rollover for multi-track books. Session restore on startup. |
-| `navigation.go` | Screen routing via back stack, propagateSize (sets all 7 screen models), initScreen, updateScreen dispatch |
+| `navigation.go` | Screen routing via back stack, propagateSize (sets all 8 screen models), initScreen, updateScreen dispatch |
 | `render.go` | View composition: header + error banner + screen + hints + player footer + chapter overlay modal + confirmation overlay |
 | `bookmarks.go` | Bookmark CRUD, chapter next/prev, seek logic (in-track vs cross-track), fetchBookmarksCmd/fetchEpisodesCmd/fetchBookDetailCmd |
 | `metadata.go` | Metadata editor save flow: server PATCH, cache eviction, detail refresh |
 | `messages.go` | Screen enum, PlaySessionMsg, PlaySessionData, QueueEntry, all root-level message types |
 | `keymap.go` | Global keybindings (quit, back, help, chapter overlay, queue, sleep, command palette). Key names for the player model. |
 | `help.go` | Help overlay groups for pine |
+| `sessions.go` | The `R` key and the palette entries for listening sessions: the target of the detail screen, the item that plays, or all items. The jump from a session: a seek, or a fetch of the item and `playItemAt`. |
 | `queue.go` | Queue entry enqueue/dequeue with dedup, clone helpers |
 | `mpris_state.go` | MPRIS bridge message conversion between player state and D-Bus adapter |
 
@@ -87,6 +88,7 @@ The Architecture Map below describes pine and the shared packages.
 | `metadataedit` | model.go, view.go | Inline metadata editor for books and podcast episodes. |
 | `serieslist` | model.go | Paginated series browser (50/page), infinite scroll. |
 | `series` | model.go | Books within a series, sorted by sequence number. Highlights current item, prefixes finished books with ✓. |
+| `sessions` | model.go | Listening sessions of a book, a podcast episode, or all items (50 newest). Each row shows the end position, the device, and the time of the last sync. Enter sends `PlayFromMsg`. |
 | `search` | cache.go | No longer a standalone screen. Fuzzy-search cache used by the command palette and shared with the library view. Builds full library snapshots (all items fetched, normalized, tokenized) with background pre-warm. |
 
 ### Cache (internal/cache/)
@@ -117,6 +119,7 @@ The server is written from the MPRIS 2.2 specification. The Go MPRIS server libr
 | `libraries.go` | GetLibraries, GetPersonalized, GetLibraryItems (paginated), GetLibraryItemsBatch (10 concurrent), GetLibrarySeries, GetSeriesContents, FilterAudioLibraries (sample-based audio detection) |
 | `playback.go` | StartPlaySession, StartEpisodePlaySession, SyncSession, CloseSession, CloseSessionNoSync (sends no position) |
 | `progress.go`, `me.go` | UpdateProgress, UpdatePosition (no `isFinished` key), GetMediaProgress (ABS gives no bookmarks with the progress), UpdateEpisodeProgress, GetMe (user + all media progress) |
+| `sessions.go` | GetListeningSessions (`GET /api/me/listening-sessions`), GetItemListeningSessions (`GET /api/me/item/listening-sessions/{id}[/{episodeId}]`) |
 | `bookmarks.go` | CreateBookmark, UpdateBookmark, DeleteBookmark, GetBookmarks (`GET /api/me/bookmarks/{id}`, or `GET /api/me` for ABS before 2.36.0) |
 
 ### Data (internal/db/)

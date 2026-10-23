@@ -212,6 +212,17 @@ func (s *e2eServerState) updateBookmark(itemID string, bmTime float64, title str
 }
 
 // newFullMockABSServer creates a comprehensive mock ABS server handling all endpoints.
+// e2eListeningSessions are the listening sessions of the mock server, the
+// newest first. CurrentTime is the position where each session ended.
+var e2eListeningSessions = []abs.ListeningSession{
+	{ID: "ls-003", LibraryItemID: "item-002", MediaType: "book", DisplayTitle: "1984", StartTime: 100, CurrentTime: 300, UpdatedAt: 1792570411000,
+		DeviceInfo: abs.DeviceInfo{DeviceID: "phone-001", ClientName: "ShelfPlayer", DeviceName: "Apple iPhone"}},
+	{ID: "ls-002", LibraryItemID: "pod-001", EpisodeID: "pod-001-ep-001", MediaType: "podcast", DisplayTitle: "Episode 1 - Pilot", StartTime: 0, CurrentTime: 420, UpdatedAt: 1792570351000,
+		DeviceInfo: abs.DeviceInfo{DeviceID: "phone-001", ClientName: "ShelfPlayer", DeviceName: "Apple iPhone"}},
+	{ID: "ls-001", LibraryItemID: "item-001", MediaType: "book", DisplayTitle: "The Great Gatsby", StartTime: 600, CurrentTime: 900, UpdatedAt: 1792570291000,
+		DeviceInfo: abs.DeviceInfo{DeviceID: "pine-desktop-001", ClientName: "pine", DeviceName: "Pine desktop"}},
+}
+
 func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 	items := []abs.LibraryItem{
 		testLibraryItem("item-001", "The Great Gatsby"),
@@ -332,6 +343,20 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 			}
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"item not found"}`))
+
+		// --- Listening sessions, of all items and of one item ---
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me/listening-sessions":
+			_ = json.NewEncoder(w).Encode(abs.ListeningSessionsResponse{Total: len(e2eListeningSessions), Sessions: e2eListeningSessions})
+
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/item/listening-sessions/"):
+			ids := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/me/item/listening-sessions/"), "/")
+			sessions := []abs.ListeningSession{}
+			for _, s := range e2eListeningSessions {
+				if s.LibraryItemID == ids[0] && (len(ids) == 1 || s.EpisodeID == ids[1]) {
+					sessions = append(sessions, s)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(abs.ListeningSessionsResponse{Total: len(sessions), Sessions: sessions})
 
 		// --- Bookmarks of one item. The progress of an item has no bookmarks. ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/me/bookmarks/"):

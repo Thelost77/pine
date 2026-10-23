@@ -16,6 +16,7 @@ const (
 	ScreenMetadataEdit
 	ScreenSeriesList
 	ScreenSeries
+	ScreenSessions
 )
 
 // String returns the display name for a screen.
@@ -35,6 +36,8 @@ func (s Screen) String() string {
 		return "Series"
 	case ScreenSeries:
 		return "Series"
+	case ScreenSessions:
+		return "Sessions"
 	default:
 		return "Unknown"
 	}
@@ -100,6 +103,14 @@ type PlaybackErrorMsg struct {
 
 // PlaybackStoppedMsg signals that playback cleanup is complete.
 type PlaybackStoppedMsg struct{}
+
+// SessionItemLoadedMsg carries the item of a listening session, so that it
+// plays from Position. Episode is nil for a book.
+type SessionItemLoadedMsg struct {
+	Item     abs.LibraryItem
+	Episode  *abs.PodcastEpisode
+	Position float64
+}
 
 // SleepTimerExpiredMsg fires when the sleep timer reaches zero.
 type SleepTimerExpiredMsg struct {

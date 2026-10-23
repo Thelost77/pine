@@ -117,6 +117,8 @@ func (m Model) capturesKeys() bool {
 		return m.series.IsFiltering()
 	case ScreenSeriesList:
 		return m.seriesList.IsFiltering()
+	case ScreenSessions:
+		return m.sessions.IsFiltering()
 	}
 	return false
 }
@@ -131,6 +133,8 @@ func (m Model) hasActiveFilter() bool {
 		return m.series.HasActiveFilter()
 	case ScreenSeriesList:
 		return m.seriesList.HasActiveFilter()
+	case ScreenSessions:
+		return m.sessions.HasActiveFilter()
 	}
 	return false
 }
@@ -542,6 +546,32 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 		}
 		return playMsg
 	}
+}
+
+// playItemAt plays a book, or an episode of a podcast, from a position in the
+// book or the episode. A different item or episode that plays stops first.
+func (m Model) playItemAt(item abs.LibraryItem, episode *abs.PodcastEpisode, pos float64) (Model, tea.Cmd) {
+	var closeCmd, stopCmd tea.Cmd
+	if m.isPlaying() {
+		episodeID := ""
+		if episode != nil {
+			episodeID = episode.ID
+		}
+		logger.Info("switching playback", "from", m.itemID+"/"+m.episodeID, "to", item.ID+"/"+episodeID)
+		m, closeCmd, stopCmd = m.stopPlaybackCmds()
+	}
+
+	m.setSeriesContext(item)
+	var startCmd tea.Cmd
+	if episode != nil {
+		startCmd = m.startEpisodePlaybackAtPositionCmd(item, *episode, pos)
+	} else {
+		startCmd = m.startPlaybackAtBookPositionCmd(item, pos)
+	}
+	if stopCmd != nil {
+		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
+	}
+	return m, startCmd
 }
 
 func (m Model) startEpisodePlaybackAtPositionCmd(item abs.LibraryItem, episode abs.PodcastEpisode, pos float64) tea.Cmd {
