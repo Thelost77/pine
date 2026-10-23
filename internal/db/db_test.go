@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -123,5 +124,31 @@ func TestOpen_CreatesFile(t *testing.T) {
 	// Windows has no Unix file modes.
 	if mode := info.Mode().Perm(); runtime.GOOS != "windows" && mode != 0o600 {
 		t.Fatalf("database file mode = %o, want 0600", mode)
+	}
+}
+
+// TestOpen_ParallelWritesWait verifies that a write waits while a write of a
+// different connection holds the lock, and does not fail with SQLITE_BUSY.
+// pine saves the session while the cache writes.
+func TestOpen_ParallelWritesWait(t *testing.T) {
+	s := openTestStore(t)
+
+	const n = 32
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs <- s.SaveListeningSession(ListeningSession{ItemID: "item", SessionID: "session", CurrentTime: float64(i)})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("parallel SaveListeningSession() error: %v", err)
+		}
 	}
 }

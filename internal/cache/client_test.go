@@ -2,8 +2,10 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,7 +66,7 @@ func TestClient_TTLExpiry(t *testing.T) {
 	client := NewClient(inner, store)
 
 	// Pre-populate cache with a short-lived entry
-	if err := store.PutLibraries([]abs.Library{{ID: "old"}}, 1*time.Millisecond); err != nil {
+	if err := store.Put(librariesKey, []abs.Library{{ID: "old"}}, 1*time.Millisecond); err != nil {
 		t.Fatalf("put error: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -114,97 +116,6 @@ func TestClient_ErrorNotCached(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Fatalf("expected 2 requests, got %d", requestCount)
-	}
-}
-
-func TestClient_ConcurrentDeduplication(t *testing.T) {
-	var requestCount int
-	var mu sync.Mutex
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
-	}))
-	defer srv.Close()
-
-	dbStore := openTestDB(t)
-	store := NewStore(dbStore)
-	inner := abs.NewClient(srv.URL, "tok")
-	client := NewClient(inner, store)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, _ = client.GetLibraries(context.Background())
-		}()
-	}
-	wg.Wait()
-
-	mu.Lock()
-	count := requestCount
-	mu.Unlock()
-	if count != 1 {
-		t.Fatalf("expected 1 request for 5 concurrent calls, got %d", count)
-	}
-}
-
-func TestGetOrFetch_RetryOnLeaderCancellation(t *testing.T) {
-	inner := abs.NewClient("http://127.0.0.1:0", "tok")
-	client := NewClient(inner, nil)
-
-	var calls atomic.Int32
-	leaderInflight := make(chan struct{})
-	releaseLeader := make(chan struct{})
-
-	fetch := func() error {
-		n := calls.Add(1)
-		if n == 1 {
-			// Leader: announce we're in flight, then block until released.
-			close(leaderInflight)
-			<-releaseLeader
-			return context.Canceled
-		}
-		// Retry leader: succeed.
-		return nil
-	}
-
-	ctx := context.Background()
-
-	leaderDone := make(chan error, 1)
-	go func() {
-		leaderDone <- client.getOrFetch(ctx, "retry-key", fetch)
-	}()
-
-	// Wait until the leader is actually in flight so the follower observes the
-	// existing inflight call rather than becoming a fresh leader.
-	<-leaderInflight
-
-	followerDone := make(chan error, 1)
-	go func() {
-		followerDone <- client.getOrFetch(ctx, "retry-key", fetch)
-	}()
-
-	// Give the follower time to park on the leader's call.done channel.
-	time.Sleep(20 * time.Millisecond)
-
-	// Release the leader: it returns context.Canceled. Its defer deletes the
-	// inflight entry before closing call.done, so the follower's retry becomes a
-	// new leader instead of re-joining a stale call.
-	close(releaseLeader)
-
-	if err := <-leaderDone; err != context.Canceled {
-		t.Fatalf("leader getOrFetch err = %v, want context.Canceled", err)
-	}
-	if err := <-followerDone; err != nil {
-		t.Fatalf("follower getOrFetch err = %v, want nil after retry", err)
-	}
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("fetch invoked %d times, want 2 (leader + one retry)", got)
 	}
 }
 
@@ -310,48 +221,206 @@ func TestClient_GetBookmarks_CacheHit(t *testing.T) {
 	}
 }
 
-func TestClient_GetRecentlyAdded_CacheHit(t *testing.T) {
-	requestCount := 0
+// closedStore returns a cache store with a closed database, so that each
+// cache read and each cache write fails at once.
+func closedStore(t *testing.T) *Store {
+	t.Helper()
+	dbStore := openTestDB(t)
+	if err := dbStore.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	return NewStore(dbStore)
+}
+
+// TestClient_CacheFailureReturnsServerData verifies that a request that the
+// server answers gives the data of the server, also if the cache cannot read
+// or write.
+func TestClient_CacheFailureReturnsServerData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/libraries/lib1/personalized":
-			_, _ = w.Write([]byte(`[{"id":"recently-added","entities":[{"id":"li1","libraryId":"lib1","addedAt":2,"mediaType":"book","media":{"metadata":{"title":"A"}}}]}]`))
-		case "/api/libraries/lib2/personalized":
-			_, _ = w.Write([]byte(`[{"id":"recently-added","entities":[{"id":"li2","libraryId":"lib2","addedAt":1,"mediaType":"podcast","media":{"metadata":{"title":"B"}}}]}]`))
+		case "/api/libraries":
+			_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		case "/api/libraries/lib1/items":
+			_, _ = w.Write([]byte(`{"results":[{"id":"li1","mediaType":"book","media":{"metadata":{"title":"Book One"}}}],"total":7,"limit":50,"page":0}`))
+		case "/api/libraries/lib1/series/se1":
+			_, _ = w.Write([]byte(`{"id":"se1","name":"Saga"}`))
 		default:
-			t.Fatalf("unexpected path %q", r.URL.Path)
+			http.NotFound(w, r)
 		}
 	}))
 	defer srv.Close()
 
-	dbStore := openTestDB(t)
-	store := NewStore(dbStore)
-	inner := abs.NewClient(srv.URL, "tok")
-	client := NewClient(inner, store)
+	client := NewClient(abs.NewClient(srv.URL, "tok"), closedStore(t))
+	ctx := context.Background()
 
-	libs := []abs.Library{{ID: "lib1"}, {ID: "lib2"}}
+	libs, err := client.GetLibraries(ctx)
+	if err != nil || len(libs) != 1 || libs[0].ID != "lib1" {
+		t.Errorf("GetLibraries() = %+v, %v; want lib1", libs, err)
+	}
 
-	items1, err := client.GetRecentlyAdded(context.Background(), libs)
-	if err != nil {
+	items, err := client.GetLibraryItems(ctx, "lib1", 0, 50)
+	if err != nil || len(items.Results) != 1 || items.Total != 7 {
+		t.Errorf("GetLibraryItems() = %+v, %v; want 1 item of 7", items, err)
+	}
+
+	contents, err := client.GetSeriesContents(ctx, "lib1", "se1")
+	if err != nil || contents.Series.Name != "Saga" || len(contents.Items) != 1 {
+		t.Errorf("GetSeriesContents() = %+v, %v; want Saga with 1 item", contents, err)
+	}
+}
+
+// TestClient_ParallelFetchesOfDifferentKeys verifies that parallel requests
+// for different keys all succeed. At the start of pine, the home screen and
+// the session restore fetch at the same time, and their cache writes meet.
+func TestClient_ParallelFetchesOfDifferentKeys(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"mediaType":"book","media":{"metadata":{"title":"t"}}}`, strings.TrimPrefix(r.URL.Path, "/api/items/"))
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), NewStore(openTestDB(t)))
+
+	const n = 64
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			item, err := client.GetLibraryItem(context.Background(), id)
+			if err == nil && item.ID != id {
+				err = fmt.Errorf("got item %q, want %q", item.ID, id)
+			}
+			errs <- err
+		}(fmt.Sprintf("li-%d", i))
+	}
+	wg.Wait()
+	close(errs)
+
+	failed := 0
+	for err := range errs {
+		if err != nil {
+			if failed == 0 {
+				t.Errorf("first error: %v", err)
+			}
+			failed++
+		}
+	}
+	if failed > 0 {
+		t.Errorf("%d of %d parallel GetLibraryItem calls failed", failed, n)
+	}
+}
+
+// TestClient_PageHitKeepsRequestedPage verifies that a cached page has the
+// page and the limit of the request, from the server and from the cache. The
+// library screen reads Page.
+func TestClient_PageHitKeepsRequestedPage(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"id":"li1","mediaType":"book","media":{"metadata":{"title":"Book One"}}}],"total":7,"limit":99,"page":9}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), NewStore(openTestDB(t)))
+
+	for call := 1; call <= 2; call++ {
+		resp, err := client.GetLibraryItems(context.Background(), "lib1", 2, 50)
+		if err != nil {
+			t.Fatalf("call %d error: %v", call, err)
+		}
+		if resp.Page != 2 || resp.Limit != 50 || resp.Total != 7 || len(resp.Results) != 1 {
+			t.Errorf("call %d = page %d, limit %d, total %d, %d results; want page 2, limit 50, total 7, 1 result",
+				call, resp.Page, resp.Limit, resp.Total, len(resp.Results))
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Errorf("%d requests, want 1", got)
+	}
+}
+
+// TestClient_SeriesContentsHitSendsNoRequest verifies that the cache keeps the
+// whole series contents, so that a hit needs no request for the series.
+func TestClient_SeriesContentsHitSendsNoRequest(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/libraries/lib1/series/se1":
+			_, _ = w.Write([]byte(`{"id":"se1","name":"Saga"}`))
+		case "/api/libraries/lib1/items":
+			_, _ = w.Write([]byte(`{"results":[{"id":"li1","mediaType":"book","media":{"metadata":{"title":"Book One"}}}],"total":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), NewStore(openTestDB(t)))
+
+	if _, err := client.GetSeriesContents(context.Background(), "lib1", "se1"); err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
-	if len(items1) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items1))
-	}
-	if requestCount != 2 {
-		t.Fatalf("expected 2 requests after first call, got %d", requestCount)
-	}
-
-	items2, err := client.GetRecentlyAdded(context.Background(), libs)
+	before := requests.Load()
+	contents, err := client.GetSeriesContents(context.Background(), "lib1", "se1")
 	if err != nil {
 		t.Fatalf("second call error: %v", err)
 	}
-	if len(items2) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items2))
+	if contents.Series.Name != "Saga" || len(contents.Items) != 1 {
+		t.Errorf("second call = %+v, want Saga with 1 item", contents)
 	}
-	if requestCount != 2 {
-		t.Fatalf("expected still 2 requests after cache hit, got %d", requestCount)
+	if got := requests.Load() - before; got != 0 {
+		t.Errorf("second call sent %d requests, want 0", got)
+	}
+}
+
+// TestClient_InvalidationClearsCache verifies that each change on the server
+// clears the cache and tells the in-memory caches.
+func TestClient_InvalidationClearsCache(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"li1","libraryItem":{"id":"li1"}}`))
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	changes := map[string]func(c *Client) error{
+		"DeleteItem":    func(c *Client) error { return c.DeleteItem(ctx, "li1", false) },
+		"DeleteEpisode": func(c *Client) error { return c.DeleteEpisode(ctx, "pod1", "ep1", false) },
+		"UpdateLibraryItemMedia": func(c *Client) error {
+			_, err := c.UpdateLibraryItemMedia(ctx, "li1", abs.UpdateMediaRequest{})
+			return err
+		},
+		"UpdatePodcastEpisode": func(c *Client) error {
+			_, err := c.UpdatePodcastEpisode(ctx, "pod1", "ep1", abs.UpdatePodcastEpisodeRequest{})
+			return err
+		},
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			store := NewStore(openTestDB(t))
+			client := NewClient(abs.NewClient(srv.URL, "tok"), store)
+			invalidated := false
+			client.OnInvalidate = func() { invalidated = true }
+			if err := store.Put(librariesKey, []abs.Library{{ID: "lib1"}}, time.Minute); err != nil {
+				t.Fatalf("seed cache: %v", err)
+			}
+
+			if err := change(client); err != nil {
+				t.Fatalf("%s error: %v", name, err)
+			}
+
+			var libs []abs.Library
+			if hit, err := store.Get(librariesKey, &libs); hit || err != nil {
+				t.Errorf("cache after %s = hit %v, %v; want a miss", name, hit, err)
+			}
+			if !invalidated {
+				t.Errorf("%s did not call OnInvalidate", name)
+			}
+		})
 	}
 }

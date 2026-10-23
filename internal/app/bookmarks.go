@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/cache"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/screens/detail"
 	"github.com/Thelost77/pine/internal/ui"
@@ -50,7 +51,7 @@ func (m Model) handleAddBookmark(msg detail.AddBookmarkCmd) (Model, tea.Cmd) {
 			return PlaybackErrorMsg{Err: err}
 		}
 		if cacheStore != nil {
-			_ = cacheStore.Delete("bookmarks:" + itemID)
+			_ = cacheStore.Delete(cache.BookmarksKey(itemID))
 		}
 		newBm := abs.Bookmark{LibraryItemID: itemID, Title: title, Time: currentTime, CreatedAt: time.Now().UnixMilli()}
 		updated := append(append([]abs.Bookmark{}, existing...), newBm)
@@ -131,7 +132,7 @@ func (m Model) handleDeleteBookmark(msg detail.DeleteBookmarkCmd) (Model, tea.Cm
 			return PlaybackErrorMsg{Err: err}
 		}
 		if cacheStore != nil {
-			_ = cacheStore.Delete("bookmarks:" + itemID)
+			_ = cacheStore.Delete(cache.BookmarksKey(itemID))
 		}
 		updated := make([]abs.Bookmark, 0, len(existing))
 		for _, bm := range existing {
@@ -162,7 +163,7 @@ func (m Model) handleUpdateBookmark(msg detail.UpdateBookmarkCmd) (Model, tea.Cm
 			return PlaybackErrorMsg{Err: err}
 		}
 		if cacheStore != nil {
-			_ = cacheStore.Delete("bookmarks:" + itemID)
+			_ = cacheStore.Delete(cache.BookmarksKey(itemID))
 		}
 		updated := make([]abs.Bookmark, len(existing))
 		copy(updated, existing)

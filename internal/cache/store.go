@@ -2,12 +2,19 @@ package cache
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Thelost77/pine/internal/db"
 )
+
+// keyVersion is the prefix of each key in the database. Raise it when the
+// type of a cached value changes: the store then does not read the old rows,
+// and EvictExpired deletes them when they expire.
+const keyVersion = "v1-"
 
 // Store provides generic get/put/delete/evict operations over a SQLite table.
 type Store struct {
@@ -20,15 +27,19 @@ func NewStore(db *db.Store) *Store {
 }
 
 // Get attempts to retrieve and decode the value for key into dest.
-// Returns (true, nil) on hit, (false, nil) on miss.
+// Returns (true, nil) on hit, (false, nil) on miss, and (false, err) if the
+// database or the decode fails.
 func (s *Store) Get(key string, dest any) (bool, error) {
 	var data []byte
 	err := s.db.DB.QueryRow(
 		`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now')`,
-		key,
+		keyVersion+key,
 	).Scan(&data)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // miss
+	}
+	if err != nil {
+		return false, fmt.Errorf("read cache value for key %q: %w", key, err)
 	}
 
 	dec := gob.NewDecoder(bytes.NewReader(data))
@@ -49,7 +60,7 @@ func (s *Store) Put(key string, value any, ttl time.Duration) error {
 	_, err := s.db.DB.Exec(
 		`INSERT OR REPLACE INTO api_cache (cache_key, data, cached_at, expires_at)
 		 VALUES (?, ?, datetime('now'), datetime('now', '+' || ? || ' seconds'))`,
-		key, buf.Bytes(), int64(ttl.Seconds()),
+		keyVersion+key, buf.Bytes(), int64(ttl.Seconds()),
 	)
 	if err != nil {
 		return fmt.Errorf("write cache value for key %q: %w", key, err)
@@ -59,7 +70,7 @@ func (s *Store) Put(key string, value any, ttl time.Duration) error {
 
 // Delete removes the entry for key.
 func (s *Store) Delete(key string) error {
-	_, err := s.db.DB.Exec(`DELETE FROM api_cache WHERE cache_key = ?`, key)
+	_, err := s.db.DB.Exec(`DELETE FROM api_cache WHERE cache_key = ?`, keyVersion+key)
 	if err != nil {
 		return fmt.Errorf("delete cache key %q: %w", key, err)
 	}

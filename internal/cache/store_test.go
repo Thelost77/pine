@@ -59,6 +59,60 @@ func TestStore_Miss(t *testing.T) {
 	}
 }
 
+// TestStore_GetReportsDatabaseError verifies that Get gives a database error
+// as an error, not as a miss.
+func TestStore_GetReportsDatabaseError(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+	if err := dbStore.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	var v string
+	hit, err := s.Get("key", &v)
+	if hit || err == nil {
+		t.Fatalf("Get() = %v, %v; want a miss and an error", hit, err)
+	}
+}
+
+// TestStore_KeysHaveVersion verifies that the store writes and deletes each key
+// with the key version, and that it does not read a row with no version.
+func TestStore_KeysHaveVersion(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+	rows := func(key string) int {
+		t.Helper()
+		var n int
+		if err := dbStore.DB.QueryRow(`SELECT COUNT(*) FROM api_cache WHERE cache_key = ?`, key).Scan(&n); err != nil {
+			t.Fatalf("count rows: %v", err)
+		}
+		return n
+	}
+
+	if err := s.Put("k", "value", time.Minute); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	if n := rows("v1-k"); n != 1 {
+		t.Fatalf("rows with key v1-k = %d, want 1", n)
+	}
+	if err := s.Delete("k"); err != nil {
+		t.Fatalf("Delete error: %v", err)
+	}
+	if n := rows("v1-k"); n != 0 {
+		t.Fatalf("rows with key v1-k after Delete = %d, want 0", n)
+	}
+
+	// A row of an older pine, with no version and data that does not decode.
+	if _, err := dbStore.DB.Exec(`INSERT INTO api_cache (cache_key, data, cached_at, expires_at)
+		VALUES ('old', x'00', datetime('now'), datetime('now', '+60 seconds'))`); err != nil {
+		t.Fatalf("insert old row: %v", err)
+	}
+	var v string
+	if hit, err := s.Get("old", &v); hit || err != nil {
+		t.Fatalf("Get(old) = %v, %v; want a miss with no error", hit, err)
+	}
+}
+
 func TestStore_Expiry(t *testing.T) {
 	dbStore := openTestDB(t)
 	s := NewStore(dbStore)

@@ -283,7 +283,7 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 	// 2. Check SQLite cache
 	var persisted PersistedSnapshot
 	if c.store != nil {
-		if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit {
+		if hit, _ := c.store.Get(cache.SearchSnapshotKey(resolvedID), &persisted); hit {
 			if c.now().Sub(persisted.BuiltAt) <= c.ttl && persisted.MediaType == resolvedMediaType {
 				// Prevent loading legacy cache where Items was not saved yet
 				if len(persisted.Items) > 0 || len(persisted.Entries) == 0 {
@@ -331,7 +331,7 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 	// Try to restore from disk cache
 	if c.store != nil {
 		var persisted PersistedSnapshot
-		if hit, _ := c.store.Get("search-snapshot:"+resolvedID, &persisted); hit && persisted.MediaType == resolvedMediaType && (len(persisted.Items) > 0 || len(persisted.Entries) == 0) {
+		if hit, _ := c.store.Get(cache.SearchSnapshotKey(resolvedID), &persisted); hit && persisted.MediaType == resolvedMediaType && (len(persisted.Items) > 0 || len(persisted.Entries) == 0) {
 			snapshot := &librarySnapshot{
 				libraryID:      persisted.LibraryID,
 				mediaType:      persisted.MediaType,
@@ -372,7 +372,7 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 			for i, e := range snapshot.entries {
 				persistedEntries[i] = e.toPersisted()
 			}
-			_ = c.store.Put("search-snapshot:"+resolvedID, PersistedSnapshot{
+			_ = c.store.Put(cache.SearchSnapshotKey(resolvedID), PersistedSnapshot{
 				LibraryID:      snapshot.libraryID,
 				MediaType:      snapshot.mediaType,
 				BuiltAt:        now,
