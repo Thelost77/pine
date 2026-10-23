@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
+	"github.com/Thelost77/pine/internal/logger"
 )
 
 const (
@@ -36,6 +37,7 @@ type Client struct {
 
 type inflightCall struct {
 	done chan struct{}
+	val  any
 	err  error
 }
 
@@ -69,7 +71,7 @@ func (c *Client) ClearAll() error {
 	return nil
 }
 
-func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() error) error {
+func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() (any, error)) (any, error) {
 	c.inflightMutex.Lock()
 	if call, ok := c.inflight[key]; ok {
 		c.inflightMutex.Unlock()
@@ -80,9 +82,9 @@ func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() error)
 				ctx.Err() == nil {
 				return c.getOrFetch(ctx, key, fetch)
 			}
-			return call.err
+			return call.val, call.err
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 	}
 	call := &inflightCall{done: make(chan struct{})}
@@ -96,8 +98,37 @@ func (c *Client) getOrFetch(ctx context.Context, key string, fetch func() error)
 		close(call.done)
 	}()
 
-	call.err = fetch()
-	return call.err
+	call.val, call.err = fetch()
+	return call.val, call.err
+}
+
+// fetchCached returns the cached value of key, or fetches the value and
+// writes it to the cache. The cache only makes a request faster: a read or a
+// write error of the cache goes to the log, and the caller gets the value of
+// the server.
+func fetchCached[T any](c *Client, ctx context.Context, key string, get func() (T, bool, error), put func(T) error, fetch func() (T, error)) (T, error) {
+	cached, hit, err := get()
+	if err != nil {
+		logger.Warn("cache read failed", "key", key, "err", err)
+	} else if hit {
+		return cached, nil
+	}
+
+	v, err := c.getOrFetch(ctx, key, func() (any, error) {
+		fetched, err := fetch()
+		if err != nil {
+			return nil, err
+		}
+		if err := put(fetched); err != nil {
+			logger.Warn("cache write failed", "key", key, "err", err)
+		}
+		return fetched, nil
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return v.(T), nil
 }
 
 // GetLibraries returns libraries from cache or fetches from the API.
@@ -105,30 +136,11 @@ func (c *Client) GetLibraries(ctx context.Context) ([]abs.Library, error) {
 	if c.store == nil {
 		return c.Client.GetLibraries(ctx)
 	}
-	if cached, hit, _ := c.store.GetLibraries(); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "libraries", func() error {
-		fetched, err := c.Client.GetLibraries(ctx)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutLibraries(fetched, ttlLibraries)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetLibraries()
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key libraries")
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "libraries",
+		c.store.GetLibraries,
+		func(v []abs.Library) error { return c.store.PutLibraries(v, ttlLibraries) },
+		func() ([]abs.Library, error) { return c.Client.GetLibraries(ctx) },
+	)
 }
 
 // GetPersonalized returns personalized shelves from cache or fetches from the API.
@@ -136,30 +148,13 @@ func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]abs.P
 	if c.store == nil {
 		return c.Client.GetPersonalized(ctx, libraryID)
 	}
-	if cached, hit, _ := c.store.GetPersonalized(libraryID); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "personalized:"+libraryID, func() error {
-		fetched, err := c.Client.GetPersonalized(ctx, libraryID)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutPersonalized(libraryID, fetched, ttlPersonalized)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetPersonalized(libraryID)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key personalized:%s", libraryID)
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "personalized:"+libraryID,
+		func() ([]abs.PersonalizedResponse, bool, error) { return c.store.GetPersonalized(libraryID) },
+		func(v []abs.PersonalizedResponse) error {
+			return c.store.PutPersonalized(libraryID, v, ttlPersonalized)
+		},
+		func() ([]abs.PersonalizedResponse, error) { return c.Client.GetPersonalized(ctx, libraryID) },
+	)
 }
 
 // GetRecentEpisodes returns recent podcast episodes from cache or fetches from the API.
@@ -167,30 +162,13 @@ func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit 
 	if c.store == nil {
 		return c.Client.GetRecentEpisodes(ctx, libraryID, limit)
 	}
-	if cached, hit, _ := c.store.GetRecentEpisodes(libraryID, limit); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "recent-episodes:"+libraryID+":"+strconv.Itoa(limit), func() error {
-		fetched, err := c.Client.GetRecentEpisodes(ctx, libraryID, limit)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutRecentEpisodes(libraryID, limit, fetched, ttlRecentEpisodes)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetRecentEpisodes(libraryID, limit)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key recent-episodes:%s:%d", libraryID, limit)
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "recent-episodes:"+libraryID+":"+strconv.Itoa(limit),
+		func() ([]abs.LibraryItem, bool, error) { return c.store.GetRecentEpisodes(libraryID, limit) },
+		func(v []abs.LibraryItem) error {
+			return c.store.PutRecentEpisodes(libraryID, limit, v, ttlRecentEpisodes)
+		},
+		func() ([]abs.LibraryItem, error) { return c.Client.GetRecentEpisodes(ctx, libraryID, limit) },
+	)
 }
 
 // GetRecentlyAdded returns the merged recently-added shelf from cache or fetches from the API.
@@ -198,30 +176,11 @@ func (c *Client) GetRecentlyAdded(ctx context.Context, libraries []abs.Library) 
 	if c.store == nil {
 		return c.Client.GetRecentlyAdded(ctx, libraries)
 	}
-	if cached, hit, _ := c.store.GetRecentlyAdded(); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "recently-added", func() error {
-		fetched, err := c.Client.GetRecentlyAdded(ctx, libraries)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutRecentlyAdded(fetched, ttlRecentlyAdded)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetRecentlyAdded()
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key recently-added")
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "recently-added",
+		c.store.GetRecentlyAdded,
+		func(v []abs.LibraryItem) error { return c.store.PutRecentlyAdded(v, ttlRecentlyAdded) },
+		func() ([]abs.LibraryItem, error) { return c.Client.GetRecentlyAdded(ctx, libraries) },
+	)
 }
 
 // GetLibraryItems returns a paginated list of library items from cache or fetches from the API.
@@ -229,40 +188,22 @@ func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, li
 	if c.store == nil {
 		return c.Client.GetLibraryItems(ctx, libraryID, page, limit)
 	}
-	if items, total, hit, _ := c.store.GetLibraryItems(libraryID, page, limit); hit {
-		return &abs.LibraryItemsResponse{
-			Results: items,
-			Total:   total,
-			Limit:   limit,
-			Page:    page,
-		}, nil
-	}
-
-	err := c.getOrFetch(ctx, fmt.Sprintf("items:%s:%d:%d", libraryID, limit, page), func() error {
-		resp, err := c.Client.GetLibraryItems(ctx, libraryID, page, limit)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutLibraryItems(libraryID, page, limit, resp.Results, resp.Total, ttlLibraryItems)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	items, total, hit, err := c.store.GetLibraryItems(libraryID, page, limit)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key items:%s:%d:%d", libraryID, limit, page)
-	}
-	return &abs.LibraryItemsResponse{
-		Results: items,
-		Total:   total,
-		Limit:   limit,
-		Page:    page,
-	}, nil
+	return fetchCached(c, ctx, fmt.Sprintf("items:%s:%d:%d", libraryID, limit, page),
+		func() (*abs.LibraryItemsResponse, bool, error) {
+			items, total, hit, err := c.store.GetLibraryItems(libraryID, page, limit)
+			return &abs.LibraryItemsResponse{Results: items, Total: total, Limit: limit, Page: page}, hit, err
+		},
+		func(v *abs.LibraryItemsResponse) error {
+			return c.store.PutLibraryItems(libraryID, page, limit, v.Results, v.Total, ttlLibraryItems)
+		},
+		func() (*abs.LibraryItemsResponse, error) {
+			resp, err := c.Client.GetLibraryItems(ctx, libraryID, page, limit)
+			if err != nil {
+				return nil, err
+			}
+			return &abs.LibraryItemsResponse{Results: resp.Results, Total: resp.Total, Limit: limit, Page: page}, nil
+		},
+	)
 }
 
 // GetLibrarySeries returns a paginated list of series from cache or fetches from the API.
@@ -270,40 +211,22 @@ func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, l
 	if c.store == nil {
 		return c.Client.GetLibrarySeries(ctx, libraryID, page, limit)
 	}
-	if items, total, hit, _ := c.store.GetLibrarySeries(libraryID, page, limit); hit {
-		return &abs.LibrarySeriesResponse{
-			Results: items,
-			Total:   total,
-			Limit:   limit,
-			Page:    page,
-		}, nil
-	}
-
-	err := c.getOrFetch(ctx, fmt.Sprintf("series:%s:%d:%d", libraryID, limit, page), func() error {
-		resp, err := c.Client.GetLibrarySeries(ctx, libraryID, page, limit)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutLibrarySeries(libraryID, page, limit, resp.Results, resp.Total, ttlLibrarySeries)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	items, total, hit, err := c.store.GetLibrarySeries(libraryID, page, limit)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key series:%s:%d:%d", libraryID, limit, page)
-	}
-	return &abs.LibrarySeriesResponse{
-		Results: items,
-		Total:   total,
-		Limit:   limit,
-		Page:    page,
-	}, nil
+	return fetchCached(c, ctx, fmt.Sprintf("series:%s:%d:%d", libraryID, limit, page),
+		func() (*abs.LibrarySeriesResponse, bool, error) {
+			items, total, hit, err := c.store.GetLibrarySeries(libraryID, page, limit)
+			return &abs.LibrarySeriesResponse{Results: items, Total: total, Limit: limit, Page: page}, hit, err
+		},
+		func(v *abs.LibrarySeriesResponse) error {
+			return c.store.PutLibrarySeries(libraryID, page, limit, v.Results, v.Total, ttlLibrarySeries)
+		},
+		func() (*abs.LibrarySeriesResponse, error) {
+			resp, err := c.Client.GetLibrarySeries(ctx, libraryID, page, limit)
+			if err != nil {
+				return nil, err
+			}
+			return &abs.LibrarySeriesResponse{Results: resp.Results, Total: resp.Total, Limit: limit, Page: page}, nil
+		},
+	)
 }
 
 // GetLibraryItem returns a single library item from cache or fetches from the API.
@@ -311,30 +234,11 @@ func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*abs.Librar
 	if c.store == nil {
 		return c.Client.GetLibraryItem(ctx, itemID)
 	}
-	if cached, hit, _ := c.store.GetLibraryItem(itemID); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "item:"+itemID, func() error {
-		fetched, err := c.Client.GetLibraryItem(ctx, itemID)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutLibraryItem(itemID, fetched, ttlLibraryItem)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetLibraryItem(itemID)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key item:%s", itemID)
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "item:"+itemID,
+		func() (*abs.LibraryItem, bool, error) { return c.store.GetLibraryItem(itemID) },
+		func(v *abs.LibraryItem) error { return c.store.PutLibraryItem(itemID, v, ttlLibraryItem) },
+		func() (*abs.LibraryItem, error) { return c.Client.GetLibraryItem(ctx, itemID) },
+	)
 }
 
 // GetSeries returns series metadata from cache or fetches from the API.
@@ -342,38 +246,24 @@ func (c *Client) GetSeries(ctx context.Context, libraryID, seriesID string) (*ab
 	if c.store == nil {
 		return c.Client.GetSeries(ctx, libraryID, seriesID)
 	}
-	if cached, hit, _ := c.store.GetSeries(seriesID); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "series-meta:"+seriesID, func() error {
-		fetched, err := c.Client.GetSeries(ctx, libraryID, seriesID)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutSeries(seriesID, fetched, ttlSeriesContents)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetSeries(seriesID)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key series-meta:%s", seriesID)
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "series-meta:"+seriesID,
+		func() (*abs.Series, bool, error) { return c.store.GetSeries(seriesID) },
+		func(v *abs.Series) error { return c.store.PutSeries(seriesID, v, ttlSeriesContents) },
+		func() (*abs.Series, error) { return c.Client.GetSeries(ctx, libraryID, seriesID) },
+	)
 }
 
 // GetSeriesContents returns series contents from cache or fetches from the API.
+// The cache keeps the items and the series metadata under two keys.
 func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID string) (*abs.SeriesContents, error) {
 	if c.store == nil {
 		return c.Client.GetSeriesContents(ctx, libraryID, seriesID)
 	}
-	if items, hit, _ := c.store.GetSeriesContents(seriesID); hit {
+	key := "series-contents:" + seriesID
+	items, hit, err := c.store.GetSeriesContents(seriesID)
+	if err != nil {
+		logger.Warn("cache read failed", "key", key, "err", err)
+	} else if hit {
 		series, err := c.GetSeries(ctx, libraryID, seriesID)
 		if err != nil {
 			return nil, err
@@ -384,34 +274,23 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 		}, nil
 	}
 
-	err := c.getOrFetch(ctx, "series-contents:"+seriesID, func() error {
+	v, err := c.getOrFetch(ctx, key, func() (any, error) {
 		resp, err := c.Client.GetSeriesContents(ctx, libraryID, seriesID)
-		if err != nil {
-			return err
+		if err != nil || resp == nil {
+			return resp, err
 		}
-		_ = c.store.PutSeriesContents(seriesID, resp.Items, ttlSeriesContents)
-		_ = c.store.PutSeries(seriesID, &resp.Series, ttlSeriesContents)
-		return nil
+		if err := c.store.PutSeriesContents(seriesID, resp.Items, ttlSeriesContents); err != nil {
+			logger.Warn("cache write failed", "key", key, "err", err)
+		}
+		if err := c.store.PutSeries(seriesID, &resp.Series, ttlSeriesContents); err != nil {
+			logger.Warn("cache write failed", "key", "series-meta:"+seriesID, "err", err)
+		}
+		return resp, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	items, hit, err := c.store.GetSeriesContents(seriesID)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key series-contents:%s", seriesID)
-	}
-	series, err := c.GetSeries(ctx, libraryID, seriesID)
-	if err != nil {
-		return nil, err
-	}
-	return &abs.SeriesContents{
-		Series: *series,
-		Items:  items,
-	}, nil
+	return v.(*abs.SeriesContents), nil
 }
 
 // FilterAudioLibraries filters audio libraries using cache or fetches from the API.
@@ -419,30 +298,11 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []abs.Library) (
 	if c.store == nil {
 		return c.Client.FilterAudioLibraries(ctx, libs)
 	}
-	if cached, hit, _ := c.store.GetFilteredLibraries(); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "filtered-libraries", func() error {
-		fetched, err := c.Client.FilterAudioLibraries(ctx, libs)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutFilteredLibraries(fetched, ttlLibraries)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetFilteredLibraries()
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key filtered-libraries")
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "filtered-libraries",
+		c.store.GetFilteredLibraries,
+		func(v []abs.Library) error { return c.store.PutFilteredLibraries(v, ttlLibraries) },
+		func() ([]abs.Library, error) { return c.Client.FilterAudioLibraries(ctx, libs) },
+	)
 }
 
 // GetMediaProgress returns media progress from cache or fetches from the API.
@@ -450,30 +310,13 @@ func (c *Client) GetMediaProgress(ctx context.Context, itemID string) (*abs.Medi
 	if c.store == nil {
 		return c.Client.GetMediaProgress(ctx, itemID)
 	}
-	if cached, hit, _ := c.store.GetMediaProgress(itemID); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "progress:"+itemID, func() error {
-		fetched, err := c.Client.GetMediaProgress(ctx, itemID)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutMediaProgress(itemID, fetched, ttlMediaProgress)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetMediaProgress(itemID)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key progress:%s", itemID)
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "progress:"+itemID,
+		func() (*abs.MediaProgressWithBookmarks, bool, error) { return c.store.GetMediaProgress(itemID) },
+		func(v *abs.MediaProgressWithBookmarks) error {
+			return c.store.PutMediaProgress(itemID, v, ttlMediaProgress)
+		},
+		func() (*abs.MediaProgressWithBookmarks, error) { return c.Client.GetMediaProgress(ctx, itemID) },
+	)
 }
 
 // GetBookmarks returns bookmarks from cache or fetches from the API.
@@ -481,30 +324,11 @@ func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]abs.Bookmar
 	if c.store == nil {
 		return c.Client.GetBookmarks(ctx, itemID)
 	}
-	if cached, hit, _ := c.store.GetBookmarks(itemID); hit {
-		return cached, nil
-	}
-
-	err := c.getOrFetch(ctx, "bookmarks:"+itemID, func() error {
-		fetched, err := c.Client.GetBookmarks(ctx, itemID)
-		if err != nil {
-			return err
-		}
-		_ = c.store.PutBookmarks(itemID, fetched, ttlBookmarks)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	cached, hit, err := c.store.GetBookmarks(itemID)
-	if err != nil {
-		return nil, err
-	}
-	if !hit {
-		return nil, fmt.Errorf("unexpected cache miss after fetch for key bookmarks:%s", itemID)
-	}
-	return cached, nil
+	return fetchCached(c, ctx, "bookmarks:"+itemID,
+		func() ([]abs.Bookmark, bool, error) { return c.store.GetBookmarks(itemID) },
+		func(v []abs.Bookmark) error { return c.store.PutBookmarks(itemID, v, ttlBookmarks) },
+		func() ([]abs.Bookmark, error) { return c.Client.GetBookmarks(ctx, itemID) },
+	)
 }
 
 // DeleteItem deletes a library item from the API and invalidates related caches.

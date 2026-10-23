@@ -22,7 +22,10 @@ func Open(path string) (*Store, error) {
 	}
 
 	logger.Info("opening database", "path", path)
-	db, err := sql.Open("sqlite", path)
+	// The pool has more than one connection, and SQLite allows one writer at
+	// a time. busy_timeout makes a write wait for the lock instead of failing
+	// with SQLITE_BUSY. It applies to one connection, so it is in the DSN.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}

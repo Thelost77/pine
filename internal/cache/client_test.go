@@ -2,8 +2,10 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -161,32 +163,38 @@ func TestGetOrFetch_RetryOnLeaderCancellation(t *testing.T) {
 	leaderInflight := make(chan struct{})
 	releaseLeader := make(chan struct{})
 
-	fetch := func() error {
+	fetch := func() (any, error) {
 		n := calls.Add(1)
 		if n == 1 {
 			// Leader: announce we're in flight, then block until released.
 			close(leaderInflight)
 			<-releaseLeader
-			return context.Canceled
+			return nil, context.Canceled
 		}
 		// Retry leader: succeed.
-		return nil
+		return "retried", nil
 	}
 
 	ctx := context.Background()
 
 	leaderDone := make(chan error, 1)
 	go func() {
-		leaderDone <- client.getOrFetch(ctx, "retry-key", fetch)
+		_, err := client.getOrFetch(ctx, "retry-key", fetch)
+		leaderDone <- err
 	}()
 
 	// Wait until the leader is actually in flight so the follower observes the
 	// existing inflight call rather than becoming a fresh leader.
 	<-leaderInflight
 
-	followerDone := make(chan error, 1)
+	type result struct {
+		val any
+		err error
+	}
+	followerDone := make(chan result, 1)
 	go func() {
-		followerDone <- client.getOrFetch(ctx, "retry-key", fetch)
+		val, err := client.getOrFetch(ctx, "retry-key", fetch)
+		followerDone <- result{val, err}
 	}()
 
 	// Give the follower time to park on the leader's call.done channel.
@@ -200,8 +208,8 @@ func TestGetOrFetch_RetryOnLeaderCancellation(t *testing.T) {
 	if err := <-leaderDone; err != context.Canceled {
 		t.Fatalf("leader getOrFetch err = %v, want context.Canceled", err)
 	}
-	if err := <-followerDone; err != nil {
-		t.Fatalf("follower getOrFetch err = %v, want nil after retry", err)
+	if got := <-followerDone; got.err != nil || got.val != "retried" {
+		t.Fatalf("follower getOrFetch = %v, %v; want the value of the retry", got.val, got.err)
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("fetch invoked %d times, want 2 (leader + one retry)", got)
@@ -353,5 +361,138 @@ func TestClient_GetRecentlyAdded_CacheHit(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Fatalf("expected still 2 requests after cache hit, got %d", requestCount)
+	}
+}
+
+// closedStore returns a cache store with a closed database, so that each
+// cache read and each cache write fails at once.
+func closedStore(t *testing.T) *Store {
+	t.Helper()
+	dbStore := openTestDB(t)
+	if err := dbStore.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	return NewStore(dbStore)
+}
+
+// TestClient_CacheFailureReturnsServerData verifies that a request that the
+// server answers gives the data of the server, also if the cache cannot read
+// or write.
+func TestClient_CacheFailureReturnsServerData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/libraries":
+			_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+		case "/api/libraries/lib1/items":
+			_, _ = w.Write([]byte(`{"results":[{"id":"li1","mediaType":"book","media":{"metadata":{"title":"Book One"}}}],"total":7,"limit":50,"page":0}`))
+		case "/api/libraries/lib1/series/se1":
+			_, _ = w.Write([]byte(`{"id":"se1","name":"Saga"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), closedStore(t))
+	ctx := context.Background()
+
+	libs, err := client.GetLibraries(ctx)
+	if err != nil || len(libs) != 1 || libs[0].ID != "lib1" {
+		t.Errorf("GetLibraries() = %+v, %v; want lib1", libs, err)
+	}
+
+	items, err := client.GetLibraryItems(ctx, "lib1", 0, 50)
+	if err != nil || len(items.Results) != 1 || items.Total != 7 {
+		t.Errorf("GetLibraryItems() = %+v, %v; want 1 item of 7", items, err)
+	}
+
+	contents, err := client.GetSeriesContents(ctx, "lib1", "se1")
+	if err != nil || contents.Series.Name != "Saga" || len(contents.Items) != 1 {
+		t.Errorf("GetSeriesContents() = %+v, %v; want Saga with 1 item", contents, err)
+	}
+}
+
+// TestClient_WaitersGetDataWhenCacheFails verifies that the callers that wait
+// for the request of a different caller get its data, also if the cache
+// cannot keep the data.
+func TestClient_WaitersGetDataWhenCacheFails(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), closedStore(t))
+
+	errs := make(chan error, 5)
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			libs, err := client.GetLibraries(context.Background())
+			if err == nil && len(libs) != 1 {
+				err = fmt.Errorf("got %d libraries, want 1", len(libs))
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Errorf("GetLibraries() error: %v", err)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Errorf("%d requests for 5 parallel calls, want 1", got)
+	}
+}
+
+// TestClient_ParallelFetchesOfDifferentKeys verifies that parallel requests
+// for different keys all succeed. At the start of pine, the home screen and
+// the session restore fetch at the same time, and their cache writes meet.
+func TestClient_ParallelFetchesOfDifferentKeys(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"mediaType":"book","media":{"metadata":{"title":"t"}}}`, strings.TrimPrefix(r.URL.Path, "/api/items/"))
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), NewStore(openTestDB(t)))
+
+	const n = 64
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			item, err := client.GetLibraryItem(context.Background(), id)
+			if err == nil && item.ID != id {
+				err = fmt.Errorf("got item %q, want %q", item.ID, id)
+			}
+			errs <- err
+		}(fmt.Sprintf("li-%d", i))
+	}
+	wg.Wait()
+	close(errs)
+
+	failed := 0
+	for err := range errs {
+		if err != nil {
+			if failed == 0 {
+				t.Errorf("first error: %v", err)
+			}
+			failed++
+		}
+	}
+	if failed > 0 {
+		t.Errorf("%d of %d parallel GetLibraryItem calls failed", failed, n)
 	}
 }

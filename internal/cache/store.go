@@ -2,7 +2,9 @@ package cache
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,15 +22,19 @@ func NewStore(db *db.Store) *Store {
 }
 
 // Get attempts to retrieve and decode the value for key into dest.
-// Returns (true, nil) on hit, (false, nil) on miss.
+// Returns (true, nil) on hit, (false, nil) on miss, and (false, err) if the
+// database or the decode fails.
 func (s *Store) Get(key string, dest any) (bool, error) {
 	var data []byte
 	err := s.db.DB.QueryRow(
 		`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now')`,
 		key,
 	).Scan(&data)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // miss
+	}
+	if err != nil {
+		return false, fmt.Errorf("read cache value for key %q: %w", key, err)
 	}
 
 	dec := gob.NewDecoder(bytes.NewReader(data))

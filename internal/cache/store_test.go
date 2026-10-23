@@ -59,6 +59,22 @@ func TestStore_Miss(t *testing.T) {
 	}
 }
 
+// TestStore_GetReportsDatabaseError verifies that Get gives a database error
+// as an error, not as a miss.
+func TestStore_GetReportsDatabaseError(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+	if err := dbStore.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	var v string
+	hit, err := s.Get("key", &v)
+	if hit || err == nil {
+		t.Fatalf("Get() = %v, %v; want a miss and an error", hit, err)
+	}
+}
+
 func TestStore_Expiry(t *testing.T) {
 	dbStore := openTestDB(t)
 	s := NewStore(dbStore)
