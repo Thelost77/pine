@@ -1047,8 +1047,8 @@ func TestMarkFinishedEvictsProgressCaches(t *testing.T) {
 	cacheStore := cache.NewStore(dbStore)
 
 	item := &abs.LibraryItem{ID: "book-001", LibraryID: "lib-001", MediaType: "book"}
-	seedCache(t, cacheStore, "item:book-001", item)
-	seedCache(t, cacheStore, "series-contents:series-001", &abs.SeriesContents{Items: []abs.LibraryItem{*item}})
+	seedCache(t, cacheStore, cache.ItemKey("book-001"), item)
+	seedCache(t, cacheStore, cache.SeriesContentsKey("series-001"), &abs.SeriesContents{Items: []abs.LibraryItem{*item}})
 
 	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, cacheStore), cacheStore, &mockPlayer{})
 	_, cmd := m.handleMarkFinished(detail.MarkFinishedCmd{
@@ -1071,8 +1071,8 @@ func TestMarkFinishedEvictsProgressCaches(t *testing.T) {
 		t.Fatalf("expected MarkFinishedMsg, got %T", cmd())
 	}
 
-	assertEvicted[abs.LibraryItem](t, cacheStore, "item:book-001")
-	assertEvicted[abs.SeriesContents](t, cacheStore, "series-contents:series-001")
+	assertEvicted[abs.LibraryItem](t, cacheStore, cache.ItemKey("book-001"))
+	assertEvicted[abs.SeriesContents](t, cacheStore, cache.SeriesContentsKey("series-001"))
 }
 
 func TestCleanupEvictsProgressCaches(t *testing.T) {
@@ -1101,9 +1101,9 @@ func TestCleanupEvictsProgressCaches(t *testing.T) {
 	cacheStore := cache.NewStore(dbStore)
 
 	item := &abs.LibraryItem{ID: "book-001", LibraryID: "lib-001", MediaType: "book"}
-	seedCache(t, cacheStore, "item:book-001", item)
-	seedCache(t, cacheStore, "series-contents:series-001", &abs.SeriesContents{Items: []abs.LibraryItem{*item}})
-	seedCache(t, cacheStore, "personalized:lib-001", []abs.PersonalizedResponse{})
+	seedCache(t, cacheStore, cache.ItemKey("book-001"), item)
+	seedCache(t, cacheStore, cache.SeriesContentsKey("series-001"), &abs.SeriesContents{Items: []abs.LibraryItem{*item}})
+	seedCache(t, cacheStore, cache.PersonalizedKey("lib-001"), []abs.PersonalizedResponse{})
 
 	m := NewWithPlayer(config.Default(), dbStore, cache.NewClient(client, cacheStore), cacheStore, &mockPlayer{})
 	m.sessionID = "sess-cleanup"
@@ -1115,9 +1115,9 @@ func TestCleanupEvictsProgressCaches(t *testing.T) {
 
 	m.Cleanup()
 
-	assertEvicted[abs.LibraryItem](t, cacheStore, "item:book-001")
-	assertEvicted[abs.SeriesContents](t, cacheStore, "series-contents:series-001")
-	assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, "personalized:lib-001")
+	assertEvicted[abs.LibraryItem](t, cacheStore, cache.ItemKey("book-001"))
+	assertEvicted[abs.SeriesContents](t, cacheStore, cache.SeriesContentsKey("series-001"))
+	assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, cache.PersonalizedKey("lib-001"))
 }
 
 func TestRestartPlaybackAtEvictsProgressCaches(t *testing.T) {
@@ -1151,9 +1151,9 @@ func TestRestartPlaybackAtEvictsProgressCaches(t *testing.T) {
 	cacheStore := cache.NewStore(dbStore)
 
 	item := &abs.LibraryItem{ID: "book-001", LibraryID: "lib-001", MediaType: "book"}
-	seedCache(t, cacheStore, "item:book-001", item)
-	seedCache(t, cacheStore, "series-contents:series-001", &abs.SeriesContents{Items: []abs.LibraryItem{*item}})
-	seedCache(t, cacheStore, "personalized:lib-001", []abs.PersonalizedResponse{})
+	seedCache(t, cacheStore, cache.ItemKey("book-001"), item)
+	seedCache(t, cacheStore, cache.SeriesContentsKey("series-001"), &abs.SeriesContents{Items: []abs.LibraryItem{*item}})
+	seedCache(t, cacheStore, cache.PersonalizedKey("lib-001"), []abs.PersonalizedResponse{})
 
 	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, cacheStore), cacheStore, &mockPlayer{})
 	m.sessionID = "sess-restart"
@@ -1172,9 +1172,9 @@ func TestRestartPlaybackAtEvictsProgressCaches(t *testing.T) {
 		t.Fatalf("expected PlaySessionMsg, got %T", cmd())
 	}
 
-	assertEvicted[abs.LibraryItem](t, cacheStore, "item:book-001")
-	assertEvicted[abs.SeriesContents](t, cacheStore, "series-contents:series-001")
-	assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, "personalized:lib-001")
+	assertEvicted[abs.LibraryItem](t, cacheStore, cache.ItemKey("book-001"))
+	assertEvicted[abs.SeriesContents](t, cacheStore, cache.SeriesContentsKey("series-001"))
+	assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, cache.PersonalizedKey("lib-001"))
 }
 
 func TestPlaybackErrorDoesNotConsumeQueue(t *testing.T) {

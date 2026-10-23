@@ -66,7 +66,7 @@ func TestClient_TTLExpiry(t *testing.T) {
 	client := NewClient(inner, store)
 
 	// Pre-populate cache with a short-lived entry
-	if err := store.Put("libraries", []abs.Library{{ID: "old"}}, 1*time.Millisecond); err != nil {
+	if err := store.Put(librariesKey, []abs.Library{{ID: "old"}}, 1*time.Millisecond); err != nil {
 		t.Fatalf("put error: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -406,7 +406,7 @@ func TestClient_InvalidationClearsCache(t *testing.T) {
 			client := NewClient(abs.NewClient(srv.URL, "tok"), store)
 			invalidated := false
 			client.OnInvalidate = func() { invalidated = true }
-			if err := store.Put("libraries", []abs.Library{{ID: "lib1"}}, time.Minute); err != nil {
+			if err := store.Put(librariesKey, []abs.Library{{ID: "lib1"}}, time.Minute); err != nil {
 				t.Fatalf("seed cache: %v", err)
 			}
 
@@ -415,7 +415,7 @@ func TestClient_InvalidationClearsCache(t *testing.T) {
 			}
 
 			var libs []abs.Library
-			if hit, err := store.Get("libraries", &libs); hit || err != nil {
+			if hit, err := store.Get(librariesKey, &libs); hit || err != nil {
 				t.Errorf("cache after %s = hit %v, %v; want a miss", name, hit, err)
 			}
 			if !invalidated {
