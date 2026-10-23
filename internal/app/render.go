@@ -245,6 +245,8 @@ func (m Model) viewScreen() string {
 		return m.seriesList.View()
 	case ScreenSeries:
 		return m.series.View()
+	case ScreenSessions:
+		return m.sessions.View()
 	default:
 		return ""
 	}
@@ -286,6 +288,9 @@ func (m Model) viewHints() string {
 		if _, _, ok := m.detail.MetadataEditTarget(); ok {
 			parts = append(parts, key("m", "metadata"))
 		}
+		if _, _, ok := m.detail.PlayTarget(); ok {
+			parts = append(parts, key("R", "sessions"))
+		}
 		parts = append(parts, key("a", "queue"))
 		parts = append(parts, key("A", "next"))
 		parts = append(parts, key("tab", "focus"))
@@ -300,6 +305,11 @@ func (m Model) viewHints() string {
 	case ScreenSeries:
 		parts = append(parts, key("enter", "open"))
 		parts = append(parts, key("H/L", "page"))
+		parts = append(parts, key("←/esc", "back"))
+	case ScreenSessions:
+		parts = append(parts, key("enter", "play from here"))
+		parts = append(parts, key("H/L", "page"))
+		parts = append(parts, key("/", "filter"))
 		parts = append(parts, key("←/esc", "back"))
 	default:
 		return ""

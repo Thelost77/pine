@@ -23,6 +23,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/search"
 	"github.com/Thelost77/pine/internal/screens/series"
 	"github.com/Thelost77/pine/internal/screens/serieslist"
+	"github.com/Thelost77/pine/internal/screens/sessions"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
@@ -49,6 +50,7 @@ type Model struct {
 	seriesList   serieslist.Model
 	searchCache  *search.Cache
 	series       series.Model
+	sessions     sessions.Model
 	player       player.Model
 
 	// Playback session state
@@ -135,6 +137,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		metadataEdit: metadataedit.New(styles, abs.LibraryItem{MediaType: "book"}),
 		seriesList:   serieslist.New(styles, client, "", ""),
 		series:       series.New(styles, client, "", "", ""),
+		sessions:     sessions.New(styles, client, sessions.Target{}, cfg.DeviceID),
 		player:       player.NewModel(mpv, cfg.Player.Speed, playerKeys(cfg.Keybinds), styles),
 		keys:         DefaultKeyMap(cfg.Keybinds),
 		err:          components.NewErrorBanner(styles.Error.Background(lipgloss.Color(cfg.Theme.Error)).Foreground(lipgloss.Color(cfg.Theme.Background))),
@@ -363,6 +366,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.metadataEdit = metadataedit.New(m.styles, abs.LibraryItem{MediaType: "book"})
 		m.seriesList = serieslist.New(m.styles, m.client, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
+		m.sessions = sessions.New(m.styles, m.client, sessions.Target{}, m.config.DeviceID)
 		m.login, _ = m.login.Update(msg)
 		m.backStack = nil
 		m.screen = ScreenHome
@@ -605,6 +609,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case series.BackMsg:
 		return m.back()
 
+	case sessions.PlayFromMsg:
+		return m.handlePlayFromSession(msg)
+
+	case sessions.BackMsg:
+		return m.back()
+
+	case SessionItemLoadedMsg:
+		return m.playItemAt(msg.Item, msg.Episode, msg.Position)
+
 	case CaptionLoadedMsg:
 		return m.handleCaptionLoaded(msg)
 
@@ -839,6 +852,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.openChapterOverlay()
 			}
 			return m, nil
+		}
+		if key.Matches(msg, m.keys.Sessions) {
+			return m.handleSessionsKey()
 		}
 		if m.isPlaying() && len(m.captionCues) > 0 && key.Matches(msg, m.keys.Captions) {
 			m.toggleCaptions()
@@ -1121,6 +1137,7 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 		{Label: "Go Home", Action: components.ActionGoHome},
 		{Label: "Go Library", Action: components.ActionGoLibrary},
 		{Label: "Go Series List", Action: components.ActionGoSeriesList},
+		{Label: "Listening History", Action: components.ActionShowSessions},
 	}
 
 	if !m.isPlaying() {
@@ -1222,6 +1239,11 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	case components.ActionGoSeriesList:
 		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
 		return m.navigate(ScreenSeriesList)
+	case components.ActionShowSessions:
+		if entry, ok := data.(detail.AddToQueueCmd); ok {
+			return m.openSessions(sessionsTarget(entry.Item, entry.Episode))
+		}
+		return m.openSessions(sessions.Target{})
 	case components.ActionTogglePlay:
 		if m.isPlaying() {
 			m.player.Playing = !m.player.Playing

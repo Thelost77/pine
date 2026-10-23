@@ -12,6 +12,7 @@ func helpGroups() []components.HelpGroup {
 				{Key: "esc / ←", Desc: "go back"},
 				{Key: "enter / →", Desc: "open / select"},
 				{Key: "?", Desc: "toggle help"},
+				{Key: "R", Desc: "listening sessions"},
 			},
 		},
 		{
@@ -69,6 +70,14 @@ func helpGroups() []components.HelpGroup {
 				{Key: "enter", Desc: "open selected book"},
 				{Key: "H / L", Desc: "page up / down"},
 				{Key: "esc / ←", Desc: "back"},
+			},
+		},
+		{
+			Title: "Listening Sessions",
+			Bindings: []components.HelpBinding{
+				{Key: "enter", Desc: "play from here"},
+				{Key: "/", Desc: "filter"},
+				{Key: "H / L", Desc: "page up / down"},
 			},
 		},
 	}

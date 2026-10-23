@@ -108,24 +108,10 @@ func (m Model) handleSeekToBookmark(msg detail.SeekToBookmarkCmd) (Model, tea.Cm
 		return m, cmd
 	}
 
-	// Different item or episode playing → stop it first
-	var closeCmd, stopCmd tea.Cmd
-	if m.isPlaying() {
-		logger.Info("switching playback", "from", m.itemID+"/"+m.episodeID, "to", msg.Item.ID+"/"+episode.ID)
-		m, closeCmd, stopCmd = m.stopPlaybackCmds()
-	}
-
-	m.setSeriesContext(msg.Item)
-	var startCmd tea.Cmd
 	if hasEpisode {
-		startCmd = m.startEpisodePlaybackAtPositionCmd(msg.Item, episode, msg.Time)
-	} else {
-		startCmd = m.startPlaybackAtBookPositionCmd(msg.Item, msg.Time)
+		return m.playItemAt(msg.Item, &episode, msg.Time)
 	}
-	if stopCmd != nil {
-		return m, tea.Batch(stopCmd, closeThen(closeCmd, startCmd))
-	}
-	return m, startCmd
+	return m.playItemAt(msg.Item, nil, msg.Time)
 }
 
 // handleDeleteBookmark deletes a bookmark and removes it from the local list.

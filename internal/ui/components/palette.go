@@ -65,6 +65,7 @@ const (
 	ActionShuffleItem
 	ActionSubliminalMode
 	ActionToggleCaptions
+	ActionShowSessions
 )
 
 type PaletteItem struct {

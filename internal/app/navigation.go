@@ -70,6 +70,7 @@ func (m *Model) propagateSize() {
 	m.metadataEdit.SetSize(w, sh)
 	m.seriesList.SetSize(w, sh)
 	m.series.SetSize(w, sh)
+	m.sessions.SetSize(w, sh)
 	m.palette.SetSize(m.width, m.height)
 }
 
@@ -90,6 +91,8 @@ func (m Model) initScreen(s Screen) tea.Cmd {
 		return m.seriesList.Init()
 	case ScreenSeries:
 		return m.series.Init()
+	case ScreenSessions:
+		return m.sessions.Init()
 	default:
 		return nil
 	}
@@ -113,6 +116,8 @@ func (m Model) updateScreen(msg tea.Msg) (Model, tea.Cmd) {
 		m.seriesList, cmd = m.seriesList.Update(msg)
 	case ScreenSeries:
 		m.series, cmd = m.series.Update(msg)
+	case ScreenSessions:
+		m.sessions, cmd = m.sessions.Update(msg)
 	}
 	return m, cmd
 }

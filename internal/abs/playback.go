@@ -16,6 +16,9 @@ type DeviceInfo struct {
 	Model         string `json:"model"`
 	ClientName    string `json:"clientName"`
 	ClientVersion string `json:"clientVersion"`
+	// DeviceName is set by the server, from the manufacturer and the model.
+	// The client does not send it.
+	DeviceName string `json:"deviceName,omitempty"`
 }
 
 // startPlayRequest is the body for POST /api/items/{id}/play.

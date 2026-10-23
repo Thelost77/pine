@@ -29,6 +29,7 @@ The remaining sections describe pine. For spruce, see [docs/spruce/README.md](do
 - Metadata editor for books and episodes
 - MPRIS media-key support on Linux
 - Bookmarks — create, edit, navigate to, and delete
+- Listening sessions (`R`) — see where each device stopped, and play from that position
 - Sleep timer
 - Automatic progress sync every 30 seconds
 - Multiple library support with tab switching
@@ -95,6 +96,7 @@ Some keys are context-specific.
 | `]` / `[` | Volume up / down |
 | `c` | Toggle captions during playback |
 | `C` | Open chapter list |
+| `R` | Listening sessions (detail: the book or episode; else: the item that plays, or all items) |
 | `s` | Browse series (library) |
 | `S` | Cycle sleep timer during playback |
 | `b` | Add bookmark |
