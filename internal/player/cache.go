@@ -36,7 +36,7 @@ type SessionCache struct {
 
 // NewSessionCache creates a private cache directory that mpv can access.
 func NewSessionCache(maxBytes int64) (*SessionCache, error) {
-	root, err := MpvSocketDir()
+	root, err := runtimeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve media cache directory: %w", err)
 	}
@@ -91,6 +91,7 @@ func (c *SessionCache) Store(ctx context.Context, itemID string, download MediaD
 		return path, nil
 	}
 
+	// Close also takes downloadMu, so the cache cannot close while Store runs.
 	c.downloadMu.Lock()
 	defer c.downloadMu.Unlock()
 
@@ -156,11 +157,6 @@ func (c *SessionCache) Store(ctx context.Context, itemID string, download MediaD
 	complete = true
 
 	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		_ = os.Remove(path)
-		return "", errors.New("media cache is closed")
-	}
 	c.paths[itemID] = path
 	c.usedBytes += limited.written
 	c.mu.Unlock()

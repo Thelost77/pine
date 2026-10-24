@@ -119,17 +119,6 @@ func (m Model) VolumeUpKey() key.Binding { return m.keys.VolumeUp }
 // VolumeDownKey returns the volume-down key binding.
 func (m Model) VolumeDownKey() key.Binding { return m.keys.VolumeDown }
 
-// HandlesKey reports whether the player should consume the key while a session is active.
-func (m Model) HandlesKey(msg tea.KeyMsg) bool {
-	return key.Matches(msg, m.keys.PlayPause) ||
-		key.Matches(msg, m.keys.SeekForward) ||
-		key.Matches(msg, m.keys.SeekBack) ||
-		key.Matches(msg, m.keys.SpeedUp) ||
-		key.Matches(msg, m.keys.SpeedDown) ||
-		key.Matches(msg, m.keys.VolumeUp) ||
-		key.Matches(msg, m.keys.VolumeDown)
-}
-
 // Update handles messages for the player sub-model.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {

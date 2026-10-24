@@ -279,7 +279,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	}
 	cmds := []tea.Cmd{
 		m.mprisPlaybackCmd(),
-		player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, msg.Session.TrackDuration, paused, headers, m.player.Volume, m.playGeneration),
+		player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers, m.player.Volume, m.playGeneration),
 	}
 	if capCmd := loadCaptionsCmd(m.client, msg.Session.ItemID, msg.Session.TrackFilename, msg.Session.TranscriptIno, m.playGeneration); capCmd != nil {
 		cmds = append(cmds, capCmd)

@@ -55,7 +55,7 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		cmds = append(cmds, startReqCmd)
 
 		if m.mpv != nil {
-			cmds = append(cmds, player.LaunchCmd(m.mpv, source, 0, 0, false, streamHeaders, m.playerState.Volume, m.playGeneration))
+			cmds = append(cmds, player.LaunchCmd(m.mpv, source, 0, false, streamHeaders, m.playerState.Volume, m.playGeneration))
 		}
 	}
 	if m.repeatQueue {
