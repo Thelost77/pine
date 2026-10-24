@@ -65,6 +65,7 @@ func TestBuildRequestChangedSeriesNameOmitsOldID(t *testing.T) {
 		MediaType: "book",
 		Media: abs.Media{Metadata: abs.MediaMetadata{
 			Title:      "Title",
+			Series:     &abs.SeriesSequence{ID: "series-1", Name: "Old Series", Sequence: "1"},
 			SeriesList: []abs.SeriesSequence{{ID: "series-1", Name: "Old Series", Sequence: "1"}},
 		}},
 	}
@@ -225,6 +226,7 @@ func TestBuildRequestClearsSeries(t *testing.T) {
 		MediaType: "book",
 		Media: abs.Media{Metadata: abs.MediaMetadata{
 			Title:      "Title",
+			Series:     &abs.SeriesSequence{ID: "series-1", Name: "Old Series", Sequence: "1"},
 			SeriesList: []abs.SeriesSequence{{ID: "series-1", Name: "Old Series", Sequence: "1"}},
 		}},
 	}
@@ -248,6 +250,7 @@ func TestMultiAuthorAndSeriesFieldsAreReadOnly(t *testing.T) {
 		Media: abs.Media{Metadata: abs.MediaMetadata{
 			Title:      "Title",
 			Authors:    []abs.Author{{Name: "One"}, {Name: "Two"}},
+			Series:     &abs.SeriesSequence{Name: "One"},
 			SeriesList: []abs.SeriesSequence{{Name: "One"}, {Name: "Two"}},
 		}},
 	}

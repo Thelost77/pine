@@ -87,7 +87,7 @@ func New(styles ui.Styles, item abs.LibraryItem) Model {
 	inputs[fieldTitle] = newInput("Title", meta.Title, 256)
 	inputs[fieldAuthor] = newInput("Author", initialAuthorValue(meta), 256)
 
-	series := meta.PrimarySeries()
+	series := meta.Series
 	seriesName := ""
 	seriesSequence := ""
 	if series != nil {

@@ -36,44 +36,40 @@ type syncSessionRequest struct {
 // StartPlaySession starts a new playback session for a library item.
 func (c *Client) StartPlaySession(ctx context.Context, itemID string, device DeviceInfo) (*PlaySession, error) {
 	path := fmt.Sprintf("/api/items/%s/play", itemID)
-	logger.Debug("API request", "method", "POST", "path", path, "itemID", itemID)
 	body := startPlayRequest{
 		DeviceInfo:      device,
 		ForceDirectPlay: true,
 	}
 	data, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
-		logger.Error("start play session failed", "itemID", itemID, "err", err)
 		return nil, fmt.Errorf("start play session: %w", err)
 	}
 	var session PlaySession
 	if err := json.Unmarshal(data, &session); err != nil {
-		logger.Error("decode play session failed", "itemID", itemID, "err", err, "body", string(data))
+		logger.Error("decode play session failed", "itemID", itemID, "err", err, "bodyLen", len(data))
 		return nil, fmt.Errorf("decode play session: %w", err)
 	}
-	logger.Info("play session created", "sessionID", session.ID, "tracks", len(session.AudioTracks), "chapters", len(session.Chapters), "mediaMetadataChapters", len(session.MediaMetadata.Chapters), "currentTime", session.CurrentTime)
+	logger.Info("play session created", "session", SessionTag(session.ID), "tracks", len(session.AudioTracks), "chapters", len(session.Chapters), "mediaMetadataChapters", len(session.MediaMetadata.Chapters), "currentTime", session.CurrentTime)
 	return &session, nil
 }
 
 // StartEpisodePlaySession starts a new playback session for a podcast episode.
 func (c *Client) StartEpisodePlaySession(ctx context.Context, itemID, episodeID string, device DeviceInfo) (*PlaySession, error) {
 	path := fmt.Sprintf("/api/items/%s/play/%s", itemID, episodeID)
-	logger.Debug("API request", "method", "POST", "path", path, "itemID", itemID, "episodeID", episodeID)
 	body := startPlayRequest{
 		DeviceInfo:      device,
 		ForceDirectPlay: true,
 	}
 	data, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
-		logger.Error("start episode play session failed", "itemID", itemID, "episodeID", episodeID, "err", err)
 		return nil, fmt.Errorf("start episode play session: %w", err)
 	}
 	var session PlaySession
 	if err := json.Unmarshal(data, &session); err != nil {
-		logger.Error("decode episode play session failed", "itemID", itemID, "episodeID", episodeID, "err", err, "body", string(data))
+		logger.Error("decode episode play session failed", "itemID", itemID, "episodeID", episodeID, "err", err, "bodyLen", len(data))
 		return nil, fmt.Errorf("decode episode play session: %w", err)
 	}
-	logger.Info("episode play session created", "sessionID", session.ID, "tracks", len(session.AudioTracks), "chapters", len(session.Chapters), "mediaMetadataChapters", len(session.MediaMetadata.Chapters), "currentTime", session.CurrentTime, "episodeID", session.EpisodeID)
+	logger.Info("episode play session created", "session", SessionTag(session.ID), "tracks", len(session.AudioTracks), "chapters", len(session.Chapters), "mediaMetadataChapters", len(session.MediaMetadata.Chapters), "currentTime", session.CurrentTime, "episodeID", session.EpisodeID)
 	return &session, nil
 }
 
@@ -84,7 +80,7 @@ func (c *Client) SyncSession(ctx context.Context, sessionID string, currentTime,
 		CurrentTime:  currentTime,
 		TimeListened: timeListened,
 	}
-	logger.Debug("syncing playback session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
+	logger.Debug("syncing playback session", "session", SessionTag(sessionID), "currentTime", currentTime, "timeListened", timeListened)
 	_, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return fmt.Errorf("sync session: %w", err)
@@ -100,7 +96,7 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string, currentTime
 		CurrentTime:  currentTime,
 		TimeListened: timeListened,
 	}
-	logger.Debug("closing playback session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened)
+	logger.Debug("closing playback session", "session", SessionTag(sessionID), "currentTime", currentTime, "timeListened", timeListened)
 	_, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return fmt.Errorf("close session: %w", err)
@@ -112,7 +108,7 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string, currentTime
 // so the server keeps the progress that it has.
 func (c *Client) CloseSessionNoSync(ctx context.Context, sessionID string) error {
 	path := fmt.Sprintf("/api/session/%s/close", sessionID)
-	logger.Debug("closing playback session with no sync", "sessionID", sessionID)
+	logger.Debug("closing playback session with no sync", "session", SessionTag(sessionID))
 	_, err := c.do(ctx, http.MethodPost, path, nil)
 	if err != nil {
 		return fmt.Errorf("close session: %w", err)

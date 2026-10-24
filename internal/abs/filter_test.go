@@ -16,10 +16,7 @@ func TestFilterAudioLibraries_KeepsPodcasts(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	libs := []Library{{ID: "pod-1", Name: "Podcasts", MediaType: "podcast"}}
-	result, err := c.FilterAudioLibraries(context.Background(), libs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := c.FilterAudioLibraries(context.Background(), libs)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 library, got %d", len(result))
 	}
@@ -48,10 +45,7 @@ func TestFilterAudioLibraries_KeepsAudiobooks(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	libs := []Library{{ID: "audio-lib", Name: "Audiobooks", MediaType: "book"}}
-	result, err := c.FilterAudioLibraries(context.Background(), libs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := c.FilterAudioLibraries(context.Background(), libs)
 	if len(result) != 1 {
 		t.Fatalf("expected audiobook library to be kept, got %d libraries", len(result))
 	}
@@ -79,10 +73,7 @@ func TestFilterAudioLibraries_ExcludesEbooks(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	libs := []Library{{ID: "ebook-lib", Name: "Books", MediaType: "book"}}
-	result, err := c.FilterAudioLibraries(context.Background(), libs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := c.FilterAudioLibraries(context.Background(), libs)
 	if len(result) != 0 {
 		t.Fatalf("expected ebook library to be excluded, got %d libraries", len(result))
 	}
@@ -105,10 +96,7 @@ func TestFilterAudioLibraries_DetectsAudioByNumTracks(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	libs := []Library{{ID: "lib-1", Name: "Books with Audio", MediaType: "book"}}
-	result, err := c.FilterAudioLibraries(context.Background(), libs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := c.FilterAudioLibraries(context.Background(), libs)
 	if len(result) != 1 {
 		t.Fatal("expected library with numTracks>0 to be kept")
 	}
@@ -131,10 +119,7 @@ func TestFilterAudioLibraries_DetectsAudioByNumAudioFiles(t *testing.T) {
 
 	c := NewClient(srv.URL, "tok")
 	libs := []Library{{ID: "lib-1", Name: "Audiobooks", MediaType: "book"}}
-	result, err := c.FilterAudioLibraries(context.Background(), libs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := c.FilterAudioLibraries(context.Background(), libs)
 	if len(result) != 1 {
 		t.Fatal("expected library with numAudioFiles>0 to be kept")
 	}

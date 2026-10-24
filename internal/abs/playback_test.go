@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -268,5 +269,54 @@ func TestCloseSessionNoSyncHTTP(t *testing.T) {
 	}
 	if len(capturedBody) != 0 {
 		t.Errorf("body = %q, want no body", capturedBody)
+	}
+}
+
+func TestSyncSessionErrorHasNoSessionID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	addr := srv.URL
+	srv.Close()
+
+	const sessionID = "3f2b8c1e-5d4a-4e7b-9a6c-1d2e3f4a5b6c"
+	c := NewClient(addr, "tok")
+	err := c.SyncSession(context.Background(), sessionID, 10, 5)
+	if err == nil {
+		t.Fatal("SyncSession() to a closed server returned no error")
+	}
+	if strings.Contains(err.Error(), sessionID) {
+		t.Errorf("SyncSession() error %q contains the session ID", err)
+	}
+	if !strings.Contains(err.Error(), "/api/session/"+SessionTag(sessionID)+"/sync") {
+		t.Errorf("SyncSession() error %q does not name the session tag", err)
+	}
+}
+
+func TestSessionTagHidesTheSessionID(t *testing.T) {
+	const id = "3f2b8c1e-5d4a-4e7b-9a6c-1d2e3f4a5b6c"
+	tag := SessionTag(id)
+	if strings.Contains(tag, id[:6]) || len(tag) > 8 {
+		t.Errorf("SessionTag(%q) = %q, want a short tag that does not show the ID", id, tag)
+	}
+	if SessionTag(id) != tag {
+		t.Errorf("SessionTag(%q) gave two tags", id)
+	}
+	if SessionTag("other-session") == tag {
+		t.Errorf("SessionTag gave the same tag %q for two IDs", tag)
+	}
+}
+
+func TestLogPathPutsTheSessionTagInPlaceOfTheID(t *testing.T) {
+	tests := []struct {
+		path, want string
+	}{
+		{"/api/session/abc/sync", "/api/session/" + SessionTag("abc") + "/sync"},
+		{"/api/session/abc/close", "/api/session/" + SessionTag("abc") + "/close"},
+		{"/api/session/abc", "/api/session/" + SessionTag("abc")},
+		{"/api/items/abc/play", "/api/items/abc/play"},
+	}
+	for _, tt := range tests {
+		if got := logPath(tt.path); got != tt.want {
+			t.Errorf("logPath(%q) = %q, want %q", tt.path, got, tt.want)
+		}
 	}
 }

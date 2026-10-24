@@ -81,9 +81,6 @@ func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]Perso
 // recentEpisodeResponse is the ABS response shape for GET /api/libraries/{id}/recent-episodes.
 type recentEpisodeResponse struct {
 	Episodes []recentEpisodeEntry `json:"episodes"`
-	Total    int                  `json:"total"`
-	Limit    int                  `json:"limit"`
-	Page     int                  `json:"page"`
 }
 
 // recentEpisodeEntry represents a single episode in the recent-episodes response.
@@ -134,14 +131,6 @@ func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit 
 	items := make([]LibraryItem, 0, len(resp.Episodes))
 	for _, ep := range resp.Episodes {
 		authorName := ep.Podcast.Metadata.Author
-		var index *int
-		if ep.Index != nil {
-			index = ep.Index
-		}
-		var publishedAt *int64
-		if ep.PublishedAt != nil {
-			publishedAt = ep.PublishedAt
-		}
 		items = append(items, LibraryItem{
 			ID:        ep.LibraryItemID,
 			MediaType: "podcast",
@@ -155,11 +144,11 @@ func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit 
 			},
 			RecentEpisode: &PodcastEpisode{
 				ID:          ep.ID,
-				Index:       index,
+				Index:       ep.Index,
 				Title:       ep.Title,
 				Description: ep.Description,
 				Duration:    ep.Duration,
-				PublishedAt: publishedAt,
+				PublishedAt: ep.PublishedAt,
 				AddedAt:     ep.AddedAt,
 			},
 		})
@@ -172,26 +161,6 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// GetRecentlyAdded fetches and merges the "recently-added" personalized shelf for the given libraries.
-func (c *Client) GetRecentlyAdded(ctx context.Context, libraries []Library) ([]LibraryItem, error) {
-	items := make([]LibraryItem, 0)
-	for _, lib := range libraries {
-		sections, err := c.GetPersonalized(ctx, lib.ID)
-		if err != nil {
-			return nil, fmt.Errorf("get recently added for library %s: %w", lib.ID, err)
-		}
-		for _, section := range sections {
-			if section.ID != "recently-added" {
-				continue
-			}
-			items = append(items, section.Entities...)
-			break
-		}
-	}
-	SortRecentlyAdded(items)
-	return items, nil
 }
 
 // GetLibraryItems returns a paginated list of items in a library.
@@ -237,65 +206,12 @@ func (c *Client) getLibraryItems(ctx context.Context, libraryID string, page, li
 	return &resp, nil
 }
 
-const podcastSearchPageLimit = 100
-
-// SearchPodcastEpisodes scans podcast library items and returns episode-level prefix hits.
-func (c *Client) SearchPodcastEpisodes(ctx context.Context, libraryID, query string) ([]LibraryItem, error) {
-	normalized := strings.ToLower(strings.TrimSpace(query))
-	if normalized == "" {
-		return nil, nil
-	}
-
-	page := 0
-	items := make([]LibraryItem, 0)
-	for {
-		resp, err := c.GetLibraryItems(ctx, libraryID, page, podcastSearchPageLimit)
-		if err != nil {
-			return nil, fmt.Errorf("list podcast library items: %w", err)
-		}
-
-		ids := make([]string, len(resp.Results))
-		for i, li := range resp.Results {
-			ids[i] = li.ID
-		}
-		fullItems, err := c.GetLibraryItemsBatch(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range fullItems {
-			for _, episode := range item.Media.Episodes {
-				if !strings.HasPrefix(strings.ToLower(episode.Title), normalized) {
-					continue
-				}
-				resultItem := *item
-				ep := episode
-				resultItem.RecentEpisode = &ep
-				resultItem.Media.Episodes = []PodcastEpisode{ep}
-				items = append(items, resultItem)
-			}
-		}
-
-		if len(resp.Results) == 0 || len(resp.Results) < podcastSearchPageLimit {
-			break
-		}
-		loaded := (page + 1) * podcastSearchPageLimit
-		if resp.Total > 0 && loaded >= resp.Total {
-			break
-		}
-		page++
-	}
-
-	return items, nil
-}
-
 // GetLibraryItem returns a single library item by ID with full details (including episodes for podcasts).
 // include=progress makes ABS embed userMediaProgress; expanded=1 is required for include to take effect.
 func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*LibraryItem, error) {
 	path := fmt.Sprintf("/api/items/%s?expanded=1&include=progress", itemID)
-	logger.Debug("API request", "method", "GET", "path", path)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		logger.Error("get library item failed", "itemID", itemID, "err", err)
 		return nil, fmt.Errorf("get library item: %w", err)
 	}
 
@@ -331,6 +247,7 @@ func (c *Client) GetLibraryItemsBatch(ctx context.Context, ids []string) ([]*Lib
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
 			case <-ctx.Done():
+				errOnce.Do(func() { firstErr = fmt.Errorf("expand item %s: %w", id, ctx.Err()) })
 				return
 			}
 			item, err := c.GetLibraryItem(ctx, id)
@@ -375,9 +292,6 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 	if err != nil {
 		return nil, err
 	}
-	if series == nil {
-		return nil, nil
-	}
 
 	items := make([]LibraryItem, 0)
 	for page := 0; ; page++ {
@@ -387,7 +301,7 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 		}
 		items = append(items, resp.Results...)
 
-		if len(resp.Results) == 0 || len(resp.Results) < seriesPageLimit {
+		if len(resp.Results) < seriesPageLimit {
 			break
 		}
 		loaded := (page + 1) * seriesPageLimit
@@ -399,10 +313,10 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 	// The items list endpoint never includes user progress (ABS merges it
 	// client-side from /api/me), so merge it here. Best-effort: progress is
 	// decorative for the series view and must not fail the whole load.
-	if me, err := c.GetMe(ctx); err == nil && me != nil {
-		mergeMediaProgress(items, me.MediaProgress)
-	} else if err != nil {
+	if me, err := c.GetMe(ctx); err != nil {
 		logger.Debug("series progress merge skipped", "seriesID", seriesID, "err", err)
+	} else {
+		mergeMediaProgress(items, me.MediaProgress)
 	}
 
 	sortSeriesItems(items, seriesID)
@@ -492,10 +406,11 @@ const audioCheckSampleSize = 10
 // FilterAudioLibraries filters out "book" type libraries that contain no audio content
 // (ebooks without audio). Podcasts are always kept. For book libraries, it samples
 // items and checks if any has Duration > 0 to determine if it's an audio library.
-// Audio checks for book libraries run in parallel.
-func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Library, error) {
+// Audio checks for book libraries run in parallel. A failed check goes to the log,
+// and the library is kept.
+func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) []Library {
 	if len(libs) == 0 {
-		return libs, nil
+		return libs
 	}
 
 	logger.Debug("filtering audio libraries", "inputCount", len(libs))
@@ -545,7 +460,7 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) ([]Li
 	}
 
 	logger.Info("audio libraries filtered", "inputCount", len(libs), "outputCount", len(result))
-	return result, nil
+	return result
 }
 
 // libraryHasAudio checks if a "book" type library contains any audio items

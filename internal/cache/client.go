@@ -124,10 +124,11 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 }
 
 // FilterAudioLibraries filters audio libraries using cache or fetches from the API.
-func (c *Client) FilterAudioLibraries(ctx context.Context, libs []abs.Library) ([]abs.Library, error) {
-	return cached(c, filteredLibrariesKey, ttlLibraries, func() ([]abs.Library, error) {
-		return c.Client.FilterAudioLibraries(ctx, libs)
+func (c *Client) FilterAudioLibraries(ctx context.Context, libs []abs.Library) []abs.Library {
+	v, _ := cached(c, filteredLibrariesKey, ttlLibraries, func() ([]abs.Library, error) {
+		return c.Client.FilterAudioLibraries(ctx, libs), nil
 	})
+	return v
 }
 
 // GetBookmarks returns bookmarks from cache or fetches from the API.

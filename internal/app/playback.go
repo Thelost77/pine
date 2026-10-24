@@ -964,6 +964,10 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	client := m.client
 	item := msg.Item
 	episode := msg.Episode
+	episodeID := ""
+	if episode != nil {
+		episodeID = episode.ID
+	}
 	cacheStore := m.cacheStore
 	itemID := item.ID
 	libraryID := item.LibraryID
@@ -974,11 +978,7 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		var err error
 		if msg.Undo {
-			if episode != nil {
-				err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, 0, 0, false)
-			} else {
-				err = client.UpdateProgress(context.Background(), item.ID, 0, 0, false)
-			}
+			err = client.UpdateProgress(context.Background(), item.ID, episodeID, 0, 0, false)
 			if err != nil {
 				logger.Warn("failed to unmark finished", "err", err)
 				return PlaybackErrorMsg{Err: err}
@@ -992,11 +992,7 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 		if episode != nil && episode.Duration > 0 {
 			duration = episode.Duration
 		}
-		if episode != nil {
-			err = client.UpdateEpisodeProgress(context.Background(), item.ID, episode.ID, duration, 1.0, true)
-		} else {
-			err = client.UpdateProgress(context.Background(), item.ID, duration, 1.0, true)
-		}
+		err = client.UpdateProgress(context.Background(), item.ID, episodeID, duration, 1.0, true)
 		if err != nil {
 			logger.Warn("failed to mark as finished", "err", err)
 			return PlaybackErrorMsg{Err: err}

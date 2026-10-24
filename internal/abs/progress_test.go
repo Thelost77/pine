@@ -25,7 +25,7 @@ func TestUpdateProgressHTTP(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok")
-	err := c.UpdateProgress(context.Background(), "li-001", 500.5, 0.45, false)
+	err := c.UpdateProgress(context.Background(), "li-001", "", 500.5, 0.45, false)
 	if err != nil {
 		t.Fatalf("UpdateProgress() error: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestUpdateProgressFinishedHTTP(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok")
-	err := c.UpdateProgress(context.Background(), "li-002", 3600.0, 1.0, true)
+	err := c.UpdateProgress(context.Background(), "li-002", "", 3600.0, 1.0, true)
 	if err != nil {
 		t.Fatalf("UpdateProgress() error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestGetMediaProgressNotFoundReturnsError(t *testing.T) {
 	}
 }
 
-func TestUpdateEpisodeProgressHTTP(t *testing.T) {
+func TestUpdateProgressOfEpisodeHTTP(t *testing.T) {
 	var capturedBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/me/progress/li-pod-001/ep-001" {
@@ -188,9 +188,9 @@ func TestUpdateEpisodeProgressHTTP(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok")
-	err := c.UpdateEpisodeProgress(context.Background(), "li-pod-001", "ep-001", 300.0, 0.5, false)
+	err := c.UpdateProgress(context.Background(), "li-pod-001", "ep-001", 300.0, 0.5, false)
 	if err != nil {
-		t.Fatalf("UpdateEpisodeProgress() error: %v", err)
+		t.Fatalf("UpdateProgress() error: %v", err)
 	}
 
 	var body struct {

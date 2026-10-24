@@ -617,7 +617,7 @@ func (c *Cache) resolveLibrary(ctx context.Context, libraryID, libraryMediaType 
 	if err != nil {
 		return "", "", fmt.Errorf("fetch libraries: %w", err)
 	}
-	libs, _ = c.client.FilterAudioLibraries(ctx, libs)
+	libs = c.client.FilterAudioLibraries(ctx, libs)
 	if len(libs) == 0 {
 		return "", "", nil
 	}
