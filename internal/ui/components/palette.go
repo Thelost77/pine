@@ -76,12 +76,17 @@ type PaletteItem struct {
 	LibraryID string
 	ItemID    string
 	Data      any
+	// PlayAction is the action of the key p. With ActionNone, p is a letter
+	// of the search.
+	PlayAction PaletteAction
 }
 
 func (i PaletteItem) Title() string       { return i.Label }
 func (i PaletteItem) Description() string { return "" }
 func (i PaletteItem) FilterValue() string { return i.Label }
 
+// SearchFunc gives the items for a query. The palette calls it in Update at
+// each keystroke, so it must not block.
 type SearchFunc func(query string) []PaletteItem
 
 type Palette struct {
@@ -178,7 +183,7 @@ func NewPalette() Palette {
 func (p *Palette) SetStyles(styles ui.Styles) {
 	p.styles = styles
 	p.delegate.styles = styles
-	p.delegate.delegate.Styles.SelectedTitle = styles.Selected.Foreground(lipgloss.Color("#d3c6aa")).Bold(true).Padding(0, 0)
+	p.delegate.delegate.Styles.SelectedTitle = styles.Selected.Bold(true).Padding(0, 0)
 	p.delegate.delegate.Styles.NormalTitle = styles.Muted.Padding(0, 0)
 	p.list.SetDelegate(p.delegate)
 
@@ -206,6 +211,15 @@ func (p *Palette) Open(staticItems []PaletteItem, searchFn SearchFunc) {
 
 func (p *Palette) Close() {
 	p.visible = false
+}
+
+// Refresh applies the query again, for results that the search function did
+// not have at the last change of the query. With no query, it does nothing.
+func (p *Palette) Refresh() {
+	if !p.visible || strings.TrimSpace(p.input.Value()) == "" {
+		return
+	}
+	p.applyFilter(p.input.Value())
 }
 
 func (p *Palette) Visible() bool {
@@ -268,12 +282,6 @@ func (p *Palette) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (p *Palette) updateSearchInput(msg tea.KeyMsg) (tea.Cmd, bool) {
-	if msg.Type == tea.KeyEsc {
-		p.focusSearch = false
-		p.input.Blur()
-		return nil, true
-	}
-
 	if msg.Type == tea.KeyEnter || msg.Type == tea.KeyTab {
 		p.focusSearch = false
 		p.input.Blur()
@@ -341,16 +349,13 @@ func (p *Palette) updateList(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	if msg.String() == "p" {
-		if sel, ok := p.list.SelectedItem().(PaletteItem); ok && !sel.IsHeader && sel.Action == ActionContentNavigate {
-			p.lastAction = ActionPlayDirect
-			p.lastPayload = sel.Payload
-			p.lastLibraryID = sel.LibraryID
-			p.lastItemID = sel.ItemID
-			p.lastData = sel.Data
-			p.Close()
-			return nil, true
-		}
+	if sel, ok := p.playItem(); ok && msg.String() == "p" {
+		p.lastAction = sel.PlayAction
+		p.lastPayload = sel.Payload
+		p.lastLibraryID = sel.LibraryID
+		p.lastItemID = sel.ItemID
+		p.lastData = sel.Data
+		p.Close()
 		return nil, true
 	}
 
@@ -384,7 +389,18 @@ func (p *Palette) updateList(msg tea.KeyMsg) (tea.Cmd, bool) {
 			p.list.Select(0)
 		}
 	}
+	// The keys of the list, such as home and the page keys, do not skip
+	// headers.
+	if sel, ok := p.list.SelectedItem().(PaletteItem); ok && sel.IsHeader {
+		p.moveListSelection(1)
+	}
 	return cmd, true
+}
+
+// playItem returns the selected item if the key p plays it.
+func (p *Palette) playItem() (PaletteItem, bool) {
+	sel, ok := p.list.SelectedItem().(PaletteItem)
+	return sel, ok && !sel.IsHeader && sel.PlayAction != ActionNone
 }
 
 func (p *Palette) moveListSelection(delta int) {
@@ -483,7 +499,11 @@ func (p Palette) View() string {
 	if p.focusSearch {
 		footer = p.styles.Muted.Render("type to filter  esc/enter → results  esc esc close")
 	} else {
-		footer = p.styles.Muted.Render("↑↓/jk navigate  enter open  p play  tab → search  esc close")
+		play := ""
+		if _, ok := p.playItem(); ok {
+			play = "p play  "
+		}
+		footer = p.styles.Muted.Render("↑↓/jk navigate  enter open  " + play + "tab → search  esc close")
 	}
 
 	box := lipgloss.JoinVertical(lipgloss.Left, title, searchLine, listContent, footer)

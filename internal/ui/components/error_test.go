@@ -80,6 +80,22 @@ func TestDismiss(t *testing.T) {
 	}
 }
 
+func TestHandleDismissIgnoresTheTickOfAnEarlierError(t *testing.T) {
+	b := NewErrorBanner(defaultTestStyle())
+	b.SetError(errors.New("first"))
+	firstTick := ErrorDismissMsg{Generation: b.generation}
+	b.SetError(errors.New("second"))
+
+	b.HandleDismiss(firstTick)
+	if !b.HasError() {
+		t.Fatal("the tick of the first error dismissed the second error")
+	}
+	b.HandleDismiss(ErrorDismissMsg{Generation: b.generation})
+	if b.HasError() {
+		t.Error("the tick of the second error did not dismiss it")
+	}
+}
+
 func TestSetErrorNil(t *testing.T) {
 	b := NewErrorBanner(defaultTestStyle())
 	b.SetError(nil)

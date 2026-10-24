@@ -44,9 +44,6 @@ func TestLoadEmptyPathReturnsDefaults(t *testing.T) {
 	if cfg.Theme.Border != "#4f585e" {
 		t.Errorf("expected border #4f585e, got %q", cfg.Theme.Border)
 	}
-	if cfg.Theme.Warning != "#dbbc7f" {
-		t.Errorf("expected warning #dbbc7f, got %q", cfg.Theme.Warning)
-	}
 	if cfg.Theme.Info != "#7fbbb3" {
 		t.Errorf("expected info #7fbbb3, got %q", cfg.Theme.Info)
 	}

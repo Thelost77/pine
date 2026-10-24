@@ -287,7 +287,7 @@ func TestPalettePlayDirect(t *testing.T) {
 	p := NewPalette()
 	p.Open([]PaletteItem{
 		{Label: "Go Home", Action: ActionGoHome},
-		{Label: "Dune", Action: ActionContentNavigate, ItemID: "dune-1"},
+		{Label: "Dune", Action: ActionContentNavigate, PlayAction: ActionPlayDirect, ItemID: "dune-1"},
 	}, nil)
 
 	p.list.Select(1)
@@ -302,19 +302,82 @@ func TestPalettePlayDirect(t *testing.T) {
 	}
 }
 
-func TestPalettePlayDirectOnNonContentDoesNothing(t *testing.T) {
+// TestPalettePWithoutAPlayActionStartsASearch verifies that p is a search
+// letter when the selected item has nothing to play.
+func TestPalettePWithoutAPlayActionStartsASearch(t *testing.T) {
 	p := NewPalette()
 	p.Open([]PaletteItem{
 		{Label: "Go Home", Action: ActionGoHome},
 	}, nil)
 
-	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	for _, r := range "pause" {
+		_, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
 	if !p.Visible() {
-		t.Fatal("palette should stay open when 'p' on non-content item")
+		t.Fatal("palette should stay open when 'p' is typed")
+	}
+	if got := p.input.Value(); got != "pause" {
+		t.Errorf("search input = %q, want %q", got, "pause")
 	}
 	action, _, _, _, _ := p.SelectedAction()
 	if action != ActionNone {
 		t.Fatalf("expected ActionNone, got %v", action)
+	}
+}
+
+// TestPaletteFooterShowsPlayOnlyForAnItemWithAPlayAction verifies that the
+// footer offers p only when p plays the selected item.
+func TestPaletteFooterShowsPlayOnlyForAnItemWithAPlayAction(t *testing.T) {
+	p := NewPalette()
+	p.SetStyles(ui.DefaultStyles())
+	p.SetSize(80, 40)
+	p.Open([]PaletteItem{
+		{Label: "Song", Action: ActionOpenSelected},
+	}, nil)
+
+	if view := p.View(); strings.Contains(view, "p play") {
+		t.Errorf("footer offers p play for an item without a play action: %q", view)
+	}
+
+	p.Open([]PaletteItem{
+		{Label: "Dune", Action: ActionContentNavigate, PlayAction: ActionPlayDirect},
+	}, nil)
+	if view := p.View(); !strings.Contains(view, "p play") {
+		t.Errorf("footer does not offer p play for an item with a play action: %q", view)
+	}
+}
+
+// TestPaletteListKeysDoNotSelectAHeader verifies that the keys that the list
+// handles, such as home, select an action row and not a header.
+func TestPaletteListKeysDoNotSelectAHeader(t *testing.T) {
+	p := NewPalette()
+	p.Open([]PaletteItem{
+		{Label: "Navigation", IsHeader: true},
+		{Label: "Go Home", Action: ActionGoHome},
+		{Label: "Go Library", Action: ActionGoLibrary},
+	}, nil)
+
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if got := p.list.Index(); got != 1 {
+		t.Fatalf("index after home = %d, want 1 (the first action row)", got)
+	}
+	_, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if action, _, _, _, _ := p.SelectedAction(); action != ActionGoHome {
+		t.Errorf("action after home and enter = %v, want ActionGoHome", action)
+	}
+}
+
+// TestPaletteSelectedRowUsesTheThemeForeground verifies that the selected row
+// has the foreground color of the theme.
+func TestPaletteSelectedRowUsesTheThemeForeground(t *testing.T) {
+	theme := ui.DefaultTheme()
+	theme.Foreground = "#333333"
+	p := NewPalette()
+	p.SetStyles(ui.NewStyles(theme))
+
+	if got := p.delegate.delegate.Styles.SelectedTitle.GetForeground(); got != lipgloss.Color("#333333") {
+		t.Errorf("selected row foreground = %v, want #333333", got)
 	}
 }
 
