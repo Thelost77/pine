@@ -5,6 +5,7 @@ package mpris
 import (
 	"bufio"
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"reflect"
@@ -156,7 +157,7 @@ func TestServerOnSessionBus(t *testing.T) {
 		"xesam:artist":  []string{"J.R.R. Tolkien"},
 	}
 	wantRoot := map[string]any{
-		"CanQuit":             true,
+		"CanQuit":             false,
 		"CanRaise":            false,
 		"HasTrackList":        false,
 		"Identity":            "pinetest",
@@ -325,16 +326,31 @@ func TestServerOnSessionBus(t *testing.T) {
 			t.Errorf("Set(Rate) error: %v", err)
 		}
 		wantMessage(t, "Set(Rate)", SetRateMsg{Rate: 2})
-
-		// A value of a wrong type must give an error. It must not reach the app.
-		err := busCall(t, obj, testPropsIface+".Set", testPlayerIface, "Volume", dbus.MakeVariant("loud")).Err
-		if got, want := errorName(err), "org.freedesktop.DBus.Properties.Error.InvalidArg"; got != want {
-			t.Errorf("Set(Volume) with a string: error = %q (%v); want %q", got, err, want)
+		// MPRIS: a rate of 0 acts as Pause.
+		if err := busCall(t, obj, testPropsIface+".Set", testPlayerIface, "Rate", dbus.MakeVariant(0.0)).Err; err != nil {
+			t.Errorf("Set(Rate, 0) error: %v", err)
 		}
-		select {
-		case got := <-bridge.msgCh:
-			t.Errorf("Set(Volume) with a string sent %#v; want no message", got)
-		default:
+		wantMessage(t, "Set(Rate, 0)", PauseMsg{})
+
+		// A value of a wrong type or a value that is not a number must give
+		// an error. It must not reach the app.
+		for _, tt := range []struct {
+			property string
+			value    any
+		}{
+			{property: "Volume", value: "loud"},
+			{property: "Volume", value: math.NaN()},
+			{property: "Rate", value: math.NaN()},
+		} {
+			err := busCall(t, obj, testPropsIface+".Set", testPlayerIface, tt.property, dbus.MakeVariant(tt.value)).Err
+			if got, want := errorName(err), "org.freedesktop.DBus.Properties.Error.InvalidArg"; got != want {
+				t.Errorf("Set(%s, %v): error = %q (%v); want %q", tt.property, tt.value, got, err, want)
+			}
+			select {
+			case got := <-bridge.msgCh:
+				t.Errorf("Set(%s, %v) sent %#v; want no message", tt.property, tt.value, got)
+			default:
+			}
 		}
 	})
 
@@ -376,7 +392,7 @@ func TestServerOnSessionBus(t *testing.T) {
 
 		server.PlaybackChanged()
 		changed := waitChanged(t)
-		checkValues(t, changed, map[string]any{"PlaybackStatus": "Playing", "Rate": 1.5, "MinimumRate": 0.5, "MaximumRate": 4.0})
+		checkValues(t, changed, map[string]any{"PlaybackStatus": "Playing", "CanPlay": true, "CanPause": true, "CanGoNext": true, "CanGoPrevious": true, "Rate": 1.5, "MinimumRate": 0.5, "MaximumRate": 4.0})
 		metadata, ok := changed["Metadata"].Value().(map[string]dbus.Variant)
 		if !ok {
 			t.Fatalf("PlaybackChanged sent Metadata with signature %s; want a{sv}", changed["Metadata"].Signature())
@@ -388,7 +404,7 @@ func TestServerOnSessionBus(t *testing.T) {
 			emit func()
 			want map[string]any
 		}{
-			{name: "StatusChanged", emit: server.StatusChanged, want: map[string]any{"PlaybackStatus": "Playing"}},
+			{name: "StatusChanged", emit: server.StatusChanged, want: map[string]any{"PlaybackStatus": "Playing", "CanPlay": true, "CanPause": true, "CanGoNext": true, "CanGoPrevious": true}},
 			{name: "VolumeChanged", emit: server.VolumeChanged, want: map[string]any{"Volume": 0.75}},
 		} {
 			tt.emit()

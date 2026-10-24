@@ -976,9 +976,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return newM, cmd
 		}
 
-	case mpris.SeekMsg:
-		return m.handleSeek(msg.Offset)
-
 	case mpris.SeekRelativeMsg:
 		return m.handleSeek(msg.OffsetSeconds)
 
