@@ -15,6 +15,7 @@ import (
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
 	"github.com/Thelost77/pine/internal/spruce/screens/library"
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
+	"github.com/Thelost77/pine/internal/spruce/screens/queue"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -461,6 +462,65 @@ func TestE2E(t *testing.T) {
 				t.Errorf("tracks not sorted alphabetically at %d: %q before %q", i, all[i-1].Name, all[i].Name)
 				break
 			}
+		}
+	})
+
+	t.Run("G8_track_change_reports_previous_track_stopped", func(t *testing.T) {
+		mj := newMockJellyfin(t, 2)
+		m := New(nil, nil)
+		m.SetSize(80, 24)
+
+		tracks := []jellyfin.Track{
+			{ID: "trk-0", Name: "Track Zero", RunTimeTicks: 180 * 1e7, Artists: []string{"Artist A"}},
+			{ID: "trk-1", Name: "Track One", RunTimeTicks: 200 * 1e7, Artists: []string{"Artist A"}},
+		}
+		m, _ = driveToPlayback(mj, tracks, 0)(t, m)
+		firstSession := m.playSessionID
+		m.playerState.Position = 179
+
+		m, cmd := update(m, player.PlayerEndMsg{Generation: m.playGeneration, Reason: "eof"})
+		execCmd(m, cmd)
+
+		stopped := mj.stoppedCalls()
+		if len(stopped) != 1 {
+			t.Fatalf("expected 1 POST /Sessions/Playing/Stopped, got %d", len(stopped))
+		}
+		var req jellyfin.PlaybackProgressRequest
+		if err := json.Unmarshal([]byte(stopped[0]), &req); err != nil {
+			t.Fatalf("unmarshal stopped body: %v", err)
+		}
+		if req.ItemID != "trk-0" || req.PlaySessionId != firstSession || req.PositionTicks != 179*1e7 {
+			t.Errorf("stopped report = %+v, want trk-0 at 179 s in session %q", req, firstSession)
+		}
+		if started := mj.startedCalls(); len(started) != 2 {
+			t.Errorf("expected 2 POST /Sessions/Playing, got %d", len(started))
+		}
+	})
+
+	t.Run("G9_clear_queue_reports_stopped", func(t *testing.T) {
+		mj := newMockJellyfin(t, 1)
+		m := New(nil, nil)
+		m.SetSize(80, 24)
+
+		tracks := []jellyfin.Track{
+			{ID: "trk-0", Name: "Track Zero", RunTimeTicks: 180 * 1e7, Artists: []string{"Artist A"}},
+		}
+		m, _ = driveToPlayback(mj, tracks, 0)(t, m)
+		m.playerState.Position = 42
+
+		m, cmd := update(m, queue.QueueActionMsg{Action: "clear"})
+		execCmd(m, cmd)
+
+		stopped := mj.stoppedCalls()
+		if len(stopped) != 1 {
+			t.Fatalf("expected 1 POST /Sessions/Playing/Stopped, got %d", len(stopped))
+		}
+		var req jellyfin.PlaybackProgressRequest
+		if err := json.Unmarshal([]byte(stopped[0]), &req); err != nil {
+			t.Fatalf("unmarshal stopped body: %v", err)
+		}
+		if req.ItemID != "trk-0" || req.PositionTicks != 42*1e7 {
+			t.Errorf("stopped report = %+v, want trk-0 at 42 s", req)
 		}
 	})
 

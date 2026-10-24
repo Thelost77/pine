@@ -108,8 +108,15 @@ func (m *Model) SetQueue(tracks []jellyfin.Track, currentIndex int) {
 			IsCurrent: i == currentIndex,
 		}
 	}
-	cmd := m.list.SetItems(items)
-	_ = cmd // SetItems returns cmd for spinner/etc if needed
+	selected := m.list.Index()
+	if cmd := m.list.SetItems(items); cmd != nil {
+		// With a filter, SetItems matches the new items in a command. Apply the
+		// matches now, so that each visible row has its index in the queue.
+		// SetItems moves the selection to the first page before the matches
+		// arrive, so select the same row again.
+		m.list, _ = m.list.Update(cmd())
+		m.list.Select(max(0, min(selected, len(m.list.VisibleItems())-1)))
+	}
 	if !m.HasActiveFilter() && shouldSelectCurrent(oldTracks, tracks, oldCurrentIndex, currentIndex) {
 		if currentIndex >= 0 && currentIndex < len(items) {
 			m.list.Select(currentIndex)

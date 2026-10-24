@@ -66,7 +66,7 @@ func helpGroups() []components.HelpGroup {
 				{Key: "-", Desc: "speed down"},
 				{Key: "] / [", Desc: "volume up / down"},
 				{Key: "s", Desc: "shuffle"},
-				{Key: "S", Desc: "sleep timer"},
+				{Key: "S", Desc: "sleep timer (queue)"},
 			},
 		},
 	}

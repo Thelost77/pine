@@ -171,6 +171,25 @@ func TestPlaylistsModel_TrackFavoritePreservesActiveFilter(t *testing.T) {
 	}
 }
 
+func TestPlaylistsModel_IgnoresTracksOfAPlaylistThatIsNotOpen(t *testing.T) {
+	m := New(ui.DefaultStyles())
+	m.SetSize(80, 24)
+
+	_ = m.SelectPlaylist(jellyfin.Playlist{ID: "pl-a", Name: "A"})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m, _ = m.Update(PlaylistTracksLoadedMsg{PlaylistID: "pl-a", Tracks: []jellyfin.Track{{ID: "a-1", Name: "Alpha"}}})
+	if m.CurrentLevel() != LevelPlaylists {
+		t.Fatalf("a late reply for a closed playlist opened level %v", m.CurrentLevel())
+	}
+
+	_ = m.SelectPlaylist(jellyfin.Playlist{ID: "pl-b", Name: "B"})
+	m, _ = m.Update(PlaylistTracksLoadedMsg{PlaylistID: "pl-b", Tracks: []jellyfin.Track{{ID: "b-1", Name: "Bravo"}}})
+	m, _ = m.Update(PlaylistTracksLoadedMsg{PlaylistID: "pl-a", Tracks: []jellyfin.Track{{ID: "a-1", Name: "Alpha"}}})
+	if got := playlistTrackNames(m.Tracks()); !slices.Equal(got, []string{"Bravo"}) {
+		t.Fatalf("tracks of playlist B = %v, want [Bravo]", got)
+	}
+}
+
 func applyPlaylistKey(m Model, key tea.KeyMsg) Model {
 	var cmd tea.Cmd
 	m, cmd = m.Update(key)
