@@ -1,9 +1,11 @@
 package db
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 )
@@ -104,6 +106,52 @@ func TestOpen_ClearsObfuscatedAccountTokens(t *testing.T) {
 	}
 }
 
+// TestOpen_MigratesLegacySchema verifies that Open updates the database of
+// an old pine: its accounts table has the column token_encrypted, and its
+// sessions table has no column episode_id.
+func TestOpen_MigratesLegacySchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for _, query := range []string{
+		`CREATE TABLE accounts (id TEXT PRIMARY KEY, server_url TEXT NOT NULL, username TEXT NOT NULL, token_encrypted TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, item_id TEXT NOT NULL, session_id TEXT NOT NULL, current_time REAL NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
+		`INSERT INTO accounts VALUES ('a1', 'http://s', 'u', 'tok', 1, datetime('now'))`,
+		`INSERT INTO sessions VALUES ('last', 'item-1', 'sess-1', 10, 100, datetime('now'))`,
+	} {
+		if _, err := legacy.Exec(query); err != nil {
+			t.Fatalf("make legacy schema: %v", err)
+		}
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	account, err := store.GetDefaultAccount()
+	if err != nil || account.ID != "a1" || account.Token != "tok" {
+		t.Fatalf("GetDefaultAccount() = %+v, %v; want a1 with the token tok", account, err)
+	}
+	last, err := store.GetLastSession()
+	if err != nil || last.ItemID != "item-1" || last.EpisodeID != "" {
+		t.Fatalf("GetLastSession() = %+v, %v; want item-1 with no episode", last, err)
+	}
+	if err := store.SaveListeningSession(ListeningSession{ItemID: "pod-1", EpisodeID: "ep-1"}); err != nil {
+		t.Fatalf("SaveListeningSession() error: %v", err)
+	}
+	last, err = store.GetLastSession()
+	if err != nil || last.ItemID != "pod-1" || last.EpisodeID != "ep-1" {
+		t.Fatalf("GetLastSession() after save = %+v, %v; want pod-1 and ep-1", last, err)
+	}
+}
+
 func TestOpen_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "test.db")
@@ -140,7 +188,7 @@ func TestOpen_ParallelWritesWait(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs <- s.SaveListeningSession(ListeningSession{ItemID: "item", SessionID: "session", CurrentTime: float64(i)})
+			errs <- s.SaveListeningSession(ListeningSession{ItemID: "item-" + strconv.Itoa(i)})
 		}(i)
 	}
 	wg.Wait()

@@ -12,14 +12,12 @@ type Account struct {
 	ServerURL string
 	Username  string
 	Token     string
-	IsDefault bool
 	CreatedAt time.Time
 }
 
-// SaveAccount inserts or updates an account. If it's the first account, it
-// becomes the default automatically. When the saved account is (or becomes)
-// the default, any other accounts are unset as default atomically within a
-// transaction so that only one default can exist at a time.
+// SaveAccount inserts or updates an account and makes it the default. It
+// deletes each other account in the same transaction, so that the database
+// keeps no token of an earlier login.
 func (s *Store) SaveAccount(a Account) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -27,36 +25,19 @@ func (s *Store) SaveAccount(a Account) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// If no accounts exist yet, make this one the default.
-	var count int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM accounts`).Scan(&count); err != nil {
-		return fmt.Errorf("counting accounts: %w", err)
-	}
-	if count == 0 {
-		a.IsDefault = true
-	}
-
-	isDefault := 0
-	if a.IsDefault {
-		isDefault = 1
-	}
-
-	// Unset the default flag on all other accounts before upserting this one.
-	if a.IsDefault {
-		if _, err := tx.Exec(`UPDATE accounts SET is_default = 0 WHERE id != ?`, a.ID); err != nil {
-			return fmt.Errorf("unsetting other defaults: %w", err)
-		}
+	if _, err := tx.Exec(`DELETE FROM accounts WHERE id != ?`, a.ID); err != nil {
+		return fmt.Errorf("deleting other accounts: %w", err)
 	}
 
 	_, err = tx.Exec(`
 		INSERT INTO accounts (id, server_url, username, token, is_default, created_at)
-		VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
+		VALUES (?, ?, ?, ?, 1, COALESCE((SELECT created_at FROM accounts WHERE id = ?), datetime('now')))
 		ON CONFLICT(id) DO UPDATE SET
 			server_url = excluded.server_url,
 			username   = excluded.username,
 			token      = excluded.token,
 			is_default = excluded.is_default
-	`, a.ID, a.ServerURL, a.Username, a.Token, isDefault, a.ID)
+	`, a.ID, a.ServerURL, a.Username, a.Token, a.ID)
 	if err != nil {
 		return fmt.Errorf("saving account: %w", err)
 	}
@@ -68,10 +49,11 @@ func (s *Store) SaveAccount(a Account) error {
 }
 
 // GetDefaultAccount returns the account marked as default.
-// Returns an error if no default account is set.
+// Returns an error if no default account is set. A database of an earlier
+// pine can have more accounts, which are not the default.
 func (s *Store) GetDefaultAccount() (Account, error) {
 	row := s.DB.QueryRow(`
-		SELECT id, server_url, username, token, is_default, created_at
+		SELECT id, server_url, username, token, created_at
 		FROM accounts WHERE is_default = 1 LIMIT 1
 	`)
 	return scanAccount(row)
@@ -80,13 +62,11 @@ func (s *Store) GetDefaultAccount() (Account, error) {
 // scanAccount scans a single account from a *sql.Row.
 func scanAccount(row *sql.Row) (Account, error) {
 	var a Account
-	var isDefault int
 	var createdAt string
-	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &a.Token, &isDefault, &createdAt)
+	err := row.Scan(&a.ID, &a.ServerURL, &a.Username, &a.Token, &createdAt)
 	if err != nil {
 		return Account{}, fmt.Errorf("scanning account: %w", err)
 	}
-	a.IsDefault = isDefault == 1
 	a.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 	return a, nil
 }

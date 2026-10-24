@@ -860,7 +860,6 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	episodeID := m.episodeID
 	currentTime := m.player.Position
 	timeListened := m.timeListened
-	duration := m.player.Duration
 	store := m.db
 
 	cmds := []tea.Cmd{
@@ -868,15 +867,12 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 		func() tea.Msg {
 			if store != nil {
 				if err := store.SaveListeningSession(db.ListeningSession{
-					ItemID:      itemID,
-					EpisodeID:   episodeID,
-					SessionID:   sessionID,
-					CurrentTime: currentTime,
-					Duration:    duration,
+					ItemID:    itemID,
+					EpisodeID: episodeID,
 				}); err != nil {
-					logger.Warn("failed to save listening session", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+					logger.Warn("failed to save listening session", "itemID", itemID, "err", err)
 				} else {
-					logger.Debug("listening session saved", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration)
+					logger.Debug("listening session saved", "itemID", itemID)
 				}
 			}
 			return nil
@@ -1115,15 +1111,12 @@ func (m Model) stopPlaybackCmds() (Model, tea.Cmd, tea.Cmd) {
 		func() tea.Msg {
 			if store != nil && itemID != "" {
 				if err := store.SaveListeningSession(db.ListeningSession{
-					ItemID:      itemID,
-					EpisodeID:   episodeID,
-					SessionID:   sessionID,
-					CurrentTime: currentTime,
-					Duration:    duration,
+					ItemID:    itemID,
+					EpisodeID: episodeID,
 				}); err != nil {
-					logger.Warn("failed to save listening session on stop", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+					logger.Warn("failed to save listening session on stop", "itemID", itemID, "err", err)
 				} else {
-					logger.Debug("listening session saved on stop", "itemID", itemID, "sessionID", sessionID, "currentTime", currentTime, "duration", duration)
+					logger.Debug("listening session saved on stop", "itemID", itemID)
 				}
 			}
 			return nil
@@ -1197,15 +1190,12 @@ func (m Model) Cleanup() {
 
 	if m.db != nil && m.itemID != "" {
 		if err := m.db.SaveListeningSession(db.ListeningSession{
-			ItemID:      m.itemID,
-			EpisodeID:   m.episodeID,
-			SessionID:   m.sessionID,
-			CurrentTime: currentTime,
-			Duration:    duration,
+			ItemID:    m.itemID,
+			EpisodeID: m.episodeID,
 		}); err != nil {
-			logger.Warn("cleanup: failed to save listening session", "itemID", m.itemID, "episodeID", m.episodeID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration, "err", err)
+			logger.Warn("cleanup: failed to save listening session", "itemID", m.itemID, "episodeID", m.episodeID, "err", err)
 		} else {
-			logger.Debug("cleanup: listening session saved", "itemID", m.itemID, "episodeID", m.episodeID, "sessionID", m.sessionID, "currentTime", currentTime, "duration", duration)
+			logger.Debug("cleanup: listening session saved", "itemID", m.itemID, "episodeID", m.episodeID)
 		}
 	}
 }

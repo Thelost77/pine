@@ -355,7 +355,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ServerURL: msg.ServerURL,
 				Username:  msg.Username,
 				Token:     msg.Token,
-				IsDefault: true,
 			}); err != nil {
 				logger.Warn("failed to save account", "err", err)
 			}

@@ -2327,11 +2327,8 @@ func TestE2E_SessionRestore(t *testing.T) {
 
 	// Save a session to the DB simulating a previous listening session
 	if err := store.SaveListeningSession(db.ListeningSession{
-		ItemID:      "item-001",
-		EpisodeID:   "",
-		SessionID:   "sess-old",
-		CurrentTime: 100.0,
-		Duration:    3600.0,
+		ItemID:    "item-001",
+		EpisodeID: "",
 	}); err != nil {
 		t.Fatalf("SaveListeningSession: %v", err)
 	}
@@ -2373,11 +2370,8 @@ func TestE2E_SessionRestorePodcastMissingEpisodeSkipsSilently(t *testing.T) {
 	m = e2eSetSize(m, 120, 40)
 
 	if err := store.SaveListeningSession(db.ListeningSession{
-		ItemID:      "pod-001",
-		EpisodeID:   "pod-001-ep-missing",
-		SessionID:   "sess-old-pod",
-		CurrentTime: 100.0,
-		Duration:    1800.0,
+		ItemID:    "pod-001",
+		EpisodeID: "pod-001-ep-missing",
 	}); err != nil {
 		t.Fatalf("SaveListeningSession: %v", err)
 	}
@@ -2418,11 +2412,8 @@ func TestE2E_SessionRestorePodcastNoTracksSkipsSilently(t *testing.T) {
 	m = e2eSetSize(m, 120, 40)
 
 	if err := store.SaveListeningSession(db.ListeningSession{
-		ItemID:      "pod-001",
-		EpisodeID:   "pod-001-ep-001",
-		SessionID:   "sess-old-pod",
-		CurrentTime: 100.0,
-		Duration:    1800.0,
+		ItemID:    "pod-001",
+		EpisodeID: "pod-001-ep-001",
 	}); err != nil {
 		t.Fatalf("SaveListeningSession: %v", err)
 	}
