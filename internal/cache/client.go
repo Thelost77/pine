@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -24,6 +25,14 @@ type Client struct {
 	*abs.Client
 	store        *Store
 	OnInvalidate func()
+
+	// generation counts the calls of invalidate. cached does not store the
+	// value of a fetch that started in an earlier generation, because the
+	// value can be from before the change. invalidate holds mu while it
+	// clears the store, and cached holds it while it checks the generation
+	// and stores the value, so no old value comes after the clear.
+	mu         sync.RWMutex
+	generation uint64
 }
 
 // NewClient creates a caching wrapper around the given ABS client.
@@ -52,9 +61,17 @@ func cached[T any](c *Client, key string, ttl time.Duration, fetch func() (T, er
 		return v, nil
 	}
 
+	c.mu.RLock()
+	generation := c.generation
+	c.mu.RUnlock()
 	v, err := fetch()
 	if err != nil {
 		return v, err
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.generation != generation {
+		return v, nil
 	}
 	if err := c.store.Put(key, v, ttl); err != nil {
 		logger.Warn("cache write failed", "key", key, "err", err)
@@ -142,11 +159,13 @@ func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]abs.Bookmar
 // tells the in-memory caches (the search cache) to drop their snapshots. A
 // change is rare, so it clears each key.
 func (c *Client) invalidate() {
-	if c.store == nil {
-		return
-	}
-	if err := c.store.ClearAll(); err != nil {
-		logger.Warn("cache clear failed", "err", err)
+	if c.store != nil {
+		c.mu.Lock()
+		c.generation++
+		if err := c.store.ClearAll(); err != nil {
+			logger.Warn("cache clear failed", "err", err)
+		}
+		c.mu.Unlock()
 	}
 	if c.OnInvalidate != nil {
 		c.OnInvalidate()

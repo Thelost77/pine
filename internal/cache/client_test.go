@@ -424,3 +424,72 @@ func TestClient_InvalidationClearsCache(t *testing.T) {
 		})
 	}
 }
+
+// TestClient_InvalidationWithNilStoreTellsTheInMemoryCaches verifies that a
+// client with no store still tells the search cache about a change.
+func TestClient_InvalidationWithNilStoreTellsTheInMemoryCaches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), nil)
+	invalidated := false
+	client.OnInvalidate = func() { invalidated = true }
+	if err := client.DeleteItem(context.Background(), "li1", false); err != nil {
+		t.Fatalf("DeleteItem error: %v", err)
+	}
+	if !invalidated {
+		t.Error("DeleteItem did not call OnInvalidate")
+	}
+}
+
+// TestClient_FetchThatEndsAfterAnInvalidationIsNotCached verifies that a
+// fetch that started before a change on the server does not put its old
+// value in the cache after the change cleared it.
+func TestClient_FetchThatEndsAfterAnInvalidationIsNotCached(t *testing.T) {
+	var title atomic.Value
+	title.Store("old")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var held atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			title.Store("new")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		body := `{"id":"li1","media":{"metadata":{"title":"` + title.Load().(string) + `"}}}`
+		if held.CompareAndSwap(false, true) {
+			close(started)
+			<-release
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	client := NewClient(abs.NewClient(srv.URL, "tok"), NewStore(openTestDB(t)))
+	ctx := context.Background()
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.GetLibraryItem(ctx, "li1")
+		done <- err
+	}()
+	<-started
+	if err := client.DeleteItem(ctx, "li1", false); err != nil {
+		t.Fatalf("DeleteItem error: %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first GetLibraryItem error: %v", err)
+	}
+
+	item, err := client.GetLibraryItem(ctx, "li1")
+	if err != nil {
+		t.Fatalf("second GetLibraryItem error: %v", err)
+	}
+	if got := item.Media.Metadata.Title; got != "new" {
+		t.Errorf("title after the change = %q, want new", got)
+	}
+}
