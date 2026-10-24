@@ -281,24 +281,26 @@ func (m Model) seekToChapter(target float64, ok bool) (Model, tea.Cmd) {
 
 // seekToBookGlobalPosition seeks to a book-global position. If the position
 // falls within the current track, seeks mpv directly. Otherwise stops playback
-// and starts a new session so ABS picks the correct track.
+// and starts a new session so ABS picks the correct track. An episode has one
+// track, so a seek in an episode always seeks mpv.
 func (m Model) seekToBookGlobalPosition(bookPos float64) (Model, tea.Cmd) {
 	trackDur := m.trackDuration
 	if trackDur == 0 {
 		trackDur = m.player.Duration
 	}
 	trackEnd := m.trackStartOffset + trackDur
-	if bookPos >= m.trackStartOffset && bookPos < trackEnd {
+	if m.episodeID != "" || (bookPos >= m.trackStartOffset && bookPos < trackEnd) {
 		trackRelative := bookPos - m.trackStartOffset
 		logger.Debug("in-track seek", "bookPosition", bookPos, "trackStart", m.trackStartOffset, "trackEnd", trackEnd, "trackRelative", trackRelative)
 		m.player.Position = bookPos
 		m.seekPending = true
 		m.seekPendingSince = time.Now()
+		m.syncMprisState()
 		mpvPlayer := m.mpv
-		return m, func() tea.Msg {
+		return m, tea.Batch(func() tea.Msg {
 			_ = mpvPlayer.Seek(trackRelative)
 			return nil
-		}
+		}, m.mprisSeekedCmd())
 	}
 
 	// Cross-track seek: restart playback at the new book-global position.

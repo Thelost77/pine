@@ -248,7 +248,7 @@ func TestPlaybackLifecycleIntegration(t *testing.T) {
 	}
 
 	// --- Step 6: Inject SyncTickMsg → verify sync fires ---
-	result, cmd = m.Update(SyncTickMsg{})
+	result, cmd = m.Update(SyncTickMsg{Generation: m.playGeneration})
 	m = result.(Model)
 
 	if cmd == nil {
@@ -1662,14 +1662,14 @@ func TestSeriesContinueAPIErrorShowsBanner(t *testing.T) {
 }
 
 func TestEpisodePlaybackClearsSeriesContext(t *testing.T) {
-	mp := &mockPlayer{}
-	m := NewWithPlayer(config.Default(), nil, nil, nil, mp)
+	m := newPlaybackTestModel()
 	m.playbackSeriesID = "series-prev"
 	m.playbackLibraryID = "lib-prev"
 
 	m, _ = m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{
 		Item: abs.LibraryItem{
 			ID:        "pod-001",
+			LibraryID: "lib-pod",
 			MediaType: "podcast",
 			Media: abs.Media{
 				Metadata: abs.MediaMetadata{Title: "Podcast Show"},
@@ -1684,8 +1684,8 @@ func TestEpisodePlaybackClearsSeriesContext(t *testing.T) {
 	if m.playbackSeriesID != "" {
 		t.Fatalf("playbackSeriesID = %q, want empty after episode start", m.playbackSeriesID)
 	}
-	if m.playbackLibraryID != "" {
-		t.Fatalf("playbackLibraryID = %q, want empty after episode start", m.playbackLibraryID)
+	if m.playbackLibraryID != "lib-pod" {
+		t.Fatalf("playbackLibraryID = %q, want lib-pod, the library of the podcast", m.playbackLibraryID)
 	}
 }
 
@@ -1836,7 +1836,7 @@ func TestLoadCaptionsCmdDownloadsMatchingVTT(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := loadCaptionsCmd(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), "item-001", "book.m4b", "vtt-1", 7)
+	cmd := loadCaptionsCmd(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), "item-001", "book.m4b", "vtt-1", true, 7)
 	msg := cmd()
 	loaded, ok := msg.(CaptionLoadedMsg)
 	if !ok {
@@ -1862,7 +1862,7 @@ func TestLoadCaptionsCmdNoSidecar(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	msg := loadCaptionsCmd(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), "item-001", "book.m4b", "", 1)()
+	msg := loadCaptionsCmd(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), "item-001", "book.m4b", "", false, 1)()
 	loaded, ok := msg.(CaptionLoadedMsg)
 	if !ok {
 		t.Fatalf("got %T", msg)
@@ -2024,5 +2024,275 @@ func TestBuildVersion(t *testing.T) {
 		if got := buildVersion(test.input); got != test.want {
 			t.Errorf("buildVersion(%q) = %q, want %q", test.input, got, test.want)
 		}
+	}
+}
+
+// TestBuildBookPlaySessionMsgAtEndOfBookSelectsLastTrack verifies that the
+// position of the end of a book plays the end of the last track. handleSeek
+// gives that position for a seek forward near the end of the book.
+func TestBuildBookPlaySessionMsgAtEndOfBookSelectsLastTrack(t *testing.T) {
+	client := cache.NewClient(abs.NewClient("http://test", "tok"), nil)
+	session := &abs.PlaySession{
+		ID: "sess",
+		AudioTracks: []abs.AudioTrack{
+			{Index: 0, StartOffset: 0, ContentURL: "/s/track0.mp3", Duration: 1800},
+			{Index: 1, StartOffset: 1800, ContentURL: "/s/track1.mp3", Duration: 1800},
+		},
+	}
+	msg, err := buildBookPlaySessionMsg(client, session, "item-001", "Title", nil, 3600, 3600)
+	if err != nil {
+		t.Fatalf("buildBookPlaySessionMsg: %v", err)
+	}
+	if msg.StreamURL != "http://test/s/track1.mp3" {
+		t.Errorf("StreamURL = %q, want the last track", msg.StreamURL)
+	}
+	if msg.Session.TrackStartOffset != 1800 || msg.Session.CurrentTime != 1800 {
+		t.Errorf("track start = %v, seek time = %v; want 1800, 1800 (the end of the last track)", msg.Session.TrackStartOffset, msg.Session.CurrentTime)
+	}
+}
+
+// TestSeekToEndOfEpisodeSeeksPlayer verifies that a seek forward near the end
+// of a podcast episode seeks the player. An episode has one track, so the seek
+// must not start a new session.
+func TestSeekToEndOfEpisodeSeeksPlayer(t *testing.T) {
+	log, client := newFakeABS(t, nil, nil)
+	mp := &mockPlayer{position: 990, duration: 1000}
+	m := NewWithPlayer(config.Default(), nil, client, nil, mp)
+	m.sessionID = "sess-ep"
+	m.itemID = "pod-001"
+	m.episodeID = "ep-001"
+	m.player.Playing = true
+	m.player.Position = 990
+	m.player.Duration = 1000
+	m.trackDuration = 1000
+
+	m, cmd := m.handleSeek(30)
+	m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+
+	if m.sessionID != "sess-ep" {
+		t.Errorf("sessionID = %q, want sess-ep: the seek restarted the playback", m.sessionID)
+	}
+	if n := len(requestsTo(log, http.MethodPost, "/api/items/pod-001/play")); n != 0 {
+		t.Errorf("the seek sent %d book play requests for the podcast", n)
+	}
+	if pos, _ := mp.GetPosition(); pos != 1000 {
+		t.Errorf("player position = %v, want 1000", pos)
+	}
+}
+
+// TestSyncTickOfEarlierPlaybackEndsItsChain verifies that a sync tick of an
+// earlier playback sends nothing and starts no tick. Each playback starts its
+// own ticks, so the ticks of an earlier playback must end.
+func TestSyncTickOfEarlierPlaybackEndsItsChain(t *testing.T) {
+	const syncPath = "/api/session/sess-abc/sync"
+	log, client := newFakeABS(t, nil, nil)
+	m := newSyncTestModel(client)
+	m.playGeneration = 2
+	m = listen(m, 110)
+
+	result, cmd := m.Update(SyncTickMsg{Generation: 1})
+	if cmd != nil {
+		t.Error("the sync tick of an earlier playback returned a command")
+	}
+	feedCmd(result.(Model), cmd)
+	if n := len(requestsTo(log, http.MethodPost, syncPath)); n != 0 {
+		t.Errorf("the sync tick of an earlier playback sent %d syncs", n)
+	}
+}
+
+// newTestCacheStore returns a cache store in a new database file.
+func newTestCacheStore(t *testing.T) *cache.Store {
+	t.Helper()
+	dbStore, err := db.Open(t.TempDir() + "/cache.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = dbStore.Close() })
+	return cache.NewStore(dbStore)
+}
+
+// TestPlaybackSwitchEvictsCachesOfPlayingItem verifies that the start of
+// another book or episode evicts the cached series and home shelves of the
+// item that played, not those of the new item.
+func TestPlaybackSwitchEvictsCachesOfPlayingItem(t *testing.T) {
+	book := testLibraryItem("book-b", "Book B")
+	book.LibraryID = "lib-b"
+	book.Media.Metadata.Series = &abs.SeriesSequence{ID: "series-b", Name: "Series B", Sequence: "1"}
+	podcast := testPodcastItem("pod-001", "A Podcast")
+	podcast.LibraryID = "lib-pod"
+
+	tests := []struct {
+		name  string
+		start func(Model) (Model, tea.Cmd)
+	}{
+		{"book", func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayCmd(detail.PlayCmd{Item: book})
+		}},
+		{"episode", func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: podcast, Episode: podcast.Media.Episodes[0]})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, client := newFakeABS(t, nil, nil)
+			cacheStore := newTestCacheStore(t)
+			seedCache(t, cacheStore, cache.SeriesContentsKey("series-a"), &abs.SeriesContents{})
+			seedCache(t, cacheStore, cache.PersonalizedKey("lib-a"), []abs.PersonalizedResponse{})
+
+			m := NewWithPlayer(config.Default(), nil, client, cacheStore, &mockPlayer{})
+			m.sessionID = "sess-a"
+			m.itemID = "book-a"
+			m.playbackSeriesID = "series-a"
+			m.playbackLibraryID = "lib-a"
+
+			m, cmd := tt.start(m)
+			feedCmdWithin(m, cmd, slowCmdWait)
+
+			assertEvicted[abs.SeriesContents](t, cacheStore, cache.SeriesContentsKey("series-a"))
+			assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, cache.PersonalizedKey("lib-a"))
+		})
+	}
+}
+
+// TestStopEvictsHomeShelvesOfItemWithoutSeries verifies that the stop of a
+// book with no series, or of a podcast episode, evicts the cached home shelves
+// of its library. The shelves show the progress of the item.
+func TestStopEvictsHomeShelvesOfItemWithoutSeries(t *testing.T) {
+	book := testLibraryItem("book-001", "A Book")
+	book.LibraryID = "lib-books"
+	podcast := testPodcastItem("pod-001", "A Podcast")
+	podcast.LibraryID = "lib-pods"
+	session := abs.PlaySession{
+		ID:          "sess-new",
+		AudioTracks: []abs.AudioTrack{{ContentURL: "/s/audio.mp3", Duration: 1800}},
+	}
+
+	tests := []struct {
+		name      string
+		libraryID string
+		start     func(Model) (Model, tea.Cmd)
+	}{
+		{"book", "lib-books", func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayCmd(detail.PlayCmd{Item: book})
+		}},
+		{"episode", "lib-pods", func(m Model) (Model, tea.Cmd) {
+			return m.handlePlayEpisodeCmd(detail.PlayEpisodeCmd{Item: podcast, Episode: podcast.Media.Episodes[0]})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, client := newFakeABS(t, map[string]abs.PlaySession{
+				"/api/items/book-001/play":               session,
+				"/api/items/pod-001/play/pod-001-ep-001": session,
+			}, nil)
+			cacheStore := newTestCacheStore(t)
+			m := NewWithPlayer(config.Default(), nil, client, cacheStore, &mockPlayer{})
+
+			m, cmd := tt.start(m)
+			m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+			if !m.isPlaying() {
+				t.Fatal("the playback did not start")
+			}
+			seedCache(t, cacheStore, cache.PersonalizedKey(tt.libraryID), []abs.PersonalizedResponse{})
+
+			m, cmd = m.stopPlayback()
+			feedCmdWithin(m, cmd, slowCmdWait)
+
+			assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, cache.PersonalizedKey(tt.libraryID))
+		})
+	}
+}
+
+// TestPlaybackStartWithSessionFilesFetchesNoFiles verifies that the start of
+// a session that gives the files of the item fetches no file list for the
+// captions. The session has no VTT file, so the item has none.
+func TestPlaybackStartWithSessionFilesFetchesNoFiles(t *testing.T) {
+	session := abs.PlaySession{
+		ID: "sess-new",
+		AudioTracks: []abs.AudioTrack{
+			{ContentURL: "/s/book.m4b", Duration: 3600, Metadata: abs.FileMetadata{Filename: "book.m4b"}},
+		},
+		LibraryItem: abs.PlaySessionItem{
+			LibraryFiles: []abs.LibraryFile{{Ino: "audio-1", Metadata: abs.FileMetadata{Filename: "book.m4b"}}},
+		},
+	}
+	log, client := newFakeABS(t, map[string]abs.PlaySession{"/api/items/book-001/play": session}, nil)
+	m := NewWithPlayer(config.Default(), nil, client, nil, &mockPlayer{})
+
+	m, cmd := m.handlePlayCmd(detail.PlayCmd{Item: testLibraryItem("book-001", "A Book")})
+	m, cmd = feedCmdWithin(m, cmd, slowCmdWait)
+	if !m.isPlaying() {
+		t.Fatal("the playback did not start")
+	}
+	feedCmdWithin(m, cmd, slowCmdWait)
+
+	if n := len(requestsTo(log, http.MethodGet, "/api/items/book-001")); n != 0 {
+		t.Errorf("the start fetched the item %d times for its files", n)
+	}
+}
+
+// TestRestoreSkippedAfterPlayRequest verifies that the restore at the start
+// does nothing after a play request of the user: the request of the user
+// stays, with its series.
+func TestRestoreSkippedAfterPlayRequest(t *testing.T) {
+	m := newPlaybackTestModel()
+	result, cmd := m.Update(detail.PlayCmd{Item: abs.LibraryItem{
+		ID:        "item-b",
+		LibraryID: "lib-1",
+		MediaType: "book",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Series: &abs.SeriesSequence{ID: "series-b"}}},
+	}})
+	m = result.(Model)
+	if cmd == nil {
+		t.Fatal("PlayCmd returns no play request")
+	}
+
+	result, cmd = m.Update(RestoreSessionMsg{Item: &abs.LibraryItem{
+		ID:        "item-a",
+		LibraryID: "lib-1",
+		MediaType: "book",
+		Media:     abs.Media{Metadata: abs.MediaMetadata{Series: &abs.SeriesSequence{ID: "series-a"}}},
+	}})
+	m = result.(Model)
+	if cmd != nil {
+		t.Error("the restore starts a playback after a play request")
+	}
+	if m.playbackSeriesID != "series-b" {
+		t.Errorf("playbackSeriesID = %q, want series-b", m.playbackSeriesID)
+	}
+}
+
+// TestRestoredSessionClosedWhilePlaying verifies that a restored session that
+// comes while an item plays does not replace the playback. pine closes the
+// restored session.
+func TestRestoredSessionClosedWhilePlaying(t *testing.T) {
+	log := &apiLog{}
+	srv := newMockABSServer(log)
+	defer srv.Close()
+	client := abs.NewClient(srv.URL, "tok")
+	m := NewWithPlayer(config.Default(), nil, cache.NewClient(client, nil), nil, &mockPlayer{})
+	result, _ := m.Update(PlaySessionMsg{Session: PlaySessionData{SessionID: "sess-b", ItemID: "item-b", Duration: 3600, TrackDuration: 3600}})
+	m = result.(Model)
+
+	result, cmd := m.Update(RestorePlaySessionMsg{PlaySessionMsg: PlaySessionMsg{Session: PlaySessionData{
+		SessionID:     "sess-a",
+		ItemID:        "item-a",
+		Duration:      3600,
+		TrackDuration: 3600,
+	}}})
+	m = result.(Model)
+	if m.sessionID != "sess-b" || m.itemID != "item-b" {
+		t.Errorf("session = %q, item = %q, want sess-b and item-b", m.sessionID, m.itemID)
+	}
+
+	if cmd == nil {
+		t.Fatal("pine does not close the restored session")
+	}
+	cmd()
+	if log.count(http.MethodPost, "/api/session/sess-a/close") != 1 {
+		t.Errorf("requests = %v, want one close of sess-a", summarizeRequests(log.get()))
+	}
+	if log.count(http.MethodPost, "/api/session/sess-b/close") != 0 {
+		t.Error("pine closed the session of the playback")
 	}
 }

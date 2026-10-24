@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -78,12 +80,6 @@ func (p *mockPlayer) Seek(seconds float64) error {
 	p.position = seconds
 	return nil
 }
-func (p *mockPlayer) SeekRelative(seconds float64) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.position += seconds
-	return nil
-}
 func (p *mockPlayer) SetSpeed(speed float64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -91,7 +87,6 @@ func (p *mockPlayer) SetSpeed(speed float64) error {
 	return nil
 }
 func (p *mockPlayer) SetVolume(vol int) error { return nil }
-func (p *mockPlayer) GetVolume() (int, error) { return 100, nil }
 func (p *mockPlayer) Quit() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -223,8 +218,8 @@ func TestMetadataSavedUpdatesDetailQueueAndPlayer(t *testing.T) {
 
 	result, cmd := m.Update(metadataedit.SavedMsg{ItemID: updated.ID, Item: &updated})
 	m = result.(Model)
-	if cmd != nil {
-		t.Fatalf("cmd = %v, want nil", cmd)
+	if cmd == nil || cmd() != (PrewarmDoneMsg{}) {
+		t.Fatalf("cmd = %v, want only the prewarm of the search cache", cmd)
 	}
 	if got := m.detail.Item().Media.Metadata.Title; got != "New Title" {
 		t.Fatalf("detail title = %q, want New Title", got)
@@ -267,8 +262,8 @@ func TestEpisodeMetadataSavedUpdatesDetailQueueAndPlayer(t *testing.T) {
 
 	result, cmd := m.Update(metadataedit.SavedEpisodeMsg{ItemID: updated.ID, EpisodeID: "ep-1", Item: &updated})
 	m = result.(Model)
-	if cmd != nil {
-		t.Fatalf("cmd = %v, want nil", cmd)
+	if cmd == nil || cmd() != (PrewarmDoneMsg{}) {
+		t.Fatalf("cmd = %v, want only the prewarm of the search cache", cmd)
 	}
 	if got := m.detail.Episodes()[0].Title; got != "New Episode" {
 		t.Fatalf("detail episode title = %q, want New Episode", got)
@@ -313,8 +308,8 @@ func TestStaleMetadataSaveDoesNotCloseNewEditor(t *testing.T) {
 	updatedA.Media.Metadata.Title = "Saved Book A"
 	result, cmd = m.Update(metadataedit.SavedMsg{ItemID: itemA.ID, Generation: save.Generation, Item: &updatedA})
 	m = result.(Model)
-	if cmd != nil {
-		t.Fatalf("cmd = %v, want nil for stale save without MPRIS bridge", cmd)
+	if cmd == nil || cmd() != (PrewarmDoneMsg{}) {
+		t.Fatalf("cmd = %v, want only the prewarm of the search cache for stale save without MPRIS bridge", cmd)
 	}
 	if m.ActiveScreen() != ScreenMetadataEdit {
 		t.Fatalf("ActiveScreen() = %v, want new editor to remain open", m.ActiveScreen())
@@ -512,7 +507,7 @@ func TestLoginCapturesGlobalKeys(t *testing.T) {
 func TestHelpKeyClosesHelpOnLoginScreen(t *testing.T) {
 	m := newTestModelAuthenticated()
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	result, _ = result.(Model).Update(components.ErrMsg{Err: errors.New("status 401")})
+	result, _ = result.(Model).Update(components.ErrMsg{Err: &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}})
 	m = result.(Model)
 	if m.ActiveScreen() != ScreenLogin || !m.help.Visible() {
 		t.Fatalf("ActiveScreen() = %v, help open = %v, want ScreenLogin and true", m.ActiveScreen(), m.help.Visible())
@@ -1963,7 +1958,7 @@ func TestUnauthorizedPlaybackErrorRedirectsToLogin(t *testing.T) {
 	m.screen = ScreenHome
 
 	result, cmd := m.Update(PlaybackErrorMsg{
-		Err: fmt.Errorf("unexpected status 401: unauthorized"),
+		Err: &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized},
 	})
 	rm := result.(Model)
 	if rm.screen != ScreenLogin {
@@ -1983,7 +1978,7 @@ func TestUnauthorizedBookDetailErrorRedirectsToLogin(t *testing.T) {
 
 	result, cmd := m.Update(BookDetailLoadedMsg{
 		ItemID: "item-1",
-		Err:    fmt.Errorf("unauthorized status 401"),
+		Err:    &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized},
 	})
 	rm := result.(Model)
 	if rm.screen != ScreenLogin {
@@ -2071,14 +2066,22 @@ func TestErrorDismissOnKeypress(t *testing.T) {
 
 func TestErrorDismissMsg(t *testing.T) {
 	m := newTestModelAuthenticated()
-	result, _ := m.Update(components.ErrMsg{Err: fmt.Errorf("test error")})
+	result, _ := m.Update(components.ErrMsg{Err: fmt.Errorf("first error")})
+	m = result.(Model)
+	result, _ = m.Update(components.ErrMsg{Err: fmt.Errorf("second error")})
 	m = result.(Model)
 
-	result, _ = m.Update(components.ErrorDismissMsg{})
+	// The tick of the first error, generation 1, must not dismiss the second
+	// error.
+	result, _ = m.Update(components.ErrorDismissMsg{Generation: 1})
 	m = result.(Model)
-
+	if !m.err.HasError() {
+		t.Fatal("the dismiss tick of the first error dismissed the second error")
+	}
+	result, _ = m.Update(components.ErrorDismissMsg{Generation: 2})
+	m = result.(Model)
 	if m.err.HasError() {
-		t.Error("error should be dismissed after ErrorDismissMsg")
+		t.Error("error should be dismissed after its ErrorDismissMsg")
 	}
 }
 
@@ -2088,7 +2091,7 @@ func TestHTTP401RedirectsToLogin(t *testing.T) {
 		t.Fatal("should start at Home")
 	}
 
-	result, _ := m.Update(components.ErrMsg{Err: fmt.Errorf("unexpected status 401: Unauthorized")})
+	result, _ := m.Update(components.ErrMsg{Err: &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}})
 	rm := result.(Model)
 
 	if rm.ActiveScreen() != ScreenLogin {
@@ -2113,7 +2116,7 @@ func TestHTTP401ErrMsgHaltsPlayback(t *testing.T) {
 	m.sleepDeadline = time.Now().Add(15 * time.Minute)
 	m.sleepDuration = 15 * time.Minute
 
-	result, cmd := m.Update(components.ErrMsg{Err: fmt.Errorf("unexpected status 401: Unauthorized")})
+	result, cmd := m.Update(components.ErrMsg{Err: &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}})
 	rm := result.(Model)
 
 	if rm.screen != ScreenLogin {
@@ -2151,7 +2154,7 @@ func TestHTTP401PlaybackErrorHaltsPlayback(t *testing.T) {
 	m.queue = []QueueEntry{{Item: abs.LibraryItem{ID: "queued-1"}}}
 	m.sleepDeadline = time.Now().Add(20 * time.Minute)
 
-	result, _ := m.Update(PlaybackErrorMsg{Err: fmt.Errorf("status 401: unauthorized")})
+	result, _ := m.Update(PlaybackErrorMsg{Err: &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}})
 	rm := result.(Model)
 
 	if rm.screen != ScreenLogin {
@@ -2362,9 +2365,14 @@ func TestIsUnauthorized(t *testing.T) {
 		want bool
 	}{
 		{nil, false},
-		{errors.New("unexpected status 401: Unauthorized"), true},
+		{&abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}, true},
+		{fmt.Errorf("get item: %w", &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}), true},
 		{errors.New("something failed"), false},
-		{errors.New("unauthorized access"), true},
+		// Only the status of the response tells a 401: a body or a text can
+		// have the word.
+		{&abs.HTTPStatusError{StatusCode: http.StatusForbidden, Body: "unauthorized"}, false},
+		{errors.New("unexpected status 401: Unauthorized"), false},
+		{errors.New("unauthorized access"), false},
 	}
 	for _, tt := range tests {
 		if got := isUnauthorized(tt.err); got != tt.want {
@@ -2374,5 +2382,194 @@ func TestIsUnauthorized(t *testing.T) {
 			}
 			t.Errorf("isUnauthorized(%q) = %v, want %v", name, got, tt.want)
 		}
+	}
+}
+
+// TestProgramModelHasMprisBridge verifies that the model that the program runs
+// has the MPRIS bridge. main makes the program with the model and then calls
+// SetProgram, as this test does.
+func TestProgramModelHasMprisBridge(t *testing.T) {
+	// The bridge must not connect to the session bus of the desktop.
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "no-bus"))
+	m := NewWithPlayer(config.Default(), nil, nil, nil, &mockPlayer{})
+	p := tea.NewProgram(m, tea.WithInput(nil), tea.WithOutput(io.Discard))
+	m.SetProgram(p)
+	defer m.Cleanup()
+
+	go p.Quit()
+	final, err := p.Run()
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if final.(Model).mprisBridge() == nil {
+		t.Error("the model of the program has no MPRIS bridge")
+	}
+}
+
+// TestSleepTimerStopsPlaybackAfterExpiryBetweenSessions verifies that the
+// sleep timer stops the playback if it expires while pine has no session: a
+// change of the track closes the session and opens a new one.
+func TestSleepTimerStopsPlaybackAfterExpiryBetweenSessions(t *testing.T) {
+	m := newMprisPlaybackTestModel(true)
+	m.trackDuration = 1800
+	m.sleepGeneration = 1
+	m.sleepDuration = 15 * time.Minute
+	m.sleepDeadline = time.Now().Add(-time.Second)
+
+	m, _ = m.restartPlaybackAt(1800)
+	result, _ := m.Update(SleepTimerExpiredMsg{Generation: 1})
+	m = result.(Model)
+	result, _ = m.Update(PlaySessionMsg{Session: PlaySessionData{
+		SessionID:        "sess-next-track",
+		ItemID:           "item-1",
+		Duration:         3600,
+		TrackStartOffset: 1800,
+		TrackDuration:    1800,
+	}})
+	m = result.(Model)
+	result, _ = m.Update(player.PositionMsg{Position: 1, Duration: 1800, Generation: m.playGeneration})
+	m = result.(Model)
+
+	if m.isPlaying() {
+		t.Error("the playback continues after the sleep timer expired")
+	}
+	if !m.sleepDeadline.IsZero() {
+		t.Error("the sleep timer is still set after it stopped the playback")
+	}
+}
+
+// TestSleepTimerOfFailedTrackChangeDoesNotStopNextPlayback verifies that the
+// sleep timer stops only its own playback: a change of the track that fails
+// ends the playback, and a playback that starts later continues.
+func TestSleepTimerOfFailedTrackChangeDoesNotStopNextPlayback(t *testing.T) {
+	m := newMprisPlaybackTestModel(true)
+	m.trackDuration = 1800
+	m.sleepGeneration = 1
+	m.sleepDuration = 15 * time.Minute
+	m.sleepDeadline = time.Now().Add(-time.Second)
+
+	m, _ = m.restartPlaybackAt(1800)
+	result, _ := m.Update(PlaybackErrorMsg{Err: errors.New("network down")})
+	m = result.(Model)
+	result, _ = m.Update(SleepTimerExpiredMsg{Generation: 1})
+	m = result.(Model)
+	result, _ = m.Update(PlaySessionMsg{Session: PlaySessionData{
+		SessionID:     "sess-other",
+		ItemID:        "item-other",
+		Duration:      3600,
+		TrackDuration: 3600,
+	}})
+	m = result.(Model)
+	result, _ = m.Update(player.PositionMsg{Position: 1, Duration: 3600, Generation: m.playGeneration})
+	m = result.(Model)
+
+	if !m.isPlaying() {
+		t.Error("the sleep timer of the failed playback stopped the next playback")
+	}
+}
+
+// TestLibraryPaletteBrowseSeriesOpensLibraryOfScreen verifies that Browse
+// Series of the palette on the library screen opens the series of the library
+// that the screen shows, as the key s does.
+func TestLibraryPaletteBrowseSeriesOpensLibraryOfScreen(t *testing.T) {
+	m := newTestModelAuthenticated()
+	libs := []abs.Library{{ID: "lib-a", Name: "A", MediaType: "book"}, {ID: "lib-b", Name: "B", MediaType: "book"}}
+	m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: libs, LibraryID: "lib-a"})
+	m.library.Configure("lib-b", libs)
+	m.library.SetSize(80, 24)
+	m.library, _ = m.library.Update(library.LibraryItemsMsg{LibraryID: "lib-b", Total: 1, Items: []abs.LibraryItem{
+		{ID: "b-1", LibraryID: "lib-b", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "B one"}}},
+	}})
+	m.screen = ScreenLibrary
+
+	var browse *components.PaletteItem
+	for _, item := range m.buildContextPaletteItems() {
+		if item.Action == components.ActionBrowseSeries {
+			browse = &item
+		}
+	}
+	if browse == nil {
+		t.Fatal("the palette of the library screen has no Browse Series")
+	}
+	m, _ = m.handlePaletteAction(browse.Action, browse.Payload, browse.LibraryID, browse.ItemID, browse.Data)
+	if got := m.seriesList.SelectedLibraryID(); got != "lib-b" {
+		t.Errorf("series list library = %q, want lib-b", got)
+	}
+}
+
+// TestPaletteSpeedActions verifies that Speed Up of the palette does not lower
+// a speed above the range of the palette, and Speed Down does not raise a speed
+// below it: the speed keys and MPRIS can set such a speed. MPRIS gets the new
+// speed.
+func TestPaletteSpeedActions(t *testing.T) {
+	tests := []struct {
+		action components.PaletteAction
+		speed  float64
+		want   float64
+	}{
+		{components.ActionSpeedUp, 1.0, 1.25},
+		{components.ActionSpeedUp, 2.9, 3.0},
+		{components.ActionSpeedUp, 3.5, 3.5},
+		{components.ActionSpeedDown, 1.0, 0.75},
+		{components.ActionSpeedDown, 0.3, 0.25},
+		{components.ActionSpeedDown, 0.2, 0.2},
+	}
+	for _, tt := range tests {
+		m := newMprisPlaybackTestModel(true)
+		m.player.Speed = tt.speed
+		m, _ = m.handlePaletteAction(tt.action, "", "", "", nil)
+		if m.player.Speed != tt.want {
+			t.Errorf("action %v at the speed %v: speed = %v, want %v", tt.action, tt.speed, m.player.Speed, tt.want)
+		}
+		if got := m.mprisState.PlayerSpeed(); got != tt.want {
+			t.Errorf("action %v at the speed %v: MPRIS speed = %v, want %v", tt.action, tt.speed, got, tt.want)
+		}
+	}
+}
+
+// TestDeleteCmdsReturnModelValue verifies that Update returns a Model value
+// for a delete request: main runs Cleanup only on a Model value.
+func TestDeleteCmdsReturnModelValue(t *testing.T) {
+	m := newTestModelAuthenticated()
+	for _, msg := range []tea.Msg{
+		detail.DeleteItemCmd{ItemID: "item-1"},
+		detail.DeleteEpisodeCmd{ItemID: "pod-1", EpisodeID: "ep-1"},
+	} {
+		result, cmd := m.Update(msg)
+		if _, ok := result.(Model); !ok {
+			t.Errorf("%T: Update returns %T, want Model", msg, result)
+		}
+		if cmd == nil {
+			t.Errorf("%T: Update returns no delete command", msg)
+		}
+	}
+}
+
+// TestMetadataSavedKeepsDetailProgress verifies that a metadata save keeps the
+// progress on the detail screen. The answer of the save has no progress of the
+// user.
+func TestMetadataSavedKeepsDetailProgress(t *testing.T) {
+	m := newTestModelAuthenticated()
+	item := abs.LibraryItem{
+		ID:                "item-1",
+		MediaType:         "book",
+		Media:             abs.Media{Metadata: abs.MediaMetadata{Title: "Old Title"}},
+		UserMediaProgress: &abs.UserMediaProgress{Progress: 1, IsFinished: true},
+	}
+	m.screen = ScreenDetail
+	m.detail = detail.New(m.styles, item)
+	updated := item
+	updated.Media.Metadata.Title = "New Title"
+	updated.UserMediaProgress = nil
+
+	result, _ := m.Update(metadataedit.SavedMsg{ItemID: updated.ID, Item: &updated})
+	m = result.(Model)
+
+	got := m.detail.Item()
+	if got.Media.Metadata.Title != "New Title" {
+		t.Errorf("detail title = %q, want New Title", got.Media.Metadata.Title)
+	}
+	if got.UserMediaProgress == nil || !got.UserMediaProgress.IsFinished {
+		t.Errorf("detail progress = %+v, want the finished progress", got.UserMediaProgress)
 	}
 }

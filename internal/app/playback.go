@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"runtime/debug"
@@ -36,6 +35,9 @@ const (
 	// the position that the session started at.
 	syncMinChange = 1.0
 )
+
+// errNoAudioTracks is the error of a play session that has no audio track.
+var errNoAudioTracks = errors.New("no audio tracks")
 
 func pineVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
@@ -152,11 +154,10 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.setSeriesContext(msg.Item)
-
 	if m.client == nil {
 		return m, nil
 	}
+	m.playRequested = true
 
 	// Different item playing → stop it first
 	var closeCmd, stopCmd tea.Cmd
@@ -209,12 +210,10 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 		return m, nil
 	}
 
-	m.playbackSeriesID = ""
-	m.playbackLibraryID = ""
-
 	if m.client == nil {
 		return m, nil
 	}
+	m.playRequested = true
 
 	// Different item/episode playing → stop it first
 	var closeCmd, stopCmd tea.Cmd
@@ -222,6 +221,10 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 		logger.Info("switching playback", "from", m.itemID+"/"+m.episodeID, "to", msg.Item.ID+"/"+msg.Episode.ID)
 		m, closeCmd, stopCmd = m.stopPlaybackCmds()
 	}
+
+	// An episode has no series to continue.
+	m.playbackSeriesID = ""
+	m.playbackLibraryID = msg.Item.LibraryID
 
 	item := msg.Item
 	episode := msg.Episode
@@ -247,6 +250,9 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 
 // handlePlaySessionMsg launches mpv with the stream URL.
 func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
+	// restartPlaybackAt keeps the item, so a session of the same item is a
+	// restart, for example at a seek to another file of the book.
+	restart := m.itemID == msg.Session.ItemID && m.episodeID == msg.Session.EpisodeID
 	m.playGeneration++
 	m.sessionID = msg.Session.SessionID
 	m.itemID = msg.Session.ItemID
@@ -269,7 +275,7 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 	m.player.Duration = msg.Session.Duration
 	m.propagateSize()
 	m.syncMprisState()
-	logger.Info("playback session loaded", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
+	logger.Info("playback session loaded", "session", abs.SessionTag(msg.Session.SessionID), "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "bookPosition", bookPos, "trackStart", msg.Session.TrackStartOffset, "trackDuration", msg.Session.TrackDuration, "chapters", len(msg.Session.Chapters), "pausedRestore", m.restorePaused)
 
 	paused := m.restorePaused
 	m.restorePaused = false
@@ -281,7 +287,12 @@ func (m Model) handlePlaySessionMsg(msg PlaySessionMsg) (Model, tea.Cmd) {
 		m.mprisPlaybackCmd(),
 		player.LaunchCmd(m.mpv, msg.StreamURL, msg.Session.CurrentTime, paused, headers, m.player.Volume, m.playGeneration),
 	}
-	if capCmd := loadCaptionsCmd(m.client, msg.Session.ItemID, msg.Session.TrackFilename, msg.Session.TranscriptIno, m.playGeneration); capCmd != nil {
+	// An MPRIS client expects a new track at the position 0. A restart keeps
+	// the track ID, so it sends Seeked also at the position 0.
+	if bookPos > 0 || restart {
+		cmds = append(cmds, m.mprisSeekedCmd())
+	}
+	if capCmd := loadCaptionsCmd(m.client, msg.Session.ItemID, msg.Session.TrackFilename, msg.Session.TranscriptIno, msg.Session.HasLibraryFiles, m.playGeneration); capCmd != nil {
 		cmds = append(cmds, capCmd)
 	}
 	return m, tea.Batch(cmds...)
@@ -308,8 +319,12 @@ func (m *Model) toggleCaptions() {
 	m.propagateSize()
 }
 
-func loadCaptionsCmd(client *cache.Client, itemID, audioFilename, ino string, generation uint64) tea.Cmd {
-	if client == nil || itemID == "" {
+// loadCaptionsCmd loads the VTT file ino. If ino is empty, it finds the VTT
+// file of audioFilename in the files of the item. hasFiles is true if the play
+// session gave the files of the item: ino is then complete, and an empty ino
+// means that the item has no VTT file.
+func loadCaptionsCmd(client *cache.Client, itemID, audioFilename, ino string, hasFiles bool, generation uint64) tea.Cmd {
+	if client == nil || itemID == "" || (ino == "" && hasFiles) {
 		return nil
 	}
 	inner := client.Client
@@ -349,7 +364,7 @@ func (m Model) handlePlayerReady(msg player.PlayerReadyMsg) (Model, tea.Cmd) {
 	return m, tea.Batch(
 		player.SetSpeedCmd(m.mpv, m.player.Speed),
 		player.TickCmd(m.mpv, m.playGeneration),
-		syncTickCmd(),
+		syncTickCmd(m.playGeneration),
 	)
 }
 
@@ -421,7 +436,6 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 			m.syncMprisState()
 			mprisCmds = append(mprisCmds, m.mprisPlaybackCmd())
 		}
-		mprisCmds = append(mprisCmds, m.mprisPositionCmd())
 		if m.mpv != nil {
 			return m, tea.Batch(append(mprisCmds, player.TickCmd(m.mpv, m.playGeneration))...)
 		}
@@ -431,21 +445,23 @@ func (m Model) handlePositionMsg(msg player.PositionMsg) (Model, tea.Cmd) {
 	m.player.Position = bookPos
 	wasPlaying := m.player.Playing
 	m.player.Playing = !msg.Paused
+	// MPRIS clients read the position from the state.
+	m.syncMprisState()
 	var mprisCmds []tea.Cmd
 	if wasPlaying != m.player.Playing {
-		m.syncMprisState()
 		mprisCmds = append(mprisCmds, m.mprisPlaybackCmd())
 	}
-	mprisCmds = append(mprisCmds, m.mprisPositionCmd())
 
-	// Update sleep timer display
+	// Update sleep timer display. Update drops SleepTimerExpiredMsg while pine
+	// has no session, for example at the change of a track, so a tick after
+	// the deadline stops the playback.
 	if !m.sleepDeadline.IsZero() {
 		remaining := time.Until(m.sleepDeadline)
 		if remaining <= 0 {
-			m.player.SleepRemaining = ""
-		} else {
-			m.player.SleepRemaining = formatSleepRemaining(remaining)
+			logger.Info("sleep timer expired, stopping playback")
+			return m.stopPlayback()
 		}
+		m.player.SleepRemaining = formatSleepRemaining(remaining)
 	}
 
 	if m.mpv != nil {
@@ -551,6 +567,7 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 // playItemAt plays a book, or an episode of a podcast, from a position in the
 // book or the episode. A different item or episode that plays stops first.
 func (m Model) playItemAt(item abs.LibraryItem, episode *abs.PodcastEpisode, pos float64) (Model, tea.Cmd) {
+	m.playRequested = true
 	var closeCmd, stopCmd tea.Cmd
 	if m.isPlaying() {
 		episodeID := ""
@@ -608,6 +625,20 @@ func (m Model) startRestorePlaybackCmd(msg RestoreSessionMsg) tea.Cmd {
 	return m.startRestoredBookPlaybackCmd(*msg.Item)
 }
 
+// closeRestoredSessionCmd closes a session that the restore opened and that
+// pine does not play. The session has no position to send.
+func closeRestoredSessionCmd(client *cache.Client, sessionID string) tea.Cmd {
+	if client == nil || sessionID == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := client.CloseSessionNoSync(context.Background(), sessionID); err != nil {
+			logger.Warn("failed to close restored session", "session", abs.SessionTag(sessionID), "err", err)
+		}
+		return nil
+	}
+}
+
 func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 	client := m.client
 	store := m.db
@@ -637,16 +668,16 @@ func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 			session.CurrentTime,
 		)
 		if err != nil {
-			if err.Error() == "no audio tracks" {
+			if errors.Is(err, errNoAudioTracks) {
 				clearSavedRestoreSession(
 					store,
 					"book playback returned no audio tracks",
 					"itemID", item.ID,
-					"sessionID", session.ID,
+					"session", abs.SessionTag(session.ID),
 				)
 				return nil
 			}
-			logSkippedRestore("book playback session invalid", "itemID", item.ID, "sessionID", session.ID, "err", err)
+			logSkippedRestore("book playback session invalid", "itemID", item.ID, "session", abs.SessionTag(session.ID), "err", err)
 			return nil
 		}
 		return RestorePlaySessionMsg{PlaySessionMsg: playMsg}
@@ -673,41 +704,22 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 			logSkippedRestore("podcast episode playback start failed", "itemID", item.ID, "episodeID", episode.ID, "err", err)
 			return nil
 		}
-		if len(session.AudioTracks) == 0 {
-			clearSavedRestoreSession(
-				store,
-				"podcast episode playback returned no audio tracks",
-				"itemID", item.ID,
-				"episodeID", episode.ID,
-				"sessionID", session.ID,
-			)
+		playMsg, err := buildEpisodePlaySessionMsg(client, session, item, episode, session.CurrentTime)
+		if err != nil {
+			if errors.Is(err, errNoAudioTracks) {
+				clearSavedRestoreSession(
+					store,
+					"podcast episode playback returned no audio tracks",
+					"itemID", item.ID,
+					"episodeID", episode.ID,
+					"session", abs.SessionTag(session.ID),
+				)
+				return nil
+			}
+			logSkippedRestore("podcast episode playback session invalid", "itemID", item.ID, "episodeID", episode.ID, "session", abs.SessionTag(session.ID), "err", err)
 			return nil
 		}
-
-		streamURL := client.BaseURL() + session.AudioTracks[0].ContentURL
-		logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", session.AudioTracks[0].Index, "trackStart", session.AudioTracks[0].StartOffset, "trackDuration", session.AudioTracks[0].Duration, "bookPosition", session.CurrentTime)
-
-		return RestorePlaySessionMsg{
-			PlaySessionMsg: PlaySessionMsg{
-				Session: PlaySessionData{
-					SessionID:        session.ID,
-					ItemID:           item.ID,
-					EpisodeID:        episode.ID,
-					CurrentTime:      session.CurrentTime,
-					SyncedTime:       session.CurrentTime,
-					Duration:         resolveEpisodeDuration(episode, session),
-					Title:            episode.Title,
-					Authors:          mprisAuthors(item),
-					Chapters:         playSessionChapters(session),
-					TrackStartOffset: session.AudioTracks[0].StartOffset,
-					TrackDuration:    session.AudioTracks[0].Duration,
-					TrackFilename:    session.AudioTracks[0].Metadata.Filename,
-					TranscriptIno:    session.TranscriptIno(session.AudioTracks[0].Metadata.Filename),
-				},
-				StreamURL: streamURL,
-				AuthToken: client.Token(),
-			},
-		}
+		return RestorePlaySessionMsg{PlaySessionMsg: playMsg}
 	}
 }
 
@@ -759,11 +771,16 @@ func (m Model) startQueuedEntry(next QueueEntry, closeCmd, stopCmd tea.Cmd) (Mod
 
 func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, itemID, title string, authors []string, duration, bookPos float64) (PlaySessionMsg, error) {
 	if len(session.AudioTracks) == 0 {
-		return PlaySessionMsg{}, fmt.Errorf("no audio tracks")
+		return PlaySessionMsg{}, errNoAudioTracks
 	}
 
 	track := session.AudioTracks[0]
 	seekTime := bookPos
+	// A position at the end of the book is the end of the last track.
+	if last := session.AudioTracks[len(session.AudioTracks)-1]; bookPos >= last.StartOffset+last.Duration {
+		track = last
+		seekTime = last.Duration
+	}
 	for _, t := range session.AudioTracks {
 		if bookPos >= t.StartOffset && bookPos < t.StartOffset+t.Duration {
 			track = t
@@ -771,7 +788,7 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 			break
 		}
 	}
-	logger.Info("track selected for playback", "itemID", itemID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", bookPos, "seekTime", seekTime)
+	logger.Info("track selected for playback", "itemID", itemID, "session", abs.SessionTag(session.ID), "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", bookPos, "seekTime", seekTime)
 
 	streamURL := client.BaseURL() + track.ContentURL
 
@@ -789,6 +806,7 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 			TrackDuration:    track.Duration,
 			TrackFilename:    track.Metadata.Filename,
 			TranscriptIno:    session.TranscriptIno(track.Metadata.Filename),
+			HasLibraryFiles:  len(session.LibraryItem.LibraryFiles) > 0,
 		},
 		StreamURL: streamURL,
 		AuthToken: client.Token(),
@@ -799,12 +817,12 @@ func buildBookPlaySessionMsg(client *cache.Client, session *abs.PlaySession, ite
 // episode at the position pos.
 func buildEpisodePlaySessionMsg(client *cache.Client, session *abs.PlaySession, item abs.LibraryItem, episode abs.PodcastEpisode, pos float64) (PlaySessionMsg, error) {
 	if len(session.AudioTracks) == 0 {
-		return PlaySessionMsg{}, fmt.Errorf("no audio tracks")
+		return PlaySessionMsg{}, errNoAudioTracks
 	}
 
 	track := session.AudioTracks[0]
 	streamURL := client.BaseURL() + track.ContentURL
-	logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "sessionID", session.ID, "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", pos)
+	logger.Info("track selected for episode playback", "itemID", item.ID, "episodeID", episode.ID, "session", abs.SessionTag(session.ID), "trackIndex", track.Index, "trackStart", track.StartOffset, "trackDuration", track.Duration, "bookPosition", pos)
 
 	return PlaySessionMsg{
 		Session: PlaySessionData{
@@ -821,6 +839,7 @@ func buildEpisodePlaySessionMsg(client *cache.Client, session *abs.PlaySession, 
 			TrackDuration:    track.Duration,
 			TrackFilename:    track.Metadata.Filename,
 			TranscriptIno:    session.TranscriptIno(track.Metadata.Filename),
+			HasLibraryFiles:  len(session.LibraryItem.LibraryFiles) > 0,
 		},
 		StreamURL: streamURL,
 		AuthToken: client.Token(),
@@ -848,9 +867,11 @@ func resolveEpisodeDuration(episode abs.PodcastEpisode, session *abs.PlaySession
 	return duration
 }
 
-// handleSyncTick syncs progress with ABS and persists to DB.
-func (m Model) handleSyncTick() (Model, tea.Cmd) {
-	if !m.isPlaying() {
+// handleSyncTick syncs progress with ABS and persists to DB. A tick of an
+// earlier playback ends its chain of ticks: each playback starts its own chain
+// in handlePlayerReady.
+func (m Model) handleSyncTick(msg SyncTickMsg) (Model, tea.Cmd) {
+	if msg.Generation != m.playGeneration || !m.isPlaying() {
 		return m, nil
 	}
 
@@ -863,7 +884,7 @@ func (m Model) handleSyncTick() (Model, tea.Cmd) {
 	store := m.db
 
 	cmds := []tea.Cmd{
-		syncTickCmd(),
+		syncTickCmd(m.playGeneration),
 		func() tea.Msg {
 			if store != nil {
 				if err := store.SaveListeningSession(db.ListeningSession{
@@ -903,7 +924,7 @@ func syncSessionCmd(client *cache.Client, device abs.DeviceInfo, sessionID, item
 		msg := SessionSyncedMsg{SessionID: sessionID, CurrentTime: currentTime, TimeListened: timeListened}
 		msg.Err = client.SyncSession(ctx, sessionID, currentTime, timeListened)
 		if abs.IsHTTPStatus(msg.Err, http.StatusNotFound) {
-			logger.Info("session is gone on the server, opening a new session", "sessionID", sessionID, "itemID", itemID, "episodeID", episodeID)
+			logger.Info("session is gone on the server, opening a new session", "session", abs.SessionTag(sessionID), "itemID", itemID, "episodeID", episodeID)
 			var session *abs.PlaySession
 			if episodeID != "" {
 				session, msg.Err = client.StartEpisodePlaySession(ctx, itemID, episodeID, device)
@@ -915,10 +936,14 @@ func syncSessionCmd(client *cache.Client, device abs.DeviceInfo, sessionID, item
 				msg.Err = client.SyncSession(ctx, session.ID, currentTime, timeListened)
 			}
 		}
+		fields := []any{"session", abs.SessionTag(sessionID), "currentTime", currentTime, "timeListened", timeListened}
+		if msg.NewSessionID != "" {
+			fields = append(fields, "newSession", abs.SessionTag(msg.NewSessionID))
+		}
 		if msg.Err != nil {
-			logger.Warn("failed to sync session", "sessionID", sessionID, "newSessionID", msg.NewSessionID, "currentTime", currentTime, "timeListened", timeListened, "err", msg.Err)
+			logger.Warn("failed to sync session", append(fields, "err", msg.Err)...)
 		} else {
-			logger.Debug("session synced", "sessionID", sessionID, "newSessionID", msg.NewSessionID, "currentTime", currentTime, "timeListened", timeListened)
+			logger.Debug("session synced", fields...)
 		}
 		return msg
 	}
@@ -984,7 +1009,7 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 				return PlaybackErrorMsg{Err: err}
 			}
 			evictProgressCaches(cacheStore, itemID, libraryID, seriesID)
-			return detail.MarkFinishedMsg{Progress: &abs.UserMediaProgress{
+			return detail.MarkFinishedMsg{EpisodeID: episodeID, Progress: &abs.UserMediaProgress{
 				IsFinished: false,
 			}}
 		}
@@ -1003,7 +1028,7 @@ func (m Model) handleMarkFinished(msg detail.MarkFinishedCmd) (Model, tea.Cmd) {
 			Progress:    1.0,
 			IsFinished:  true,
 		}
-		return detail.MarkFinishedMsg{Progress: progress}
+		return detail.MarkFinishedMsg{EpisodeID: episodeID, Progress: progress}
 	}
 }
 
@@ -1045,7 +1070,7 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 // close of the session apart from the other cleanup commands, so that a
 // caller can run a play request after the close with closeThen.
 func (m Model) stopPlaybackCmds() (Model, tea.Cmd, tea.Cmd) {
-	logger.Info("stopping playback", "sessionID", m.sessionID, "itemID", m.itemID, "episodeID", m.episodeID, "position", m.player.Position, "duration", m.player.Duration, "timeListened", m.timeListened)
+	logger.Info("stopping playback", "session", abs.SessionTag(m.sessionID), "itemID", m.itemID, "episodeID", m.episodeID, "position", m.player.Position, "duration", m.player.Duration, "timeListened", m.timeListened)
 	client := m.client
 	sessionID := m.sessionID
 	itemID := m.itemID
@@ -1062,7 +1087,7 @@ func (m Model) stopPlaybackCmds() (Model, tea.Cmd, tea.Cmd) {
 
 	// Cache last played item for MPRIS metadata after stop
 	m.lastPlayedTitle = m.player.Title
-	m.lastPlayedItemID = m.itemID
+	m.lastPlayedTrackID = mprisTrackID(m.itemID, m.episodeID)
 	m.lastPlayedAuthors = m.currentAuthors
 
 	// Clear session state
@@ -1082,9 +1107,9 @@ func (m Model) stopPlaybackCmds() (Model, tea.Cmd, tea.Cmd) {
 	closeCmd := func() tea.Msg {
 		if client != nil && sessionID != "" {
 			if err := closeSession(context.Background(), client, sessionID, currentTime, timeListened, changed); err != nil {
-				logger.Warn("failed to close session", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
+				logger.Warn("failed to close session", "session", abs.SessionTag(sessionID), "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
 			} else {
-				logger.Debug("session closed", "sessionID", sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
+				logger.Debug("session closed", "session", abs.SessionTag(sessionID), "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
 			}
 		}
 		invalidateCache()
@@ -1137,8 +1162,8 @@ func playSessionChapters(session *abs.PlaySession) []abs.Chapter {
 
 // Cleanup performs synchronous cleanup of playback resources.
 func (m Model) Cleanup() {
-	if m.mprisBridge != nil {
-		_ = m.mprisBridge.Stop()
+	if bridge := m.mprisBridge(); bridge != nil {
+		_ = bridge.Stop()
 	}
 	if m.mpv != nil {
 		_ = m.mpv.Quit()
@@ -1167,9 +1192,9 @@ func (m Model) Cleanup() {
 
 	if m.client != nil && m.sessionID != "" {
 		if err := closeSession(ctx, m.client, m.sessionID, currentTime, timeListened, changed); err != nil {
-			logger.Warn("cleanup: failed to close session", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
+			logger.Warn("cleanup: failed to close session", "session", abs.SessionTag(m.sessionID), "currentTime", currentTime, "timeListened", timeListened, "changed", changed, "err", err)
 		} else {
-			logger.Debug("cleanup: session closed", "sessionID", m.sessionID, "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
+			logger.Debug("cleanup: session closed", "session", abs.SessionTag(m.sessionID), "currentTime", currentTime, "timeListened", timeListened, "changed", changed)
 		}
 		evictProgressCaches(m.cacheStore, itemID, libraryID, seriesID)
 	}
@@ -1197,9 +1222,10 @@ func (m Model) Cleanup() {
 }
 
 // syncTickCmd returns a command that fires SyncTickMsg after the sync interval.
-func syncTickCmd() tea.Cmd {
+// generation is the playGeneration of the playback.
+func syncTickCmd(generation uint64) tea.Cmd {
 	return tea.Tick(syncInterval, func(_ time.Time) tea.Msg {
-		return SyncTickMsg{}
+		return SyncTickMsg{Generation: generation}
 	})
 }
 
@@ -1266,13 +1292,14 @@ func logSkippedRestore(reason string, keyvals ...any) {
 	logger.Info("skipping session restore", fields...)
 }
 
+// setSeriesContext records the library and the series of the item that
+// starts. The library is also the library of an item with no series: the
+// home shelves of the library show the progress of the item.
 func (m *Model) setSeriesContext(item abs.LibraryItem) {
+	m.playbackLibraryID = item.LibraryID
+	m.playbackSeriesID = ""
 	if item.Media.Metadata.Series != nil {
 		m.playbackSeriesID = item.Media.Metadata.Series.ID
-		m.playbackLibraryID = item.LibraryID
-	} else {
-		m.playbackSeriesID = ""
-		m.playbackLibraryID = ""
 	}
 }
 
