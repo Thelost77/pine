@@ -11,6 +11,9 @@ import (
 	"sync"
 )
 
+// maxLogSize is the size above which Init renames the log to <name>.log.old.
+const maxLogSize = 5 * 1024 * 1024
+
 var (
 	instance *slog.Logger
 	logPath  string
@@ -31,25 +34,30 @@ func Init(dir, name string) func() {
 			return
 		}
 
-		// Rotate: if log exceeds 5MB, truncate
-		if info, err := os.Stat(path); err == nil && info.Size() > 5*1024*1024 {
-			_ = os.Rename(path, path+".old")
-		}
-
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		f, err := openLog(path)
 		if err != nil {
 			return
 		}
-		_ = os.Chmod(path, 0o600)
-		if err := lockFile(f); err != nil {
+		locked := lockFile(f) == nil
+		// Rotate only while this process holds the lock, so that the log of a
+		// running instance keeps its name. Windows cannot rename an open file,
+		// so the file closes first.
+		info, err := f.Stat()
+		if locked && err == nil && info.Size() > maxLogSize {
+			_ = f.Close()
+			_ = os.Rename(path, path+".old")
+			if f, err = openLog(path); err != nil {
+				return
+			}
+			locked = lockFile(f) == nil
+		}
+		if !locked {
 			_ = f.Close()
 			path = filepath.Join(dir, fmt.Sprintf("%s-%d.log", name, os.Getpid()))
 			logPath = path
-			f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-			if err != nil {
+			if f, err = openLog(path); err != nil {
 				return
 			}
-			_ = os.Chmod(path, 0o600)
 			_ = lockFile(f)
 		}
 		instance = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
@@ -64,6 +72,16 @@ func Init(dir, name string) func() {
 		cleanup = func() {}
 	}
 	return cleanup
+}
+
+// openLog opens the log file at path for appending, with the mode 0600.
+func openLog(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	_ = os.Chmod(path, 0o600)
+	return f, nil
 }
 
 // Get returns the logger instance. Returns a no-op logger if Init hasn't been called.

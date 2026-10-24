@@ -126,3 +126,41 @@ func TestLoginDeserializesToken(t *testing.T) {
 		t.Errorf("client token not updated: got %q", c.token)
 	}
 }
+
+func TestNewClientTrimsTheServerAddress(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"user": {"token": "tok"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(" "+srv.URL+"/ ", "")
+	if _, err := c.Login(context.Background(), "admin", "secret"); err != nil {
+		t.Fatalf("Login() returned error: %v", err)
+	}
+	if gotPath != "/login" {
+		t.Errorf("request path = %q, want /login", gotPath)
+	}
+	if c.BaseURL() != srv.URL {
+		t.Errorf("BaseURL() = %q, want %q", c.BaseURL(), srv.URL)
+	}
+}
+
+func TestDoKeepsAShortBodyInTheStatusError(t *testing.T) {
+	page := strings.Repeat("<p>Bad Gateway</p>", 10000)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	_, err := c.do(context.Background(), http.MethodGet, "/api/items/a", nil)
+	if !IsHTTPStatus(err, http.StatusBadGateway) {
+		t.Fatalf("do() error = %v, want the status 502", err)
+	}
+	if len(err.Error()) > 600 {
+		t.Errorf("len(err.Error()) = %d, want at most 600", len(err.Error()))
+	}
+}

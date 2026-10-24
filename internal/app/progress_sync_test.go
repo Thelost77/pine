@@ -72,7 +72,7 @@ func timesListened(log *apiLog, path string) []float64 {
 
 // syncTick runs one sync tick and its commands.
 func syncTick(m Model) Model {
-	result, cmd := m.Update(SyncTickMsg{})
+	result, cmd := m.Update(SyncTickMsg{Generation: m.playGeneration})
 	m, _ = feedCmd(result.(Model), cmd)
 	return m
 }
@@ -406,6 +406,29 @@ func TestMarkFinishedSendsExplicitFlag(t *testing.T) {
 				t.Errorf("progress update = %v, want %v", updates[0].Body, tt.want)
 			}
 		})
+	}
+}
+
+// TestMarkFinishedOfEpisodeNamesTheEpisode verifies that the result of a mark
+// of an episode names the episode, so that the detail screen keeps it out of
+// the progress of the podcast.
+func TestMarkFinishedOfEpisodeNamesTheEpisode(t *testing.T) {
+	for _, undo := range []bool{false, true} {
+		_, client := newFakeABS(t, nil, nil)
+		m := newSyncTestModel(client)
+
+		_, cmd := m.handleMarkFinished(detail.MarkFinishedCmd{
+			Item:    testLibraryItem("pod-001", "A Podcast"),
+			Episode: &abs.PodcastEpisode{ID: "ep-001", Duration: 600},
+			Undo:    undo,
+		})
+		msg, ok := cmd().(detail.MarkFinishedMsg)
+		if !ok {
+			t.Fatalf("undo=%v: expected MarkFinishedMsg", undo)
+		}
+		if msg.EpisodeID != "ep-001" {
+			t.Errorf("undo=%v: EpisodeID = %q, want ep-001", undo, msg.EpisodeID)
+		}
 	}
 }
 

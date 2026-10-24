@@ -17,6 +17,8 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		return m.stopPlayback()
 	}
 
+	restart := m.CurrentItemID() == m.tracks[index].ID
+	stopReqCmd := m.reportStoppedCmd()
 	m.currentIndex = index
 	m.pendingRepeatIndex = -1
 	m.pendingRepeatItemID = ""
@@ -32,11 +34,16 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 	logger.Info("starting track playback", "index", index, "id", track.ID, "title", track.Name)
 
 	m.syncQueueScreen()
+	if restart {
+		// MPRIS clients see the same track, so they need the new position.
+		m.mprisSeeked(0)
+	}
 
 	var cmds []tea.Cmd
 	if m.client != nil {
 		playSessionID := strconv.FormatInt(time.Now().UnixNano(), 16)
 		m.playSessionID = playSessionID
+		m.playItemID = track.ID
 		source := m.client.StreamURL(track.ID, playSessionID)
 		streamHeaders := m.client.StreamHeaders()
 		if m.mediaCache != nil {
@@ -49,13 +56,18 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		itemID := track.ID
 
 		startReqCmd := func() tea.Msg {
+			// The stop report of the previous track goes first, so that the
+			// server gets the reports in the order of the playback.
+			if stopReqCmd != nil {
+				stopReqCmd()
+			}
 			_ = client.ReportPlaybackStart(context.Background(), itemID, playSessionID)
 			return nil
 		}
 		cmds = append(cmds, startReqCmd)
 
 		if m.mpv != nil {
-			cmds = append(cmds, player.LaunchCmd(m.mpv, source, 0, 0, false, streamHeaders, m.playerState.Volume, m.playGeneration))
+			cmds = append(cmds, player.LaunchCmd(m.mpv, source, 0, false, streamHeaders, m.playerState.Volume, m.playGeneration))
 		}
 	}
 	if m.repeatQueue {
@@ -69,7 +81,7 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 
 func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	logger.Info("stopping playback")
-	position := m.playerState.Position
+	cmds := []tea.Cmd{m.reportStoppedCmd()}
 	m.playGeneration++
 	m.playerState.Title = ""
 	m.playerState.Playing = false
@@ -80,18 +92,6 @@ func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	m.sleepDuration = 0
 	m.playerState.SleepRemaining = ""
 
-	var cmds []tea.Cmd
-	if m.client != nil && m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
-		client := m.client
-		itemID := m.tracks[m.currentIndex].ID
-		playSessionID := m.playSessionID
-		stopReqCmd := func() tea.Msg {
-			_ = client.ReportPlaybackStopped(context.Background(), itemID, position, playSessionID)
-			return nil
-		}
-		cmds = append(cmds, stopReqCmd)
-	}
-
 	if m.mpv != nil {
 		cmds = append(cmds, player.QuitCmd(m.mpv))
 	}
@@ -99,6 +99,43 @@ func (m *Model) stopPlayback() (*Model, tea.Cmd) {
 	m.currentIndex = -1
 	m.syncQueueScreen()
 	return m, tea.Batch(cmds...)
+}
+
+// reportStoppedCmd closes the Jellyfin play session of the track that plays.
+// It returns nil if no play session is open. The report does not depend on
+// the queue, because a queue change can remove the track before the stop.
+func (m *Model) reportStoppedCmd() tea.Cmd {
+	itemID := m.playItemID
+	m.playItemID = ""
+	if m.client == nil || itemID == "" {
+		return nil
+	}
+	client := m.client
+	position := m.playerState.Position
+	playSessionID := m.playSessionID
+	return func() tea.Msg {
+		_ = client.ReportPlaybackStopped(context.Background(), itemID, position, playSessionID)
+		return nil
+	}
+}
+
+// playNext plays the next track. At the end of the queue it does nothing,
+// unless the queue repeats.
+func (m *Model) playNext() (*Model, tea.Cmd) {
+	next := m.nextIndex(m.currentIndex + 1)
+	if next >= len(m.tracks) {
+		return m, nil
+	}
+	return m.startPlaybackAt(next)
+}
+
+// playPrevious plays the previous track in the first 3 seconds of a track.
+// Later, and at the first track, it plays the track again from the start.
+func (m *Model) playPrevious() (*Model, tea.Cmd) {
+	if m.playerState.Position > 3.0 || m.currentIndex <= 0 {
+		return m.handleSeekAbsolute(0)
+	}
+	return m.startPlaybackAt(m.currentIndex - 1)
 }
 
 func (m *Model) setPlaybackPaused(paused bool) (*Model, tea.Cmd) {
@@ -195,20 +232,17 @@ func authorsEqual(a, b []string) bool {
 }
 
 type mprisStateSnapshot struct {
-	playing  bool
-	paused   bool
-	title    string
-	authors  []string
-	itemID   string
-	position float64
-	speed    float64
-	volume   int
+	playing bool
+	paused  bool
+	title   string
+	authors []string
+	itemID  string
+	speed   float64
+	volume  int
 }
 
 func (m *Model) syncQueueScreen() {
-	if !m.queueScreen.IsFiltering() && !m.queueScreen.HasActiveFilter() {
-		m.queueScreen.SetQueue(m.tracks, m.currentIndex)
-	}
+	m.queueScreen.SetQueue(m.tracks, m.currentIndex)
 	m.queueScreen.SetPlaybackState(
 		m.IsPlaying(),
 		m.IsPaused(),
@@ -225,14 +259,13 @@ func (m *Model) syncQueueScreen() {
 		var oldState, newState mprisStateSnapshot
 		m.mprisState.Update(func(s *MprisState) {
 			oldState = mprisStateSnapshot{
-				playing:  s.playing,
-				paused:   s.paused,
-				title:    s.title,
-				authors:  s.authors,
-				itemID:   s.itemID,
-				position: s.position,
-				speed:    s.speed,
-				volume:   s.volume,
+				playing: s.playing,
+				paused:  s.paused,
+				title:   s.title,
+				authors: s.authors,
+				itemID:  s.itemID,
+				speed:   s.speed,
+				volume:  s.volume,
 			}
 			normalActive := m.IsPlaying()
 			subliminalActive := m.isSubliminalRunning()
@@ -274,16 +307,14 @@ func (m *Model) syncQueueScreen() {
 				s.maximumRate = 4.0
 			}
 			s.volume = m.playerState.Volume
-			s.queueLength = len(m.tracks)
 			newState = mprisStateSnapshot{
-				playing:  s.playing,
-				paused:   s.paused,
-				title:    s.title,
-				authors:  s.authors,
-				itemID:   s.itemID,
-				position: s.position,
-				speed:    s.speed,
-				volume:   s.volume,
+				playing: s.playing,
+				paused:  s.paused,
+				title:   s.title,
+				authors: s.authors,
+				itemID:  s.itemID,
+				speed:   s.speed,
+				volume:  s.volume,
 			}
 		})
 
@@ -297,7 +328,6 @@ func (m *Model) syncQueueScreen() {
 					oldState.itemID != newState.itemID ||
 					!authorsEqual(oldState.authors, newState.authors)
 				volumeChanged := oldState.volume != newState.volume
-				positionChanged := oldState.position != newState.position
 
 				if playbackChanged {
 					server.PlaybackChanged()
@@ -308,13 +338,6 @@ func (m *Model) syncQueueScreen() {
 				if volumeChanged {
 					server.VolumeChanged()
 				}
-				if positionChanged {
-					now := time.Now()
-					if now.Sub(m.lastMprisEmit) >= time.Second {
-						m.lastMprisEmit = now
-						server.Seeked(newState.position)
-					}
-				}
 			}
 		}
 	}
@@ -322,19 +345,7 @@ func (m *Model) syncQueueScreen() {
 }
 
 func (m *Model) handleSeek(offset float64) (*Model, tea.Cmd) {
-	if m.mpv == nil || !m.IsPlaying() {
-		return m, nil
-	}
-	target := m.playerState.Position + offset
-	if target < 0 {
-		target = 0
-	}
-	if m.playerState.Duration > 0 && target > m.playerState.Duration {
-		target = m.playerState.Duration
-	}
-	m.playerState.Position = target
-	m.syncQueueScreen()
-	return m, player.SeekCmd(m.mpv, target)
+	return m.handleSeekAbsolute(m.playerState.Position + offset)
 }
 
 func (m *Model) handleSeekAbsolute(pos float64) (*Model, tea.Cmd) {
@@ -349,7 +360,19 @@ func (m *Model) handleSeekAbsolute(pos float64) (*Model, tea.Cmd) {
 	}
 	m.playerState.Position = pos
 	m.syncQueueScreen()
+	m.mprisSeeked(pos)
 	return m, player.SeekCmd(m.mpv, pos)
+}
+
+// mprisSeeked tells MPRIS clients about a position change that the rate does
+// not explain.
+func (m *Model) mprisSeeked(position float64) {
+	if m.mprisBridge == nil {
+		return
+	}
+	if server := m.mprisBridge.Server(); server != nil {
+		server.Seeked(position)
+	}
 }
 
 func (m *Model) mprisPlaybackCmd() tea.Cmd {
@@ -404,26 +427,6 @@ func (m *Model) mprisTitleCmd() tea.Cmd {
 	}
 	return func() tea.Msg {
 		server.MetadataChanged()
-		return nil
-	}
-}
-
-func (m *Model) mprisPositionCmd() tea.Cmd {
-	if m.mprisBridge == nil {
-		return nil
-	}
-	now := time.Now()
-	if now.Sub(m.lastMprisEmit) < time.Second {
-		return nil
-	}
-	m.lastMprisEmit = now
-	server := m.mprisBridge.Server()
-	if server == nil {
-		return nil
-	}
-	pos := m.playerState.Position
-	return func() tea.Msg {
-		server.Seeked(pos)
 		return nil
 	}
 }

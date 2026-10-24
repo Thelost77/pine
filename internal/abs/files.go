@@ -7,17 +7,13 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-
-	"github.com/Thelost77/pine/internal/logger"
 )
 
 // GetLibraryFiles returns libraryFiles from an expanded item without storing the item.
 func (c *Client) GetLibraryFiles(ctx context.Context, itemID string) ([]LibraryFile, error) {
 	path := fmt.Sprintf("/api/items/%s?expanded=1", itemID)
-	logger.Debug("API request", "method", "GET", "path", path, "itemID", itemID)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		logger.Error("get library files failed", "itemID", itemID, "err", err)
 		return nil, fmt.Errorf("get library files: %w", err)
 	}
 	var resp struct {
@@ -32,10 +28,8 @@ func (c *Client) GetLibraryFiles(ctx context.Context, itemID string) ([]LibraryF
 // GetLibraryFile downloads a library file by inode.
 func (c *Client) GetLibraryFile(ctx context.Context, itemID, ino string) ([]byte, error) {
 	path := fmt.Sprintf("/api/items/%s/file/%s", itemID, ino)
-	logger.Debug("API request", "method", "GET", "path", path, "itemID", itemID, "ino", ino)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		logger.Error("get library file failed", "itemID", itemID, "ino", ino, "err", err)
 		return nil, fmt.Errorf("get library file: %w", err)
 	}
 	return data, nil

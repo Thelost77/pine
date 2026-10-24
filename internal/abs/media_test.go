@@ -151,9 +151,6 @@ func TestMediaMetadataUnmarshalSeriesObject(t *testing.T) {
 	if len(meta.SeriesList) != 1 {
 		t.Fatalf("len(SeriesList) = %d, want 1", len(meta.SeriesList))
 	}
-	if got := meta.PrimarySeries(); got == nil || got.ID != "s1" {
-		t.Fatalf("PrimarySeries() = %+v, want s1", got)
-	}
 }
 
 func TestMediaMetadataUnmarshalSeriesArray(t *testing.T) {

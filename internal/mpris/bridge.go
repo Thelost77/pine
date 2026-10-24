@@ -3,6 +3,7 @@ package mpris
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -16,7 +17,6 @@ type Bridge struct {
 	program   *tea.Program
 	name      string
 	server    *Server
-	player    PlayerAdapter
 	msgCh     chan tea.Msg
 	quitCh    chan struct{}
 	doneCh    chan struct{}
@@ -39,6 +39,17 @@ func NewBridge(program *tea.Program, name string) *Bridge {
 
 var errSkipSeek = errors.New("seek completed: returning error to bypass DE track-change debounce")
 
+// maxVolume is the MPRIS volume of the app volume 150, the end of the scale
+// of SetVolumeMsg.
+const maxVolume = 1.5
+
+// skipSeekAccessor reports Next and Previous as possible when an item is
+// active and a seek is possible, because with a skip seek they seek.
+type skipSeekAccessor struct{ ModelAccessor }
+
+func (a skipSeekAccessor) CanGoNext() bool     { return a.HasActiveItem() && a.CanSeek() }
+func (a skipSeekAccessor) CanGoPrevious() bool { return a.HasActiveItem() && a.CanSeek() }
+
 // send dispatches a message to the bubbletea program via the buffered dispatcher without blocking the caller.
 func (b *Bridge) send(msg tea.Msg) {
 	select {
@@ -50,11 +61,15 @@ func (b *Bridge) send(msg tea.Msg) {
 	}
 }
 
-// Bind wires the adapter closures to read from accessor and send messages via program.Send().
+// Bind creates the MPRIS server. Its properties read from accessor, and its methods send messages via program.Send().
 // accessor is a function that returns the current ModelAccessor, called on each read.
 // If skipSeekSeconds is more than 0, Next and Previous seek by that amount (non-standard MPRIS)
 // and do not change the track.
 func (b *Bridge) Bind(accessor func() ModelAccessor, skipSeekSeconds float64) {
+	if skipSeekSeconds > 0 {
+		appAccessor := accessor
+		accessor = func() ModelAccessor { return skipSeekAccessor{appAccessor()} }
+	}
 	actions := PlayerActions{
 		Next: func() error {
 			if skipSeekSeconds > 0 {
@@ -97,27 +112,38 @@ func (b *Bridge) Bind(accessor func() ModelAccessor, skipSeekSeconds float64) {
 			return nil
 		},
 		SetPosition: func(trackId string, pos time.Duration) error {
-			// MPRIS: SetPosition has no effect if CanSeek is false, and a request
-			// for a track that is not the current track is stale.
+			// MPRIS: SetPosition has no effect if CanSeek is false or if the
+			// position is outside the track. A request for a track that is not
+			// the current track is stale.
 			a := accessor()
 			if !a.CanSeek() || trackId != string(trackPath(b.name, a.CurrentItemID())) {
 				return nil
 			}
-			b.send(SeekAbsoluteMsg{PositionSeconds: pos.Seconds()})
+			seconds := pos.Seconds()
+			if seconds < 0 || (a.PlayerDuration() > 0 && seconds > a.PlayerDuration()) {
+				return nil
+			}
+			b.send(SeekAbsoluteMsg{PositionSeconds: seconds})
 			return nil
 		},
 		SetRate: func(rate float64) error {
-			b.send(SetRateMsg{Rate: rate})
+			// MPRIS: a rate of 0 acts as Pause. A rate is in the range of
+			// MinimumRate and MaximumRate.
+			if rate == 0 {
+				b.send(PauseMsg{})
+				return nil
+			}
+			a := accessor()
+			b.send(SetRateMsg{Rate: min(max(rate, a.PlayerMinimumRate()), a.PlayerMaximumRate())})
 			return nil
 		},
-		SetVolume: func(vol int) error {
-			b.send(SetVolumeMsg{Volume: vol})
+		SetVolume: func(volume float64) error {
+			// MPRIS: a negative volume is 0.
+			b.send(SetVolumeMsg{Volume: int(math.Round(min(max(volume, 0), maxVolume) * 100))})
 			return nil
 		},
 	}
-	root := RootAdapter{Name: b.name}
-	b.player = NewPlayerAdapter(b.name, accessor, actions)
-	b.server = NewServer(b.name, root, b.player)
+	b.server = NewServer(b.name, RootAdapter{Name: b.name}, accessor, actions)
 }
 
 // Start runs the D-Bus server in a goroutine and starts the message dispatcher loop.
@@ -141,10 +167,7 @@ func (b *Bridge) dispatchLoop() {
 		select {
 		case <-b.quitCh:
 			return
-		case msg, ok := <-b.msgCh:
-			if !ok {
-				return
-			}
+		case msg := <-b.msgCh:
 			if b.program != nil {
 				b.program.Send(msg)
 			}

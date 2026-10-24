@@ -5,8 +5,11 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -516,184 +519,6 @@ func TestGetSeriesContentsHTTP(t *testing.T) {
 	}
 }
 
-func TestGetRecentlyAddedHTTP(t *testing.T) {
-	responses := map[string]string{
-		"/api/libraries/lib-books-001/personalized": `[
-			{
-				"id": "recently-added",
-				"entities": [
-					{
-						"id": "li-book-001",
-						"libraryId": "lib-books-001",
-						"addedAt": 1711111111111,
-						"mediaType": "book",
-						"media": {"metadata": {"title": "Caliban's War"}}
-					}
-				]
-			}
-		]`,
-		"/api/libraries/lib-pods-002/personalized": `[
-			{
-				"id": "recently-added",
-				"entities": [
-					{
-						"id": "li-pod-001",
-						"libraryId": "lib-pods-002",
-						"addedAt": 1712222222222,
-						"mediaType": "podcast",
-						"media": {"metadata": {"title": "My Podcast"}}
-					}
-				]
-			}
-		]`,
-	}
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, ok := responses[r.URL.Path]
-		if !ok {
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-		if r.Method != http.MethodGet {
-			t.Errorf("method = %q, want GET", r.Method)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-	}))
-	defer srv.Close()
-
-	c := NewClient(srv.URL, "tok")
-	items, err := c.GetRecentlyAdded(context.Background(), []Library{
-		{ID: "lib-books-001", MediaType: "book"},
-		{ID: "lib-pods-002", MediaType: "podcast"},
-	})
-	if err != nil {
-		t.Fatalf("GetRecentlyAdded() error: %v", err)
-	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
-	}
-	if items[0].ID != "li-pod-001" {
-		t.Errorf("items[0].ID = %q, want li-pod-001", items[0].ID)
-	}
-	if items[1].ID != "li-book-001" {
-		t.Errorf("items[1].ID = %q, want li-book-001", items[1].ID)
-	}
-}
-
-func TestSearchPodcastEpisodesHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/libraries/lib-pod/items":
-			if r.URL.Query().Get("page") != "0" {
-				t.Errorf("page = %q, want 0", r.URL.Query().Get("page"))
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{
-				"results": [
-					{
-						"id": "pod-001",
-						"libraryId": "lib-pod",
-						"mediaType": "podcast",
-						"media": {"metadata": {"title": "Joe Rogan"}}
-					}
-				],
-				"total": 1,
-				"limit": 100,
-				"page": 0
-			}`))
-		case "/api/libraries/lib-pod/search":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"book":[],"podcast":[]}`))
-		case "/api/items/pod-001":
-			if r.URL.Query().Get("expanded") != "1" {
-				t.Error("expected expanded=1 query param")
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{
-				"id": "pod-001",
-				"libraryId": "lib-pod",
-				"mediaType": "podcast",
-				"media": {
-					"metadata": {"title": "Joe Rogan"},
-					"episodes": [
-						{"id": "ep-001", "title": "Joe Rogan Experience #1", "duration": 3600},
-						{"id": "ep-002", "title": "Another Show", "duration": 1800},
-						{"id": "ep-003", "title": "Joe Rogan Experience #2", "duration": 4200}
-					]
-				}
-			}`))
-		default:
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient(srv.URL, "tok")
-	items, err := c.SearchPodcastEpisodes(context.Background(), "lib-pod", "Joe Rogan")
-	if err != nil {
-		t.Fatalf("SearchPodcastEpisodes() error: %v", err)
-	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 matching episode hits, got %d", len(items))
-	}
-	if items[0].RecentEpisode == nil || items[0].RecentEpisode.ID != "ep-001" {
-		t.Fatalf("expected first hit to expose episode ep-001, got %#v", items[0].RecentEpisode)
-	}
-	if items[1].RecentEpisode == nil || items[1].RecentEpisode.ID != "ep-003" {
-		t.Fatalf("expected second hit to expose episode ep-003, got %#v", items[1].RecentEpisode)
-	}
-}
-
-func TestSearchPodcastEpisodesHTTP_FindsEpisodeWhenShowSearchWouldMiss(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/libraries/lib-pod/items":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{
-				"results": [
-					{
-						"id": "pod-001",
-						"libraryId": "lib-pod",
-						"mediaType": "podcast",
-						"media": {"metadata": {"title": "Joe Rogan"}}
-					}
-				],
-				"total": 1,
-				"limit": 100,
-				"page": 0
-			}`))
-		case "/api/items/pod-001":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{
-				"id": "pod-001",
-				"libraryId": "lib-pod",
-				"mediaType": "podcast",
-				"media": {
-					"metadata": {"title": "Joe Rogan"},
-					"episodes": [
-						{"id": "ep-001", "title": "Jason...", "duration": 3600}
-					]
-				}
-			}`))
-		default:
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-
-	c := NewClient(srv.URL, "tok")
-	items, err := c.SearchPodcastEpisodes(context.Background(), "lib-pod", "Jas")
-	if err != nil {
-		t.Fatalf("SearchPodcastEpisodes() error: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 matching episode hit, got %d", len(items))
-	}
-	if items[0].RecentEpisode == nil || items[0].RecentEpisode.Title != "Jason..." {
-		t.Fatalf("expected Jason episode hit, got %#v", items[0].RecentEpisode)
-	}
-}
-
 func TestSortSeriesItems_MultipleSeriesInSeriesList(t *testing.T) {
 	// Each item belongs to two series (s1, s2) with independent sequences.
 	// SeriesByID must select the sequence for the requested series rather than
@@ -839,5 +664,68 @@ func TestGetRecentEpisodesHTTP(t *testing.T) {
 	}
 	if item2.Media.Metadata.AuthorName == nil || *item2.Media.Metadata.AuthorName != "" {
 		t.Errorf("AuthorName = %v, want empty string", item2.Media.Metadata.AuthorName)
+	}
+}
+
+func TestGetLibraryItemsBatchKeepsTheOrderOfTheIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/items/")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "` + id + `", "mediaType": "podcast"}`))
+	}))
+	defer srv.Close()
+
+	ids := make([]string, 2*batchFetchConcurrency+1)
+	for i := range ids {
+		ids[i] = "item-" + strconv.Itoa(i)
+	}
+	c := NewClient(srv.URL, "tok")
+	items, err := c.GetLibraryItemsBatch(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("GetLibraryItemsBatch() error: %v", err)
+	}
+	if len(items) != len(ids) {
+		t.Fatalf("GetLibraryItemsBatch() gave %d items, want %d", len(items), len(ids))
+	}
+	for i, item := range items {
+		if item == nil || item.ID != ids[i] {
+			t.Fatalf("items[%d] = %+v, want the item %q", i, item, ids[i])
+		}
+	}
+}
+
+func TestGetLibraryItemsBatchReturnsTheErrorOfOneItem(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/items/bad" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id": "ok"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	items, err := c.GetLibraryItemsBatch(context.Background(), []string{"ok", "bad", "ok"})
+	if !IsHTTPStatus(err, http.StatusInternalServerError) {
+		t.Fatalf("GetLibraryItemsBatch() = %v, %v; want the error of the status 500", items, err)
+	}
+}
+
+func TestGetLibraryItemsBatchWithACanceledContextReturnsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id": "a"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// A goroutine of the batch can take a slot or see the canceled context
+	// first. Each run must return an error.
+	for range 50 {
+		items, err := c.GetLibraryItemsBatch(ctx, []string{"a"})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("GetLibraryItemsBatch() = %v, %v; want context.Canceled", items, err)
+		}
 	}
 }

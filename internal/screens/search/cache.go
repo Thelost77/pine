@@ -116,7 +116,10 @@ type Cache struct {
 
 	mu        sync.Mutex
 	snapshots map[string]*librarySnapshot
-	builds    map[string]*snapshotBuild
+	// builds holds the build in flight of each library. An invalidation
+	// removes the build: its data can be from before the change, so it
+	// stores nothing.
+	builds map[string]*snapshotBuild
 }
 
 type snapshotBuild struct {
@@ -169,8 +172,16 @@ func NewCache(client *cache.Client, store *cache.Store) *Cache {
 	if client != nil {
 		client.OnInvalidate = func() {
 			c.mu.Lock()
+			defer c.mu.Unlock()
+			// The client clears the store before it calls this function. A
+			// build can store its snapshot between the two steps.
+			if c.store != nil {
+				for libraryID := range c.snapshots {
+					_ = c.store.Delete(cache.SearchSnapshotKey(libraryID))
+				}
+			}
 			c.snapshots = make(map[string]*librarySnapshot)
-			c.mu.Unlock()
+			c.builds = make(map[string]*snapshotBuild)
 		}
 	}
 	return c
@@ -183,39 +194,8 @@ func (c *Cache) Invalidate(libraryID string) {
 	}
 	c.mu.Lock()
 	delete(c.snapshots, libraryID)
+	delete(c.builds, libraryID)
 	c.mu.Unlock()
-}
-
-// UpdateItem replaces cached metadata for a single item in-place.
-// This avoids a full re-fetch from ABS which can return stale data.
-func (c *Cache) UpdateItem(item abs.LibraryItem) {
-	if c == nil || item.LibraryID == "" {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	snap, ok := c.snapshots[item.LibraryID]
-	if !ok {
-		return
-	}
-	title := item.Media.Metadata.Title
-	author := item.Media.Metadata.DisplayAuthor()
-	if author == "Unknown author" {
-		author = ""
-	}
-	for i, e := range snap.entries {
-		if e.itemID == item.ID {
-			snap.entries[i].title = title
-			snap.entries[i].author = author
-			snap.entries[i].primarySearchText = normalizeSearchText(title)
-			snap.entries[i].secondarySearchText = normalizeSearchText(author)
-			snap.entries[i].combinedSearchText = combineSearchText(title, author)
-			snap.entries[i].fuzzySearchText = compactNormalizedText(combineSearchText(title, author))
-			snap.entries[i].primaryTokens = tokenizeSearchText(normalizeSearchText(title))
-			snap.entries[i].combinedTokens = tokenizeSearchText(combineSearchText(title, author))
-			return
-		}
-	}
 }
 
 // Prepare ensures the library snapshot exists before the user starts searching.
@@ -245,16 +225,29 @@ func (c *Cache) PrebuildCmd(libraryID, libraryMediaType string) tea.Cmd {
 	}
 }
 
-// Search returns search results from a cached per-library snapshot.
-func (c *Cache) Search(ctx context.Context, libraryID, libraryMediaType, query string) ([]abs.LibraryItem, error) {
+// Search returns search results from the cached snapshot of a library. The
+// command palette calls it in the Update loop, so it does not wait for the
+// network: if no snapshot is ready, it returns no results and builds the
+// snapshot in the background.
+func (c *Cache) Search(_ context.Context, libraryID, libraryMediaType, query string) ([]abs.LibraryItem, error) {
 	normalized := normalizeQuery(query)
 	if normalized == "" {
 		return nil, nil
 	}
+	if c == nil || c.client == nil {
+		return nil, fmt.Errorf("not authenticated")
+	}
 
-	snapshot, err := c.ensureSnapshot(ctx, libraryID, libraryMediaType)
-	if err != nil {
-		return nil, err
+	c.mu.Lock()
+	snapshot, ok := c.readySnapshot(libraryID, libraryMediaType)
+	c.mu.Unlock()
+	if !ok {
+		go func() {
+			if err := c.Prepare(context.Background(), libraryID, libraryMediaType); err != nil {
+				logger.Warn("search snapshot build failed", "libraryID", libraryID, "err", err)
+			}
+		}()
+		return nil, nil
 	}
 
 	return snapshot.filter(normalized), nil
@@ -269,14 +262,23 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	snapshot, ok := c.readySnapshot(libraryID, libraryMediaType)
+	if !ok {
+		return nil, false
+	}
+	return snapshot.items, true
+}
 
+// readySnapshot returns the snapshot of a library from memory or from the
+// store, with no network request. The caller holds c.mu.
+func (c *Cache) readySnapshot(libraryID, libraryMediaType string) (*librarySnapshot, bool) {
 	resolvedID, resolvedMediaType := libraryID, libraryMediaType // Best effort without blocking
 
 	// 1. Check in-memory cache
 	if snapshot, ok := c.snapshots[resolvedID]; ok {
 		if c.now().Sub(snapshot.builtAt) <= c.ttl && snapshot.mediaType == resolvedMediaType {
 			snapshot.lastAccessedAt = c.now()
-			return snapshot.items, true
+			return snapshot, true
 		}
 	}
 
@@ -296,7 +298,7 @@ func (c *Cache) TryGetAll(libraryID, libraryMediaType string) ([]abs.LibraryItem
 						items:          persisted.Items,
 					}
 					c.snapshots[resolvedID] = snapshot
-					return snapshot.items, true
+					return snapshot, true
 				}
 			}
 		}
@@ -366,6 +368,16 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 	if err == nil {
 		snapshot.builtAt = now
 		snapshot.lastAccessedAt = now
+	}
+
+	// The check of the build and the writes are one step under c.mu, so an
+	// invalidation comes before or after both.
+	c.mu.Lock()
+	current := c.builds[resolvedID] == build
+	if current {
+		delete(c.builds, resolvedID)
+	}
+	if err == nil && current {
 		// Persist to disk cache
 		if c.store != nil {
 			persistedEntries := make([]PersistedEntry, len(snapshot.entries))
@@ -381,11 +393,6 @@ func (c *Cache) ensureSnapshot(ctx context.Context, libraryID, libraryMediaType 
 				Items:          snapshot.items,
 			}, c.ttl)
 		}
-	}
-
-	c.mu.Lock()
-	delete(c.builds, resolvedID)
-	if err == nil {
 		c.snapshots[resolvedID] = snapshot
 	}
 	build.snapshot = snapshot
@@ -617,7 +624,7 @@ func (c *Cache) resolveLibrary(ctx context.Context, libraryID, libraryMediaType 
 	if err != nil {
 		return "", "", fmt.Errorf("fetch libraries: %w", err)
 	}
-	libs, _ = c.client.FilterAudioLibraries(ctx, libs)
+	libs = c.client.FilterAudioLibraries(ctx, libs)
 	if len(libs) == 0 {
 		return "", "", nil
 	}

@@ -156,13 +156,13 @@ func (m *Model) contentSearchFunc() components.SearchFunc {
 			texts = append(texts, label)
 		}
 
-		for _, t := range m.tracks {
+		for i, t := range m.tracks {
 			label := fmt.Sprintf("Queue: %s — %s", t.Name, t.DisplayArtist())
 			candidates = append(candidates, components.PaletteItem{
 				Label:  label,
 				Action: components.ActionPlayDirect,
 				ItemID: t.ID,
-				Data:   t,
+				Data:   queue.JumpQueueMsg{Index: i},
 			})
 			texts = append(texts, label)
 		}
@@ -255,21 +255,9 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 		}
 		return m, nil
 	case components.ActionNextTrack:
-		if len(m.tracks) > 0 && m.currentIndex+1 < len(m.tracks) {
-			return m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
-		}
-		return m, nil
+		return m.playNext()
 	case components.ActionPrevTrack:
-		if m.playerState.Position > 3.0 {
-			if m.mpv != nil {
-				return m, player.SeekCmd(m.mpv, 0)
-			}
-			return m, nil
-		}
-		if len(m.tracks) > 0 && m.currentIndex-1 >= 0 {
-			return m.startPlaybackAt(m.currentIndex - 1)
-		}
-		return m, nil
+		return m.playPrevious()
 	case components.ActionClearQueue:
 		return m.Update(queue.QueueActionMsg{Action: "clear"})
 	case components.ActionShuffleQueue:
@@ -385,6 +373,9 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 	case components.ActionPlayDirect:
 		if m.isSubliminalActive() {
 			return m, m.err.SetError(fmt.Errorf("stop subliminal mode before starting another track"))
+		}
+		if jump, ok := data.(queue.JumpQueueMsg); ok {
+			return m.startPlaybackAt(jump.Index)
 		}
 		if track, ok := data.(jellyfin.Track); ok {
 			m.tracks = append(m.tracks, track)

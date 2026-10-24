@@ -74,6 +74,7 @@ type PlaySessionData struct {
 	TrackDuration    float64
 	TrackFilename    string
 	TranscriptIno    string
+	HasLibraryFiles  bool // the session gave the files of the item
 }
 
 // QueueEntry represents a queued book or podcast episode.
@@ -83,7 +84,10 @@ type QueueEntry struct {
 }
 
 // SyncTickMsg fires every 30 seconds to sync playback progress with ABS.
-type SyncTickMsg struct{}
+// Generation is the playGeneration of the playback that started the ticks.
+type SyncTickMsg struct {
+	Generation uint64
+}
 
 // SessionSyncedMsg carries the result of a sync of the playback session.
 // NewSessionID is the session that pine opened because the server did not

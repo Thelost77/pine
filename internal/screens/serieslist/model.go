@@ -118,6 +118,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.Err
 			return m, nil
 		}
+		m.err = nil
 		m.total = msg.Total
 		m.page = msg.Page
 		if msg.Page == 0 {

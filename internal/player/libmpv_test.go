@@ -240,7 +240,8 @@ func TestLibmpvHandleLogMessagesGiveTheCauseWithoutSecrets(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	texts := collectLogMessages(t, mpvLogLevel, srv.URL+"/book.wav?token=query-secret")
+	streamURL := strings.Replace(srv.URL, "://", "://reader:userinfo-secret@", 1) + "/book.wav?token=query-secret"
+	texts := collectLogMessages(t, mpvLogLevel, streamURL)
 
 	all := strings.Join(texts, "\n")
 	if !strings.Contains(all, "404") {
@@ -249,7 +250,7 @@ func TestLibmpvHandleLogMessagesGiveTheCauseWithoutSecrets(t *testing.T) {
 	if !strings.Contains(all, "/book.wav") {
 		t.Errorf("the log messages do not name the stream: %q", texts)
 	}
-	for _, secret := range []string{testAuthValue, "query-secret"} {
+	for _, secret := range []string{testAuthValue, "userinfo-secret", "query-secret"} {
 		if strings.Contains(all, secret) {
 			t.Errorf("the log messages contain the secret %q: %q", secret, texts)
 		}

@@ -14,7 +14,6 @@ type ModelAccessor interface {
 	PlayerSpeed() float64
 	PlayerMinimumRate() float64
 	PlayerMaximumRate() float64
-	QueueLength() int
 	CanSeek() bool
 	CanGoNext() bool
 	CanGoPrevious() bool

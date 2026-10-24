@@ -1,8 +1,8 @@
 package mpris
 
 import (
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -34,13 +34,24 @@ func (m *mockAccessor) PlayerVolume() int          { return m.volume }
 func (m *mockAccessor) PlayerSpeed() float64       { return m.speed }
 func (m *mockAccessor) PlayerMinimumRate() float64 { return 0.5 }
 func (m *mockAccessor) PlayerMaximumRate() float64 { return 4.0 }
-func (m *mockAccessor) QueueLength() int           { return m.queueLen }
 func (m *mockAccessor) CanSeek() bool              { return !m.noSeek }
 func (m *mockAccessor) CanGoNext() bool            { return m.queueLen > 0 }
 func (m *mockAccessor) CanGoPrevious() bool        { return true }
 
 func accessorFn(a *mockAccessor) func() ModelAccessor {
 	return func() ModelAccessor { return a }
+}
+
+// playerProperty returns the value of a player property of a server that
+// reads the app state from a.
+func playerProperty(t *testing.T, a *mockAccessor, name string) any {
+	t.Helper()
+	s := NewServer("spruce", RootAdapter{Name: "spruce"}, accessorFn(a), PlayerActions{})
+	value, err := s.get(playerInterface, name)
+	if err != nil {
+		t.Fatalf("Get(%s) error: %v", name, err)
+	}
+	return value.Value()
 }
 
 func TestRootAdapterIdentity(t *testing.T) {
@@ -52,8 +63,9 @@ func TestRootAdapterIdentity(t *testing.T) {
 	if v, err := r.DesktopEntry(); err != nil || v != "pine" {
 		t.Errorf("DesktopEntry() = %q, %v; want %q, nil", v, err, "pine")
 	}
-	if v, err := r.CanQuit(); err != nil || !v {
-		t.Errorf("CanQuit() = %v, %v; want true, nil", v, err)
+	// Quit does nothing, so MPRIS requires CanQuit to be false.
+	if v, err := r.CanQuit(); err != nil || v {
+		t.Errorf("CanQuit() = %v, %v; want false, nil", v, err)
 	}
 	if v, err := r.CanRaise(); err != nil || v {
 		t.Errorf("CanRaise() = %v, %v; want false, nil", v, err)
@@ -77,7 +89,7 @@ func TestRootAdapterIdentity(t *testing.T) {
 	}
 }
 
-func TestPlayerAdapterPlaybackStatus(t *testing.T) {
+func TestServerPlaybackStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		accessor *mockAccessor
@@ -89,19 +101,14 @@ func TestPlayerAdapterPlaybackStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewPlayerAdapter("spruce", accessorFn(tt.accessor), PlayerActions{})
-			got, err := p.PlaybackStatus()
-			if err != nil {
-				t.Fatalf("PlaybackStatus() error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("PlaybackStatus() = %q; want %q", got, tt.want)
+			if got := playerProperty(t, tt.accessor, "PlaybackStatus"); got != string(tt.want) {
+				t.Errorf("PlaybackStatus = %q; want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestPlayerAdapterVolumeConversion(t *testing.T) {
+func TestServerVolumeConversion(t *testing.T) {
 	tests := []struct {
 		name      string
 		appVol    int
@@ -115,38 +122,14 @@ func TestPlayerAdapterVolumeConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &mockAccessor{volume: tt.appVol}
-			p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
-			got, err := p.Volume()
-			if err != nil {
-				t.Fatalf("Volume() error: %v", err)
-			}
-			if got != tt.wantMPRIS {
-				t.Errorf("Volume() = %v; want %v", got, tt.wantMPRIS)
+			if got := playerProperty(t, a, "Volume"); got != tt.wantMPRIS {
+				t.Errorf("Volume = %v; want %v", got, tt.wantMPRIS)
 			}
 		})
 	}
 }
 
-func TestPlayerAdapterSetVolumeConversion(t *testing.T) {
-	var capturedVol int
-	actions := PlayerActions{
-		SetVolume: func(vol int) error {
-			capturedVol = vol
-			return nil
-		},
-	}
-	a := &mockAccessor{}
-	p := NewPlayerAdapter("spruce", accessorFn(a), actions)
-
-	if err := p.SetVolume(0.75); err != nil {
-		t.Fatalf("SetVolume() error: %v", err)
-	}
-	if capturedVol != 75 {
-		t.Errorf("SetVolume(0.75) set app volume = %d; want 75", capturedVol)
-	}
-}
-
-func TestPlayerAdapterMetadata(t *testing.T) {
+func TestServerMetadata(t *testing.T) {
 	a := &mockAccessor{
 		hasItem:  true,
 		title:    "The Hobbit",
@@ -154,126 +137,83 @@ func TestPlayerAdapterMetadata(t *testing.T) {
 		itemID:   "item-123",
 		duration: 3600,
 	}
-	p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
 
-	meta, err := p.Metadata()
-	if err != nil {
-		t.Fatalf("Metadata() error: %v", err)
+	metadata, ok := playerProperty(t, a, "Metadata").(map[string]dbus.Variant)
+	if !ok {
+		t.Fatalf("Metadata is not a{sv}")
 	}
-	if meta.Title != "The Hobbit" {
-		t.Errorf("Metadata().Title = %q; want %q", meta.Title, "The Hobbit")
+	want := map[string]any{
+		"mpris:trackid": dbus.ObjectPath("/org/spruce/track/item_123"),
+		"mpris:length":  int64(3_600_000_000),
+		"xesam:title":   "The Hobbit",
+		"xesam:artist":  []string{"J.R.R. Tolkien"},
 	}
-	if len(meta.Artist) != 1 || meta.Artist[0] != "J.R.R. Tolkien" {
-		t.Errorf("Metadata().Artist = %v; want [J.R.R. Tolkien]", meta.Artist)
+	if len(metadata) != len(want) {
+		t.Errorf("Metadata has %d entries; want %d", len(metadata), len(want))
 	}
-	if meta.Length != time.Hour {
-		t.Errorf("Metadata().Length = %v; want %v", meta.Length, time.Hour)
-	}
-	expectedPath := dbus.ObjectPath("/org/spruce/track/item_123")
-	if meta.TrackID != expectedPath {
-		t.Errorf("Metadata().TrackID = %q; want %q", meta.TrackID, expectedPath)
+	for key, wantValue := range want {
+		if got := metadata[key].Value(); !reflect.DeepEqual(got, wantValue) {
+			t.Errorf("Metadata[%s] = %#v; want %#v", key, got, wantValue)
+		}
 	}
 }
 
-func TestPlayerAdapterMetadataNoItem(t *testing.T) {
-	a := &mockAccessor{}
-	p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
-
-	meta, err := p.Metadata()
-	if err != nil {
-		t.Fatalf("Metadata() error: %v", err)
+func TestServerMetadataNoItem(t *testing.T) {
+	metadata, ok := playerProperty(t, &mockAccessor{}, "Metadata").(map[string]dbus.Variant)
+	if !ok {
+		t.Fatalf("Metadata is not a{sv}")
 	}
-	if meta.Title != "" {
-		t.Errorf("Metadata().Title = %q; want empty", meta.Title)
+	if _, ok := metadata["xesam:title"]; ok || len(metadata) != 1 {
+		t.Errorf("Metadata = %v; want only mpris:trackid", metadata)
 	}
-}
-
-func TestPlayerAdapterPosition(t *testing.T) {
-	a := &mockAccessor{position: 42.5}
-	p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
-
-	pos, err := p.Position()
-	if err != nil {
-		t.Fatalf("Position() error: %v", err)
-	}
-	if pos != 42_500_000 {
-		t.Errorf("Position() = %d; want 42500000", pos)
+	// MPRIS reserves this path for no track.
+	if got, want := metadata["mpris:trackid"].Value(), dbus.ObjectPath("/org/mpris/MediaPlayer2/TrackList/NoTrack"); got != want {
+		t.Errorf("Metadata[mpris:trackid] = %#v; want %#v", got, want)
 	}
 }
 
-func TestPlayerAdapterSeek(t *testing.T) {
-	var capturedOffset time.Duration
-	actions := PlayerActions{
-		Seek: func(offset time.Duration) error {
-			capturedOffset = offset
-			return nil
-		},
-	}
-	a := &mockAccessor{}
-	p := NewPlayerAdapter("spruce", accessorFn(a), actions)
-
-	if err := p.Seek(10 * time.Second); err != nil {
-		t.Fatalf("Seek() error: %v", err)
-	}
-	if capturedOffset != 10*time.Second {
-		t.Errorf("Seek(10s) captured = %v; want 10s", capturedOffset)
+// TestServerCanPlayAndPauseNeedAnItem verifies that Play and Pause are
+// possible only with a current item. Without one, Play does nothing.
+func TestServerCanPlayAndPauseNeedAnItem(t *testing.T) {
+	for _, hasItem := range []bool{false, true} {
+		a := &mockAccessor{hasItem: hasItem}
+		for _, property := range []string{"CanPlay", "CanPause"} {
+			if got := playerProperty(t, a, property); got != hasItem {
+				t.Errorf("%s with an item %v = %v; want %v", property, hasItem, got, hasItem)
+			}
+		}
 	}
 }
 
-func TestPlayerAdapterCanGoNext(t *testing.T) {
+func TestServerPosition(t *testing.T) {
+	if got := playerProperty(t, &mockAccessor{position: 42.5}, "Position"); got != int64(42_500_000) {
+		t.Errorf("Position = %#v; want int64(42500000)", got)
+	}
+}
+
+func TestServerCanGoNext(t *testing.T) {
 	a := &mockAccessor{queueLen: 2}
-	p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
-
-	v, err := p.CanGoNext()
-	if err != nil {
-		t.Fatalf("CanGoNext() error: %v", err)
-	}
-	if !v {
-		t.Error("CanGoNext() = false; want true (queue has items)")
+	if got := playerProperty(t, a, "CanGoNext"); got != true {
+		t.Error("CanGoNext = false; want true (queue has items)")
 	}
 
 	a.queueLen = 0
-	v, err = p.CanGoNext()
-	if err != nil {
-		t.Fatalf("CanGoNext() error: %v", err)
-	}
-	if v {
-		t.Error("CanGoNext() = true; want false (empty queue)")
+	if got := playerProperty(t, a, "CanGoNext"); got != false {
+		t.Error("CanGoNext = true; want false (empty queue)")
 	}
 }
 
-func TestPlayerAdapterCanControl(t *testing.T) {
-	a := &mockAccessor{}
-	p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
-
-	v, err := p.CanControl()
-	if err != nil {
-		t.Fatalf("CanControl() error: %v", err)
-	}
-	if !v {
-		t.Error("CanControl() = false; want true")
+func TestServerCanControl(t *testing.T) {
+	if got := playerProperty(t, &mockAccessor{}, "CanControl"); got != true {
+		t.Error("CanControl = false; want true")
 	}
 }
 
-func TestPlayerAdapterRates(t *testing.T) {
+func TestServerRates(t *testing.T) {
 	a := &mockAccessor{speed: 1.5}
-	p := NewPlayerAdapter("spruce", accessorFn(a), PlayerActions{})
-
-	rate, err := p.Rate()
-	if err != nil {
-		t.Fatalf("Rate() error: %v", err)
-	}
-	if rate != 1.5 {
-		t.Errorf("Rate() = %v; want 1.5", rate)
-	}
-
-	min, err := p.MinimumRate()
-	if err != nil || min != 0.5 {
-		t.Errorf("MinimumRate() = %v, %v; want 0.5, nil", min, err)
-	}
-
-	max, err := p.MaximumRate()
-	if err != nil || max != 4.0 {
-		t.Errorf("MaximumRate() = %v, %v; want 4.0, nil", max, err)
+	for name, want := range map[string]float64{"Rate": 1.5, "MinimumRate": 0.5, "MaximumRate": 4.0} {
+		if got := playerProperty(t, a, name); got != want {
+			t.Errorf("%s = %v; want %v", name, got, want)
+		}
 	}
 }

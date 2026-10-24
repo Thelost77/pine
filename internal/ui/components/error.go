@@ -18,14 +18,20 @@ type ErrMsg struct {
 	Err error
 }
 
-// ErrorDismissMsg signals that the error banner should be dismissed.
-type ErrorDismissMsg struct{}
+// ErrorDismissMsg signals that the auto-dismiss time of an error ended.
+// Generation identifies that error in the banner.
+type ErrorDismissMsg struct {
+	Generation uint64
+}
 
 // ErrorBanner holds the state for the error banner overlay.
 type ErrorBanner struct {
 	err   error
 	style lipgloss.Style
 	width int
+	// generation counts the calls of SetError. It ties a dismiss tick to its
+	// error.
+	generation uint64
 }
 
 // NewErrorBanner creates a new error banner with the given error style.
@@ -43,12 +49,21 @@ func (b *ErrorBanner) SetWidth(w int) {
 // SetError sets the current error and returns a command to auto-dismiss.
 func (b *ErrorBanner) SetError(err error) tea.Cmd {
 	b.err = err
-	return scheduleDismiss()
+	b.generation++
+	return scheduleDismiss(b.generation)
 }
 
 // Dismiss clears the error.
 func (b *ErrorBanner) Dismiss() {
 	b.err = nil
+}
+
+// HandleDismiss clears the error if msg is the dismiss tick of the current
+// error. The tick of an earlier error does nothing.
+func (b *ErrorBanner) HandleDismiss(msg ErrorDismissMsg) {
+	if msg.Generation == b.generation {
+		b.err = nil
+	}
 }
 
 // HasError returns true if there is an active error.
@@ -96,9 +111,10 @@ func sanitizeTerminalText(msg string) string {
 	}, msg)
 }
 
-// scheduleDismiss returns a command that sends ErrorDismissMsg after the timeout.
-func scheduleDismiss() tea.Cmd {
+// scheduleDismiss returns a command that sends ErrorDismissMsg for the error
+// of the generation after the timeout.
+func scheduleDismiss(generation uint64) tea.Cmd {
 	return tea.Tick(ErrorDismissTimeout, func(_ time.Time) tea.Msg {
-		return ErrorDismissMsg{}
+		return ErrorDismissMsg{Generation: generation}
 	})
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"net/http"
 	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
@@ -74,34 +74,37 @@ type Model struct {
 	queue                    []QueueEntry
 	restorePaused            bool
 	propertyUnavailableCount int
-	lastMprisEmit            time.Time
 	seekPending              bool
 	seekPendingSince         time.Time
 	lastEvict                time.Time
 
-	// Series auto-continue
+	// playRequested is true after a play request of the user. The restore
+	// of the last session at the start then does nothing.
+	playRequested bool
+
+	// The library and the series of the item that plays: for the cache
+	// eviction after the playback, and for the series auto-continue.
 	playbackLibraryID string
 	playbackSeriesID  string
 
-	keys        KeyMap
-	err         components.ErrorBanner
-	help        components.HelpOverlay
-	width       int
-	height      int
-	styles      ui.Styles
-	config      config.Config
-	db          *db.Store
-	client      *cache.Client
-	cacheStore  *cache.Store
-	mpv         player.Player
-	mprisBridge *mpris.Bridge
-	program     *tea.Program
-	mprisState  *MprisState
+	keys       KeyMap
+	err        components.ErrorBanner
+	help       components.HelpOverlay
+	width      int
+	height     int
+	styles     ui.Styles
+	config     config.Config
+	db         *db.Store
+	client     *cache.Client
+	cacheStore *cache.Store
+	mpv        player.Player
+	mprisLink  *mprisLink
+	mprisState *MprisState
 
 	palette components.Palette
 
 	lastPlayedTitle   string
-	lastPlayedItemID  string
+	lastPlayedTrackID string
 	lastPlayedAuthors []string
 	currentAuthors    []string
 
@@ -148,6 +151,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		client:       client,
 		cacheStore:   cacheStore,
 		mpv:          mpv,
+		mprisLink:    &mprisLink{},
 		mprisState:   &MprisState{},
 		palette:      palette,
 	}
@@ -162,15 +166,30 @@ func (m Model) Queue() []QueueEntry {
 	return cp
 }
 
-// SetProgram sets the bubbletea program reference and starts the MPRIS bridge.
+// mprisLink holds the MPRIS bridge. The copies of the model share it, so the
+// model that the program runs gets the bridge: main calls SetProgram after
+// tea.NewProgram copies the model.
+type mprisLink struct {
+	bridge *mpris.Bridge
+}
+
+// SetProgram starts the MPRIS bridge, which sends the MPRIS requests to p.
 func (m *Model) SetProgram(p *tea.Program) {
-	m.program = p
-	m.mprisBridge = mpris.NewBridge(p, "pine")
+	bridge := mpris.NewBridge(p, "pine")
 	state := m.mprisState
-	m.mprisBridge.Bind(func() mpris.ModelAccessor {
+	bridge.Bind(func() mpris.ModelAccessor {
 		return state
 	}, float64(m.config.Player.SeekSeconds))
-	m.mprisBridge.Start()
+	m.mprisLink.bridge = bridge
+	bridge.Start()
+}
+
+// mprisBridge returns the MPRIS bridge, or nil before SetProgram.
+func (m Model) mprisBridge() *mpris.Bridge {
+	if m.mprisLink == nil {
+		return nil
+	}
+	return m.mprisLink.bridge
 }
 
 // setMprisPlaying applies an MPRIS request to play or pause the active item.
@@ -187,10 +206,11 @@ func (m Model) setMprisPlaying(playing bool) (Model, tea.Cmd) {
 }
 
 func (m *Model) mprisPlaybackCmd() tea.Cmd {
-	if m.mprisBridge == nil {
+	bridge := m.mprisBridge()
+	if bridge == nil {
 		return nil
 	}
-	server := m.mprisBridge.Server()
+	server := bridge.Server()
 	return func() tea.Msg {
 		server.PlaybackChanged()
 		return nil
@@ -198,10 +218,11 @@ func (m *Model) mprisPlaybackCmd() tea.Cmd {
 }
 
 func (m *Model) mprisPlayPauseCmd() tea.Cmd {
-	if m.mprisBridge == nil {
+	bridge := m.mprisBridge()
+	if bridge == nil {
 		return nil
 	}
-	server := m.mprisBridge.Server()
+	server := bridge.Server()
 	return func() tea.Msg {
 		server.StatusChanged()
 		return nil
@@ -209,10 +230,11 @@ func (m *Model) mprisPlayPauseCmd() tea.Cmd {
 }
 
 func (m *Model) mprisEndedCmd() tea.Cmd {
-	if m.mprisBridge == nil {
+	bridge := m.mprisBridge()
+	if bridge == nil {
 		return nil
 	}
-	server := m.mprisBridge.Server()
+	server := bridge.Server()
 	return func() tea.Msg {
 		server.StatusChanged()
 		return nil
@@ -220,26 +242,26 @@ func (m *Model) mprisEndedCmd() tea.Cmd {
 }
 
 func (m *Model) mprisTitleCmd() tea.Cmd {
-	if m.mprisBridge == nil {
+	bridge := m.mprisBridge()
+	if bridge == nil {
 		return nil
 	}
-	server := m.mprisBridge.Server()
+	server := bridge.Server()
 	return func() tea.Msg {
 		server.MetadataChanged()
 		return nil
 	}
 }
 
-func (m *Model) mprisPositionCmd() tea.Cmd {
-	if m.mprisBridge == nil {
+// mprisSeekedCmd tells MPRIS clients the position after a seek. A client
+// computes the position of a playback from the rate, so a position tick sends
+// no Seeked.
+func (m *Model) mprisSeekedCmd() tea.Cmd {
+	bridge := m.mprisBridge()
+	if bridge == nil {
 		return nil
 	}
-	now := time.Now()
-	if now.Sub(m.lastMprisEmit) < time.Second {
-		return nil
-	}
-	m.lastMprisEmit = now
-	server := m.mprisBridge.Server()
+	server := bridge.Server()
 	pos := m.player.Position
 	return func() tea.Msg {
 		server.Seeked(pos)
@@ -248,14 +270,24 @@ func (m *Model) mprisPositionCmd() tea.Cmd {
 }
 
 func (m *Model) mprisVolumeCmd() tea.Cmd {
-	if m.mprisBridge == nil {
+	bridge := m.mprisBridge()
+	if bridge == nil {
 		return nil
 	}
-	server := m.mprisBridge.Server()
+	server := bridge.Server()
 	return func() tea.Msg {
 		server.VolumeChanged()
 		return nil
 	}
+}
+
+// mprisTrackID returns the MPRIS track of an item, or of an episode of a
+// podcast: each episode is a track of its own.
+func mprisTrackID(itemID, episodeID string) string {
+	if episodeID == "" {
+		return itemID
+	}
+	return itemID + "_" + episodeID
 }
 
 func (m *Model) syncMprisState() {
@@ -267,9 +299,9 @@ func (m *Model) syncMprisState() {
 	if title == "" {
 		title = m.lastPlayedTitle
 	}
-	itemID := m.itemID
+	itemID := mprisTrackID(m.itemID, m.episodeID)
 	if itemID == "" {
-		itemID = m.lastPlayedItemID
+		itemID = m.lastPlayedTrackID
 	}
 	playing := m.isPlaying()
 	m.mprisState.Update(func(s *MprisState) {
@@ -331,7 +363,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case components.ErrorDismissMsg:
-		m.err.Dismiss()
+		m.err.HandleDismiss(msg)
 		m.propagateSize()
 		return m, nil
 
@@ -346,6 +378,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case login.LoginSuccessMsg:
 		logger.Info("login success", "server", msg.ServerURL, "user", msg.Username)
+		// The cache keys have no account, so the cached data of an earlier
+		// account must go.
+		if m.cacheStore != nil {
+			if err := m.cacheStore.ClearAll(); err != nil {
+				logger.Warn("failed to clear the cache at login", "err", err)
+			}
+		}
 		absClient := abs.NewClient(msg.ServerURL, msg.Token)
 		m.client = cache.NewClient(absClient, m.cacheStore)
 		if m.db != nil {
@@ -355,14 +394,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ServerURL: msg.ServerURL,
 				Username:  msg.Username,
 				Token:     msg.Token,
-				IsDefault: true,
 			}); err != nil {
 				logger.Warn("failed to save account", "err", err)
 			}
 		}
 		m.home = home.New(m.styles, m.client)
-		m.library = library.New(m.styles, m.client, m.searchCache, "", nil)
 		m.searchCache = search.NewCache(m.client, m.cacheStore)
+		m.library = library.New(m.styles, m.client, m.searchCache, "", nil)
 		m.metadataEdit = metadataedit.New(m.styles, abs.LibraryItem{MediaType: "book"})
 		m.seriesList = serieslist.New(m.styles, m.client, "", "")
 		m.series = series.New(m.styles, m.client, "", "", "")
@@ -622,12 +660,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCaptionLoaded(msg)
 
 	case PlaySessionMsg:
-		logger.Info("play session started", "sessionID", msg.Session.SessionID, "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)
+		logger.Info("play session started", "session", abs.SessionTag(msg.Session.SessionID), "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)
 		return m.handlePlaySessionMsg(msg)
 
 	case RestoreSessionMsg:
 		if msg.Item == nil {
 			logger.Debug("no session to restore")
+			return m, nil
+		}
+		if m.isPlaying() || m.playRequested {
+			logger.Info("skipping session restore: the user started a playback", "itemID", msg.Item.ID)
 			return m, nil
 		}
 		logger.Info("restoring session", "itemID", msg.Item.ID, "savedEpisodeID", msg.SavedEpisodeID, "resolvedEpisodeID", func() string {
@@ -640,6 +682,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startRestorePlaybackCmd(msg)
 
 	case RestorePlaySessionMsg:
+		if m.isPlaying() || m.playRequested {
+			session := msg.PlaySessionMsg.Session
+			logger.Info("closing restored session: the user started a playback", "session", abs.SessionTag(session.SessionID), "itemID", session.ItemID)
+			return m, closeRestoredSessionCmd(m.client, session.SessionID)
+		}
 		m.restorePaused = true
 		return m.handlePlaySessionMsg(msg.PlaySessionMsg)
 
@@ -650,7 +697,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePositionMsg(msg)
 
 	case SyncTickMsg:
-		m, cmd := m.handleSyncTick()
+		m, cmd := m.handleSyncTick(msg)
 		if m.cacheStore != nil && time.Since(m.lastEvict) > 5*time.Minute {
 			_ = m.cacheStore.EvictExpired()
 			m.lastEvict = time.Now()
@@ -716,12 +763,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.mprisVolumeCmd()
 
 	case mpris.SetRateMsg:
-		m.player.Speed = msg.Rate
-		m.syncMprisState()
-		if m.mpv != nil {
-			return m, tea.Batch(m.mprisPlaybackCmd(), player.SetSpeedCmd(m.mpv, msg.Rate))
-		}
-		return m, m.mprisPlaybackCmd()
+		return m.setSpeed(msg.Rate)
 
 	case PlaybackStoppedMsg:
 		return m, nil
@@ -732,6 +774,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case search.CacheReadyMsg:
+		// The palette shows the results of its query when the snapshot of its
+		// library is ready.
+		if libID, _ := m.currentLibraryForSearch(); msg.LibraryID == libID {
+			m.palette.Refresh()
+		}
 		return m.updateScreen(msg)
 
 	case SleepTimerExpiredMsg:
@@ -766,6 +813,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger.Error("playback error", "err", msg.Err)
 			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
 				return m2, cmd
+			}
+			// A start that fails with no session, for example at the change
+			// of a track, ends the playback. Its sleep timer must not stop
+			// the next playback.
+			if !m.isPlaying() {
+				m.sleepDeadline = time.Time{}
+				m.sleepDuration = 0
+				m.player.SleepRemaining = ""
 			}
 			cmd := m.err.SetError(msg.Err)
 			m.propagateSize()
@@ -844,8 +899,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if key.Matches(msg, m.keys.GlobalPalette) {
-			m.openGlobalPalette()
-			return m, nil
+			return m, m.openGlobalPalette()
 		}
 		if key.Matches(msg, m.keys.ChapterOverlay) {
 			if m.canOpenChapterOverlay() {
@@ -900,6 +954,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.syncMprisState()
 	return m.updateScreen(msg)
+}
+
+// setSpeed sets the speed of the player and tells MPRIS clients the rate.
+func (m Model) setSpeed(speed float64) (Model, tea.Cmd) {
+	m.player.Speed = speed
+	m.syncMprisState()
+	if m.mpv != nil {
+		return m, tea.Batch(m.mprisPlaybackCmd(), player.SetSpeedCmd(m.mpv, speed))
+	}
+	return m, m.mprisPlaybackCmd()
 }
 
 // --- Sleep timer ---
@@ -1029,13 +1093,9 @@ func (m *Model) clearPlaybackSessionState() {
 	m.playbackLibraryID = ""
 }
 
-// isUnauthorized returns true if the error message indicates HTTP 401.
+// isUnauthorized returns true if the server answered HTTP 401.
 func isUnauthorized(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "status 401") || strings.Contains(msg, "unauthorized")
+	return abs.IsHTTPStatus(err, http.StatusUnauthorized)
 }
 
 // checkUnauthorized checks if the error indicates a 401 response.
@@ -1064,7 +1124,11 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 	return m, tea.Batch(stopCmd, initCmd), true
 }
 
-func (m *Model) openGlobalPalette() {
+// openGlobalPalette opens the palette. The search of the palette answers only
+// from a snapshot that is ready, so if the snapshot of the library is not
+// ready, it returns a command that builds it. CacheReadyMsg then shows the
+// results of the query.
+func (m *Model) openGlobalPalette() tea.Cmd {
 	playerItems, navItems := m.buildStaticPaletteItems()
 	contextItems := m.buildContextPaletteItems()
 
@@ -1074,6 +1138,15 @@ func (m *Model) openGlobalPalette() {
 	}
 	items = append(items, navItems...)
 	m.palette.Open(items, m.contentSearchFunc())
+
+	libID, libMediaType := m.currentLibraryForSearch()
+	if m.searchCache == nil || libID == "" {
+		return nil
+	}
+	if _, ok := m.searchCache.TryGetAll(libID, libMediaType); ok {
+		return nil
+	}
+	return m.searchCache.PrebuildCmd(libID, libMediaType)
 }
 
 func (m Model) contentSearchFunc() components.SearchFunc {
@@ -1098,11 +1171,12 @@ func (m Model) contentSearchFunc() components.SearchFunc {
 			}
 			itemCopy := res
 			items = append(items, components.PaletteItem{
-				Label:     label,
-				Action:    components.ActionContentNavigate,
-				LibraryID: res.LibraryID,
-				ItemID:    res.ID,
-				Data:      itemCopy,
+				Label:      label,
+				Action:     components.ActionContentNavigate,
+				PlayAction: components.ActionPlayDirect,
+				LibraryID:  res.LibraryID,
+				ItemID:     res.ID,
+				Data:       itemCopy,
 			})
 		}
 		return items
@@ -1258,24 +1332,13 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		return m.handleSeek(float64(m.config.Player.SeekSeconds))
 	case components.ActionSeekBackward:
 		return m.handleSeek(-float64(m.config.Player.SeekSeconds))
+	// The speed keys and MPRIS can set a speed out of the range of the
+	// palette, 0.25 to 3.0. Speed Up never lowers a speed, and Speed Down
+	// never raises one.
 	case components.ActionSpeedUp:
-		m.player.Speed += 0.25
-		if m.player.Speed > 3.0 {
-			m.player.Speed = 3.0
-		}
-		if m.mpv != nil {
-			return m, player.SetSpeedCmd(m.mpv, m.player.Speed)
-		}
-		return m, nil
+		return m.setSpeed(max(m.player.Speed, min(m.player.Speed+0.25, 3.0)))
 	case components.ActionSpeedDown:
-		m.player.Speed -= 0.25
-		if m.player.Speed < 0.25 {
-			m.player.Speed = 0.25
-		}
-		if m.mpv != nil {
-			return m, player.SetSpeedCmd(m.mpv, m.player.Speed)
-		}
-		return m, nil
+		return m.setSpeed(min(m.player.Speed, max(m.player.Speed-0.25, 0.25)))
 	case components.ActionNextChapter:
 		if len(m.chapters) > 0 {
 			return m.seekToChapter(m.nextChapter())
@@ -1545,7 +1608,7 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		}
 		return m, nil
 	case components.ActionBrowseSeries:
-		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
+		m.seriesList = serieslist.New(m.styles, m.client, libraryID, payload)
 		return m.navigate(ScreenSeriesList)
 	case components.ActionSwitchLibrary:
 		return m, nil
@@ -1574,12 +1637,13 @@ func (m Model) prewarmCacheCmd() tea.Cmd {
 	}
 }
 
-func (m *Model) handleDeleteItem(cmd detail.DeleteItemCmd) (tea.Model, tea.Cmd) {
+func (m Model) handleDeleteItem(cmd detail.DeleteItemCmd) (Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
 	}
+	client := m.client
 	return m, func() tea.Msg {
-		err := m.client.DeleteItem(context.Background(), cmd.ItemID, false)
+		err := client.DeleteItem(context.Background(), cmd.ItemID, false)
 		if err != nil {
 			return components.ErrMsg{Err: fmt.Errorf("failed to delete item: %w", err)}
 		}
@@ -1587,12 +1651,13 @@ func (m *Model) handleDeleteItem(cmd detail.DeleteItemCmd) (tea.Model, tea.Cmd) 
 	}
 }
 
-func (m *Model) handleDeleteEpisode(cmd detail.DeleteEpisodeCmd) (tea.Model, tea.Cmd) {
+func (m Model) handleDeleteEpisode(cmd detail.DeleteEpisodeCmd) (Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
 	}
+	client := m.client
 	return m, func() tea.Msg {
-		err := m.client.DeleteEpisode(context.Background(), cmd.ItemID, cmd.EpisodeID, false)
+		err := client.DeleteEpisode(context.Background(), cmd.ItemID, cmd.EpisodeID, false)
 		if err != nil {
 			return components.ErrMsg{Err: fmt.Errorf("failed to delete episode: %w", err)}
 		}

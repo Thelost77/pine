@@ -19,7 +19,6 @@ type MprisState struct {
 	minimumRate   float64
 	maximumRate   float64
 	volume        int
-	queueLength   int
 	canSeek       bool
 	canGoNext     bool
 	canGoPrevious bool
@@ -168,13 +167,4 @@ func (s *MprisState) CanGoPrevious() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.canGoPrevious
-}
-
-func (s *MprisState) QueueLength() int {
-	if s == nil {
-		return 0
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.queueLength
 }

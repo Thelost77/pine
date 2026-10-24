@@ -3,6 +3,7 @@ package metadataedit
 import (
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/ui"
@@ -65,7 +66,11 @@ type Model struct {
 	episode    *abs.PodcastEpisode
 	generation uint64
 
-	inputs  [numFields]textinput.Model
+	inputs [numFields]textinput.Model
+	// initial holds the value of each input before an edit. A field changes
+	// only if its input differs from it. The input puts a space for a
+	// newline or a tab, so its value can differ from the value of ABS.
+	initial [numFields]string
 	focused int
 
 	authorEditable bool
@@ -87,7 +92,7 @@ func New(styles ui.Styles, item abs.LibraryItem) Model {
 	inputs[fieldTitle] = newInput("Title", meta.Title, 256)
 	inputs[fieldAuthor] = newInput("Author", initialAuthorValue(meta), 256)
 
-	series := meta.PrimarySeries()
+	series := meta.Series
 	seriesName := ""
 	seriesSequence := ""
 	if series != nil {
@@ -106,6 +111,7 @@ func New(styles ui.Styles, item abs.LibraryItem) Model {
 		seriesEditable: item.MediaType == "book" && !meta.HasMultipleSeries(),
 		styles:         styles,
 	}
+	m.setInitialValues()
 	_ = m.updateFocus()
 	return m
 }
@@ -127,17 +133,33 @@ func NewEpisode(styles ui.Styles, item abs.LibraryItem, episode abs.PodcastEpiso
 		focused:    fieldTitle,
 		styles:     styles,
 	}
+	m.setInitialValues()
 	_ = m.updateFocus()
 	return m
 }
 
+// newInput makes an input for value. The input takes at least the whole value,
+// so that an edit does not cut a long value.
 func newInput(placeholder, value string, limit int) textinput.Model {
 	input := textinput.New()
 	input.Placeholder = placeholder
-	input.CharLimit = limit
+	input.CharLimit = max(limit, utf8.RuneCountInString(value))
 	input.Prompt = ""
 	input.SetValue(value)
 	return input
+}
+
+func (m *Model) setInitialValues() {
+	for i := range m.inputs {
+		m.initial[i] = m.inputs[i].Value()
+	}
+}
+
+// fieldValue returns the trimmed value of a field, and whether the user
+// changed it.
+func (m Model) fieldValue(field int) (string, bool) {
+	value := strings.TrimSpace(m.inputs[field].Value())
+	return value, value != strings.TrimSpace(m.initial[field])
 }
 
 // Init returns the initial command.
@@ -187,8 +209,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.fieldEditable(m.focused) {
 		return m, nil
 	}
-	m.validationErr = ""
-	m.saveErr = nil
+	if _, ok := msg.(tea.KeyMsg); ok {
+		m.validationErr = ""
+		m.saveErr = nil
+	}
 	var cmd tea.Cmd
 	m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
 	return m, cmd
@@ -236,15 +260,14 @@ func (m Model) saveEpisode() (Model, tea.Cmd) {
 }
 
 func (m Model) buildRequest() (abs.UpdateMediaRequest, bool, string) {
-	meta := m.item.Media.Metadata
 	request := abs.UpdateMediaRequest{}
 	changed := false
 
-	title := strings.TrimSpace(m.inputs[fieldTitle].Value())
+	title, titleChanged := m.fieldValue(fieldTitle)
 	if title == "" {
 		return request, false, "Title cannot be empty"
 	}
-	if title != strings.TrimSpace(meta.Title) {
+	if titleChanged {
 		request.Metadata.Title = &title
 		changed = true
 	}
@@ -276,32 +299,28 @@ func (m Model) buildEpisodeRequest() (abs.UpdatePodcastEpisodeRequest, bool, str
 		return request, false, "No episode selected"
 	}
 
-	title := strings.TrimSpace(m.inputs[fieldTitle].Value())
+	title, titleChanged := m.fieldValue(fieldTitle)
 	if title == "" {
 		return request, false, "Title cannot be empty"
 	}
-	if title != strings.TrimSpace(episode.Title) {
+	if titleChanged {
 		request.Title = &title
 		changed = true
 	}
 
-	description := strings.TrimSpace(m.inputs[fieldDescription].Value())
-	if description != strings.TrimSpace(episode.Description) {
+	if description, ok := m.fieldValue(fieldDescription); ok {
 		request.Description = &description
 		changed = true
 	}
-	season := strings.TrimSpace(m.inputs[fieldSeason].Value())
-	if season != strings.TrimSpace(episode.Season) {
+	if season, ok := m.fieldValue(fieldSeason); ok {
 		request.Season = &season
 		changed = true
 	}
-	episodeNumber := strings.TrimSpace(m.inputs[fieldEpisode].Value())
-	if episodeNumber != strings.TrimSpace(episode.Episode) {
+	if episodeNumber, ok := m.fieldValue(fieldEpisode); ok {
 		request.Episode = &episodeNumber
 		changed = true
 	}
-	episodeType := strings.TrimSpace(m.inputs[fieldEpisodeType].Value())
-	if episodeType != strings.TrimSpace(episode.EpisodeType) {
+	if episodeType, ok := m.fieldValue(fieldEpisodeType); ok {
 		request.EpisodeType = &episodeType
 		changed = true
 	}
@@ -310,13 +329,8 @@ func (m Model) buildEpisodeRequest() (abs.UpdatePodcastEpisodeRequest, bool, str
 }
 
 func (m Model) buildAuthors() ([]abs.Author, bool) {
-	newName := strings.TrimSpace(m.inputs[fieldAuthor].Value())
-	original, ok := singleAuthor(m.item.Media.Metadata)
-	originalName := ""
-	if ok {
-		originalName = strings.TrimSpace(original.Name)
-	}
-	if newName == originalName {
+	newName, changed := m.fieldValue(fieldAuthor)
+	if !changed {
 		return nil, false
 	}
 	if newName == "" {
@@ -326,15 +340,12 @@ func (m Model) buildAuthors() ([]abs.Author, bool) {
 }
 
 func (m Model) buildSeries() ([]abs.SeriesSequence, bool) {
-	newName := strings.TrimSpace(m.inputs[fieldSeries].Value())
-	newSequence := strings.TrimSpace(m.inputs[fieldSequence].Value())
+	newName, nameChanged := m.fieldValue(fieldSeries)
+	newSequence, sequenceChanged := m.fieldValue(fieldSequence)
+	if !nameChanged && !sequenceChanged {
+		return nil, false
+	}
 	original, ok := singleSeries(m.item.Media.Metadata)
-	if ok && newName == strings.TrimSpace(original.Name) && newSequence == strings.TrimSpace(original.Sequence) {
-		return nil, false
-	}
-	if !ok && newName == "" && newSequence == "" {
-		return nil, false
-	}
 	if newName == "" {
 		return []abs.SeriesSequence{}, true
 	}

@@ -80,8 +80,9 @@ type Model struct {
 
 	playGeneration uint64
 	playSessionID  string
-	lastHeartbeat  time.Time
-	lastMprisEmit  time.Time
+	// playItemID is the item of the open Jellyfin play session, or "".
+	playItemID    string
+	lastHeartbeat time.Time
 
 	sleepDeadline   time.Time
 	sleepDuration   time.Duration
@@ -307,9 +308,12 @@ func (m *Model) handleAuthReset(err error) (tea.Model, tea.Cmd) {
 		m.mediaCancel = nil
 		m.mediaContext = nil
 	}
+	// The next login can be for a different user or server, so the screens
+	// load their content again.
+	m.libraryScreen = library.New(m.styles)
+	m.playlistsScreen = playlists.New(m.styles)
 	m.syncQueueScreen()
 	m.client = nil
-	m.playlistsScreen.SetClient(nil)
 	m.screen = ScreenLogin
 	return m, tea.Batch(stopCmd, m.err.SetError(err), m.loginScreen.Init())
 }
@@ -399,7 +403,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					newM, stopCmd := m.stopAllPlayback()
 					return newM, tea.Batch(stopCmd, tea.Quit)
 				}
-				if m.isSubliminalRunning() {
+				screenKey := m.isScreenKey(msg)
+				if m.isSubliminalRunning() && !screenKey {
 					if key.Matches(msg, m.keys.SleepTimer) {
 						return m.cycleSleepTimer()
 					}
@@ -413,7 +418,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.setSubliminalPaused(m.playerState.Playing)
 					}
 				}
-				if m.IsPlaying() {
+				if m.IsPlaying() && !screenKey {
 					if key.Matches(msg, m.keys.SleepTimer) {
 						return m.cycleSleepTimer()
 					}
@@ -432,19 +437,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.handleSeek(-seek)
 					}
 					if key.Matches(msg, m.keys.NextTrack) {
-						if len(m.tracks) > 0 && m.currentIndex+1 < len(m.tracks) {
-							return m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
-						}
-						return m, nil
+						return m.playNext()
 					}
 					if key.Matches(msg, m.keys.PrevTrack) {
-						if m.playerState.Position > 3.0 {
-							return m.handleSeek(-m.playerState.Position)
-						}
-						if len(m.tracks) > 0 && m.currentIndex-1 >= 0 {
-							return m.startPlaybackAt(m.currentIndex - 1)
-						}
-						return m, nil
+						return m.playPrevious()
 					}
 					if key.Matches(msg, m.keys.RepeatTrack) {
 						return m.Update(queue.QueueActionMsg{
@@ -532,7 +528,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.libraryScreen.PatchTrack(msg.ItemID, msg.Req.Name, msg.Req.Artists, msg.Req.Album)
+			albumCmd := m.libraryScreen.PatchAlbum(msg.ItemID, msg.Req.Name, msg.Req.Artists, msg.Req.ProductionYear)
 			m.syncQueueScreen()
+			return m, tea.Batch(cmd, albumCmd)
 		}
 		return m, cmd
 
@@ -553,13 +551,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = m.mediaCache.Close()
 			m.mediaCache = nil
 		}
+		var errCmd tea.Cmd
 		if m.cfg != nil {
 			m.cfg.Server.Address = msg.ServerURL
 			m.cfg.Server.Username = msg.Username
 			m.cfg.Server.Token = msg.Token
 			m.cfg.Server.UserID = msg.UserID
 			if err := config.Save(filepath.Join(config.ConfigDir(), "config.toml"), *m.cfg); err != nil {
-				_ = m.err.SetError(fmt.Errorf("failed to save config: %w", err))
+				errCmd = m.err.SetError(fmt.Errorf("failed to save config: %w", err))
 			}
 		}
 		deviceName, deviceID := "", ""
@@ -571,7 +570,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playlistsScreen.SetClient(m.client)
 		var cmd tea.Cmd
 		m.loginScreen, cmd = m.loginScreen.Update(msg)
-		return m, tea.Batch(cmd, m.fetchMusicLibrariesCmd())
+		return m, tea.Batch(cmd, m.fetchMusicLibrariesCmd(), errCmd)
 
 	case musicLibrariesLoadedMsg:
 		if msg.err == nil && len(msg.libraries) > 0 {
@@ -759,7 +758,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.navigate(ScreenMetadataEdit)
 
 	case components.ErrorDismissMsg:
-		m.err.Dismiss()
+		m.err.HandleDismiss(msg)
 		return m, nil
 
 	case queue.JumpQueueMsg:
@@ -840,17 +839,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, player.SetPauseCmd(m.mpv, !m.playerState.Playing)
 			}
 		case "next":
-			newM, cmd := m.startPlaybackAt(m.nextIndex(m.currentIndex + 1))
-			return newM, cmd
+			return m.playNext()
 		case "prev":
-			if m.playerState.Position > 3.0 {
-				if m.mpv != nil {
-					return m, player.SeekCmd(m.mpv, 0)
-				}
-			} else {
-				newM, cmd := m.startPlaybackAt(m.currentIndex - 1)
-				return newM, cmd
-			}
+			return m.playPrevious()
 		case "shuffle":
 			if len(m.tracks) > 1 {
 				currentID := ""
@@ -967,17 +958,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isSubliminalActive() {
 			return m, nil
 		}
-		if m.playerState.Position > 3.0 {
-			if m.mpv != nil {
-				return m, player.SeekCmd(m.mpv, 0)
-			}
-		} else {
-			newM, cmd := m.startPlaybackAt(m.currentIndex - 1)
-			return newM, cmd
-		}
-
-	case mpris.SeekMsg:
-		return m.handleSeek(msg.Offset)
+		return m.playPrevious()
 
 	case mpris.SeekRelativeMsg:
 		return m.handleSeek(msg.OffsetSeconds)
@@ -1021,6 +1002,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, cmd
+}
+
+// isScreenKey reports whether the active screen binds msg itself. The screen
+// then gets the key before the playback keys: S on the library and the
+// playlists queues the selection shuffled, and r on the queue repeats the
+// selected track.
+func (m *Model) isScreenKey(msg tea.KeyMsg) bool {
+	switch m.screen {
+	case ScreenLibrary, ScreenPlaylists:
+		return msg.String() == "S"
+	case ScreenQueue:
+		return msg.String() == "r"
+	}
+	return false
 }
 
 // View is defined in render.go.

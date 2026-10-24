@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
@@ -15,6 +17,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/home"
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
+	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -264,7 +267,7 @@ func TestE2E_DetailToPlayback(t *testing.T) {
 	assertViewContains(t, m, "The Great Gatsby")
 
 	// Trigger sync
-	res, cmd := m.Update(SyncTickMsg{})
+	res, cmd := m.Update(SyncTickMsg{Generation: m.playGeneration})
 	m = res.(Model)
 	executeBatchCmds(cmd)
 
@@ -1101,7 +1104,7 @@ func TestE2E_401Redirect(t *testing.T) {
 	assertScreen(t, m, ScreenHome)
 
 	// Simulate a 401 error
-	res, _ := m.Update(components.ErrMsg{Err: fmt.Errorf("unexpected status 401: unauthorized")})
+	res, _ := m.Update(components.ErrMsg{Err: &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized}})
 	m = res.(Model)
 
 	// Should redirect to login
@@ -1431,7 +1434,7 @@ func TestE2E_FullJourney(t *testing.T) {
 	assertAPICallMade(t, log, "POST", "/api/me/item/")
 
 	// === Phase 8: Sync tick ===
-	res, cmd := m.Update(SyncTickMsg{})
+	res, cmd := m.Update(SyncTickMsg{Generation: m.playGeneration})
 	m = res.(Model)
 	executeBatchCmds(cmd)
 	assertAPICallMade(t, log, "POST", "/api/session/sess-e2e/sync")
@@ -2327,11 +2330,8 @@ func TestE2E_SessionRestore(t *testing.T) {
 
 	// Save a session to the DB simulating a previous listening session
 	if err := store.SaveListeningSession(db.ListeningSession{
-		ItemID:      "item-001",
-		EpisodeID:   "",
-		SessionID:   "sess-old",
-		CurrentTime: 100.0,
-		Duration:    3600.0,
+		ItemID:    "item-001",
+		EpisodeID: "",
 	}); err != nil {
 		t.Fatalf("SaveListeningSession: %v", err)
 	}
@@ -2373,11 +2373,8 @@ func TestE2E_SessionRestorePodcastMissingEpisodeSkipsSilently(t *testing.T) {
 	m = e2eSetSize(m, 120, 40)
 
 	if err := store.SaveListeningSession(db.ListeningSession{
-		ItemID:      "pod-001",
-		EpisodeID:   "pod-001-ep-missing",
-		SessionID:   "sess-old-pod",
-		CurrentTime: 100.0,
-		Duration:    1800.0,
+		ItemID:    "pod-001",
+		EpisodeID: "pod-001-ep-missing",
 	}); err != nil {
 		t.Fatalf("SaveListeningSession: %v", err)
 	}
@@ -2418,11 +2415,8 @@ func TestE2E_SessionRestorePodcastNoTracksSkipsSilently(t *testing.T) {
 	m = e2eSetSize(m, 120, 40)
 
 	if err := store.SaveListeningSession(db.ListeningSession{
-		ItemID:      "pod-001",
-		EpisodeID:   "pod-001-ep-001",
-		SessionID:   "sess-old-pod",
-		CurrentTime: 100.0,
-		Duration:    1800.0,
+		ItemID:    "pod-001",
+		EpisodeID: "pod-001-ep-001",
 	}); err != nil {
 		t.Fatalf("SaveListeningSession: %v", err)
 	}
@@ -2516,5 +2510,143 @@ func TestE2E_CacheSurvivesRestart(t *testing.T) {
 	personalizedCallsAfter := log.count("GET", "/api/libraries/lib-001/personalized")
 	if personalizedCallsAfter != personalizedCallsBefore {
 		t.Fatalf("expected cache hit on restart, but API was called again: before=%d after=%d", personalizedCallsBefore, personalizedCallsAfter)
+	}
+}
+
+// TestE2E_PaletteSearchResultsPlayWithP verifies that pine gives each search
+// result of the command palette the play action of the key p.
+func TestE2E_PaletteSearchResultsPlayWithP(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	cmd := m.home.Init()
+	m, cmd = feedCmd(m, cmd)
+	m = feedCmdChain(m, cmd, 5)
+	// The search answers only from a snapshot that is built.
+	m, _ = feedCmdWithin(m, m.prewarmCacheCmd(), slowCmdWait)
+
+	results := m.contentSearchFunc()("gatsby")
+	if len(results) == 0 {
+		t.Fatal("the search found no item")
+	}
+	for _, item := range results {
+		if item.PlayAction != components.ActionPlayDirect {
+			t.Errorf("search result %q has the play action %v, want ActionPlayDirect", item.Label, item.PlayAction)
+		}
+	}
+}
+
+// TestE2E_PaletteShowsResultsWhenSnapshotIsBuilt verifies that the palette
+// shows the results of its query when the search snapshot is built while the
+// palette is open. The search does not wait for the build.
+func TestE2E_PaletteShowsResultsWhenSnapshotIsBuilt(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	// No snapshot is ready, for example after the TTL of the snapshot.
+	m.searchCache.Invalidate("lib-001")
+
+	res, openCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gatsby")})
+	m = res.(Model)
+	if strings.Contains(m.palette.View(), "The Great Gatsby") {
+		t.Fatal("the palette shows a result before the snapshot is built")
+	}
+	if err := m.searchCache.Prepare(context.Background(), "lib-001", "book"); err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	m, _ = feedCmdWithin(m, openCmd, slowCmdWait)
+
+	if !strings.Contains(m.palette.View(), "The Great Gatsby") {
+		t.Error("the palette shows no result after the snapshot is built")
+	}
+}
+
+// TestE2E_MetadataSaveBuildsSearchSnapshot verifies that a metadata save
+// builds the search snapshot again: the save clears the snapshots.
+func TestE2E_MetadataSaveBuildsSearchSnapshot(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	// The save clears the caches before Update gets SavedMsg.
+	m.client.OnInvalidate()
+
+	item := testLibraryItem("item-001", "The Great Gatsby")
+	res, cmd := m.Update(metadataedit.SavedMsg{ItemID: item.ID, Item: &item})
+	m = res.(Model)
+	_, _ = feedCmdWithin(m, cmd, slowCmdWait)
+
+	if _, ok := m.searchCache.TryGetAll("lib-001", "book"); !ok {
+		t.Error("no search snapshot after the metadata save")
+	}
+}
+
+// TestE2E_LoginGivesLibraryTheSearchCacheOfTheLogin verifies that the library
+// screen reads the search cache that the login makes: the prewarm of the
+// login builds the snapshots in that cache.
+func TestE2E_LoginGivesLibraryTheSearchCacheOfTheLogin(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModel(srv, &mockPlayer{})
+	res, _ := m.Update(login.LoginSuccessMsg{Token: "jwt-token-e2e", ServerURL: srv.URL, Username: "alice"})
+	m = res.(Model)
+	if err := m.searchCache.Prepare(context.Background(), "lib-001", "book"); err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+
+	m.library.Configure("lib-001", []abs.Library{{ID: "lib-001", Name: "Audiobooks", MediaType: "book"}})
+	if m.library.Loading() || len(m.library.Items()) == 0 {
+		t.Error("the library does not read the snapshot of the search cache of the login")
+	}
+}
+
+// TestE2E_LoginClearsCacheStore verifies that a login clears the persistent
+// cache: its keys have no account, so the data of the account of an earlier
+// login must not reach the new account.
+func TestE2E_LoginClearsCacheStore(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	store, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	cacheStore := cache.NewStore(store)
+	if err := cacheStore.Put(cache.ItemKey("item-old-account"), abs.LibraryItem{ID: "item-old-account"}, time.Hour); err != nil {
+		t.Fatalf("Put() error: %v", err)
+	}
+
+	m := NewWithPlayer(config.Default(), store, nil, cacheStore, &mockPlayer{})
+	res, _ := m.Update(login.LoginSuccessMsg{Token: "jwt-token-e2e", ServerURL: srv.URL, Username: "alice"})
+	m = res.(Model)
+
+	var item abs.LibraryItem
+	if hit, err := cacheStore.Get(cache.ItemKey("item-old-account"), &item); err != nil || hit {
+		t.Errorf("Get() = %v, %v after the login, want a miss", hit, err)
+	}
+	if m.client == nil {
+		t.Error("the login sets no client")
 	}
 }

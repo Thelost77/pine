@@ -1,9 +1,7 @@
 package abs
 
 import (
-	"cmp"
 	"encoding/json"
-	"slices"
 	"strings"
 )
 
@@ -48,16 +46,6 @@ type LibraryFile struct {
 type FileMetadata struct {
 	Filename string `json:"filename"`
 	Ext      string `json:"ext,omitempty"`
-}
-
-// SortRecentlyAdded sorts library items by descending addedAt and then title.
-func SortRecentlyAdded(items []LibraryItem) {
-	slices.SortFunc(items, func(a, b LibraryItem) int {
-		if byAddedAt := cmp.Compare(b.AddedAt, a.AddedAt); byAddedAt != 0 {
-			return byAddedAt
-		}
-		return cmp.Compare(a.Media.Metadata.Title, b.Media.Metadata.Title)
-	})
 }
 
 // Media contains the media content and metadata of a library item.
@@ -195,14 +183,6 @@ func (m MediaMetadata) DisplayAuthor() string {
 	return "Unknown author"
 }
 
-// PrimarySeries returns the first ABS series entry used by pine's current single-series behavior.
-func (m MediaMetadata) PrimarySeries() *SeriesSequence {
-	if len(m.SeriesList) > 0 {
-		return &m.SeriesList[0]
-	}
-	return m.Series
-}
-
 // HasMultipleAuthors reports whether ABS returned more than one non-empty author.
 func (m MediaMetadata) HasMultipleAuthors() bool {
 	count := 0
@@ -245,21 +225,14 @@ type SeriesSequence struct {
 	Sequence string `json:"sequence,omitempty"`
 }
 
-// SeriesBook is a library item embedded in some ABS responses with sequence info.
-type SeriesBook struct {
-	LibraryItem
-	Sequence string `json:"sequence,omitempty"`
-}
-
 // Series contains series metadata returned by ABS.
 type Series struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Description string       `json:"description,omitempty"`
-	LibraryID   string       `json:"libraryId,omitempty"`
-	AddedAt     int64        `json:"addedAt,omitempty"`
-	UpdatedAt   int64        `json:"updatedAt,omitempty"`
-	Books       []SeriesBook `json:"books"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	LibraryID   string `json:"libraryId,omitempty"`
+	AddedAt     int64  `json:"addedAt,omitempty"`
+	UpdatedAt   int64  `json:"updatedAt,omitempty"`
 }
 
 // SeriesContents combines series metadata with the library items in that series.

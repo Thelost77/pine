@@ -17,15 +17,25 @@ type updateProgressRequest struct {
 	IsFinished  *bool   `json:"isFinished,omitempty"`
 }
 
-// UpdateProgress updates the user's progress on a library item.
-func (c *Client) UpdateProgress(ctx context.Context, itemID string, currentTime, progress float64, isFinished bool) error {
-	path := fmt.Sprintf("/api/me/progress/%s", itemID)
+// progressPath is the path of the progress of a library item, or of a
+// podcast episode if episodeID is not empty.
+func progressPath(itemID, episodeID string) string {
+	path := "/api/me/progress/" + itemID
+	if episodeID != "" {
+		path += "/" + episodeID
+	}
+	return path
+}
+
+// UpdateProgress updates the user's progress on a library item, or on a
+// podcast episode if episodeID is not empty.
+func (c *Client) UpdateProgress(ctx context.Context, itemID, episodeID string, currentTime, progress float64, isFinished bool) error {
 	body := updateProgressRequest{
 		CurrentTime: currentTime,
 		Progress:    progress,
 		IsFinished:  &isFinished,
 	}
-	_, err := c.do(ctx, http.MethodPatch, path, body)
+	_, err := c.do(ctx, http.MethodPatch, progressPath(itemID, episodeID), body)
 	if err != nil {
 		return fmt.Errorf("update progress: %w", err)
 	}
@@ -35,15 +45,11 @@ func (c *Client) UpdateProgress(ctx context.Context, itemID string, currentTime,
 // UpdatePosition updates the user's position in a library item, or in a
 // podcast episode if episodeID is not empty. It sends no isFinished key.
 func (c *Client) UpdatePosition(ctx context.Context, itemID, episodeID string, currentTime, progress float64) error {
-	path := fmt.Sprintf("/api/me/progress/%s", itemID)
-	if episodeID != "" {
-		path += "/" + episodeID
-	}
 	body := updateProgressRequest{
 		CurrentTime: currentTime,
 		Progress:    progress,
 	}
-	_, err := c.do(ctx, http.MethodPatch, path, body)
+	_, err := c.do(ctx, http.MethodPatch, progressPath(itemID, episodeID), body)
 	if err != nil {
 		return fmt.Errorf("update position: %w", err)
 	}
@@ -63,19 +69,4 @@ func (c *Client) GetMediaProgress(ctx context.Context, itemID string) (*MediaPro
 		return nil, fmt.Errorf("get media progress: unmarshal: %w", err)
 	}
 	return &progress, nil
-}
-
-// UpdateEpisodeProgress updates the user's progress on a podcast episode.
-func (c *Client) UpdateEpisodeProgress(ctx context.Context, itemID, episodeID string, currentTime, progress float64, isFinished bool) error {
-	path := fmt.Sprintf("/api/me/progress/%s/%s", itemID, episodeID)
-	body := updateProgressRequest{
-		CurrentTime: currentTime,
-		Progress:    progress,
-		IsFinished:  &isFinished,
-	}
-	_, err := c.do(ctx, http.MethodPatch, path, body)
-	if err != nil {
-		return fmt.Errorf("update episode progress: %w", err)
-	}
-	return nil
 }

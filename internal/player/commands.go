@@ -2,6 +2,7 @@ package player
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Thelost77/pine/internal/logger"
@@ -117,32 +118,14 @@ type PlayerLaunchErrMsg struct {
 // PlayerQuitMsg signals that mpv has been quit.
 type PlayerQuitMsg struct{}
 
-// formatStartPosition builds mpv's --start value.
-// If duration is known and start is past 0, it uses a percent so mpv can jump
-// by byte offset instead of scanning to a timestamp.
-func formatStartPosition(startTime, duration float64) string {
-	if duration > 0 && startTime > 0 {
-		pct := startTime / duration * 100
-		if pct > 100 {
-			pct = 100
-		}
-		return fmt.Sprintf("%f%%", pct)
-	}
-	return fmt.Sprintf("%f", startTime)
-}
-
-// LaunchCmd starts playback. If paused is true, mpv starts paused.
-// httpHeaders are the HTTP request headers of the stream.
-// duration is the current track length in seconds; it is used to start at a
-// percent offset when resuming into a long HTTP stream. Pass 0 to start at
-// startTime in seconds.
+// LaunchCmd starts playback at startTime in seconds. If paused is true, mpv
+// starts paused. httpHeaders are the HTTP request headers of the stream.
 // Returns PlayerReadyMsg when mpv has accepted the file. A file that fails to
 // load ends the playback later.
-func LaunchCmd(p Player, url string, startTime, duration float64, paused bool, httpHeaders []string, volume int, generation uint64) tea.Cmd {
+func LaunchCmd(p Player, url string, startTime float64, paused bool, httpHeaders []string, volume int, generation uint64) tea.Cmd {
 	return func() tea.Msg {
-		startStr := formatStartPosition(startTime, duration)
-		logger.Info("launching mpv", "startTime", startTime, "duration", duration, "start", startStr, "generation", generation)
-		if err := p.Launch(url, startStr, paused, httpHeaders, volume); err != nil {
+		logger.Info("launching mpv", "startTime", startTime, "generation", generation)
+		if err := p.Launch(url, strconv.FormatFloat(startTime, 'f', -1, 64), paused, httpHeaders, volume); err != nil {
 			logger.Error("mpv launch failed", "err", err)
 			return PlayerLaunchErrMsg{Generation: generation, Err: err}
 		}
@@ -158,24 +141,12 @@ func QuitCmd(p Player) tea.Cmd {
 	}
 }
 
-// SeekCmd sends an absolute seek request to mpv by target seconds.
+// SeekCmd sends an absolute seek request to mpv by target seconds. It returns
+// no message: Seek logs a failure, and the next position tick has the
+// position of the player.
 func SeekCmd(p Player, target float64) tea.Cmd {
 	return func() tea.Msg {
-		err := p.Seek(target)
-		if err != nil {
-			return PositionMsg{Err: err}
-		}
-		return nil
-	}
-}
-
-// SeekRelativeCmd sends a relative seek request to mpv by offset seconds.
-func SeekRelativeCmd(p Player, offset float64) tea.Cmd {
-	return func() tea.Msg {
-		err := p.SeekRelative(offset)
-		if err != nil {
-			return PositionMsg{Err: err}
-		}
+		_ = p.Seek(target)
 		return nil
 	}
 }

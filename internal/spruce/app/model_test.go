@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +18,11 @@ import (
 	"github.com/Thelost77/pine/internal/spruce/jellyfin"
 	"github.com/Thelost77/pine/internal/spruce/screens/library"
 	"github.com/Thelost77/pine/internal/spruce/screens/login"
+	"github.com/Thelost77/pine/internal/spruce/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/spruce/screens/playlists"
 	"github.com/Thelost77/pine/internal/spruce/screens/queue"
 	"github.com/Thelost77/pine/internal/ui/components"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -488,8 +491,8 @@ func TestLibraryLoadUnauthorizedResetsPlaybackAndQueue(t *testing.T) {
 			if m.IsPlaying() || len(m.tracks) != 0 || m.currentIndex != -1 {
 				t.Fatalf("expected stopped empty playback state, playing=%v tracks=%d index=%d", m.IsPlaying(), len(m.tracks), m.currentIndex)
 			}
-			if len(m.queueScreen.Tracks()) != 0 || m.mprisState.QueueLength() != 0 {
-				t.Fatalf("expected cleared queue projections, screen=%d mpris=%d", len(m.queueScreen.Tracks()), m.mprisState.QueueLength())
+			if len(m.queueScreen.Tracks()) != 0 || m.mprisState.CanGoNext() {
+				t.Fatalf("expected cleared queue projections, screen=%d mpris next=%v", len(m.queueScreen.Tracks()), m.mprisState.CanGoNext())
 			}
 			if m.repeatTrackID != "" || m.repeatQueue || m.playerState.RepeatStatus != "" {
 				t.Fatalf("expected cleared repeat state, track=%q queue=%v status=%q", m.repeatTrackID, m.repeatQueue, m.playerState.RepeatStatus)
@@ -727,9 +730,6 @@ func TestAppModel_MPRISCmdHelpers(t *testing.T) {
 	if cmd := m.mprisTitleCmd(); cmd != nil {
 		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
 	}
-	if cmd := m.mprisPositionCmd(); cmd != nil {
-		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
-	}
 	if cmd := m.mprisVolumeCmd(); cmd != nil {
 		t.Errorf("expected nil cmd when bridge is nil, got %v", cmd)
 	}
@@ -742,7 +742,7 @@ func TestAppModel_MPRISCmdHelpers(t *testing.T) {
 
 func TestAppModel_SleepTimer(t *testing.T) {
 	m := New(nil, nil)
-	m.screen = ScreenLibrary
+	m.screen = ScreenQueue
 	tracks := []jellyfin.Track{{ID: "t-1", Name: "Track One"}}
 	newM, _ := m.Update(library.PlayTracksMsg{Tracks: tracks, StartIndex: 0})
 	m = newM.(*Model)
@@ -1084,4 +1084,268 @@ func TestAppModel_EmptyAndFailedQueueAddsDoNotConfirmSuccess(t *testing.T) {
 			t.Fatal("failed add must display the error banner")
 		}
 	})
+}
+
+func TestScreenKeysWorkDuringPlayback(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}, {ID: "t-2", Name: "Track 2"}}
+	m.currentIndex = 0
+	m.syncQueueScreen()
+	m.libraryScreen, _ = m.libraryScreen.Update(library.AlbumsLoadedMsg{
+		Albums: []jellyfin.Album{{ID: "alb-1", Name: "Album One"}},
+	})
+	m.playlistsScreen, _ = m.playlistsScreen.Update(playlists.PlaylistsLoadedMsg{
+		Playlists: []jellyfin.Playlist{{ID: "pl-1", Name: "Road Trip"}},
+	})
+
+	for _, screen := range []Screen{ScreenLibrary, ScreenPlaylists} {
+		m.screen = screen
+		var cmd tea.Cmd
+		m, cmd = update(m, keyMsg("S"))
+		if m.sleepDuration != 0 {
+			t.Fatalf("S on screen %v set the sleep timer to %v", screen, m.sleepDuration)
+		}
+		if cmd == nil {
+			t.Fatalf("S on screen %v returned no command", screen)
+		}
+		if msg, ok := cmd().(library.AddShuffledTracksToQueueMsg); !ok {
+			t.Fatalf("S on screen %v returned %T, want AddShuffledTracksToQueueMsg", screen, msg)
+		}
+	}
+
+	m.screen = ScreenQueue
+	m, _ = update(m, keySpecial(tea.KeyDown))
+	m, cmd := update(m, keyMsg("r"))
+	m, _ = execCmd(m, cmd)
+	if m.repeatTrackID != "t-2" {
+		t.Fatalf("r on the selected queue row repeats %q, want t-2", m.repeatTrackID)
+	}
+}
+
+func TestQueueRowsKeepTheirIndexesWithActiveFilter(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenQueue
+	m.tracks = []jellyfin.Track{
+		{ID: "a-1", Name: "Alpha One"},
+		{ID: "b", Name: "Bravo"},
+		{ID: "a-2", Name: "Alpha Two"},
+	}
+	m.currentIndex = 1
+	m.syncQueueScreen()
+
+	m = applyKeyWithFilter(m, keyMsg("/"))
+	m = applyKeyWithFilter(m, keyMsg("Alpha"))
+	m = applyKeyWithFilter(m, keySpecial(tea.KeyEnter))
+	if !m.queueScreen.HasActiveFilter() {
+		t.Fatal("expected an active queue filter")
+	}
+
+	for range 2 {
+		var cmd tea.Cmd
+		m, cmd = update(m, keyMsg("d"))
+		m, _ = execCmd(m, cmd)
+	}
+	if len(m.tracks) != 1 || m.tracks[0].ID != "b" || m.CurrentItemID() != "b" {
+		t.Fatalf("queue after removing both filtered rows = %+v, current %q; want only b", m.tracks, m.CurrentItemID())
+	}
+}
+
+func TestPositionTickKeepsTheSelectedRowOfAFilteredQueue(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.screen = ScreenQueue
+	for i := range 60 {
+		m.tracks = append(m.tracks, jellyfin.Track{ID: fmt.Sprintf("a-%d", i), Name: fmt.Sprintf("Alpha %02d", i)})
+	}
+	m.tracks = append(m.tracks, jellyfin.Track{ID: "b", Name: "Bravo"})
+	m, _ = m.startPlaybackAt(60)
+
+	m = applyKeyWithFilter(m, keyMsg("/"))
+	m = applyKeyWithFilter(m, keyMsg("Alpha"))
+	m = applyKeyWithFilter(m, keySpecial(tea.KeyEnter))
+	// The filtered rows fill more than one page, so the selection leaves the
+	// first page.
+	for range 25 {
+		m, _ = update(m, keySpecial(tea.KeyDown))
+	}
+	before := selectedQueueIndex(t, m)
+
+	m, _ = update(m, player.PositionMsg{Generation: m.playGeneration, Position: 5, Duration: 100})
+	if after := selectedQueueIndex(t, m); after != before {
+		t.Fatalf("selected queue index after a position tick = %d; want %d", after, before)
+	}
+}
+
+// selectedQueueIndex returns the queue index that 'd' removes.
+func selectedQueueIndex(t *testing.T, m *Model) int {
+	t.Helper()
+	_, cmd := m.queueScreen.Update(keyMsg("d"))
+	if cmd == nil {
+		t.Fatal("the queue has no selected row")
+	}
+	return cmd().(queue.RemoveQueueMsg).Index
+}
+
+// applyKeyWithFilter sends key to m and feeds the filter results back.
+func applyKeyWithFilter(m *Model, key tea.KeyMsg) *Model {
+	m, cmd := update(m, key)
+	return applyFilterMatches(m, cmd)
+}
+
+func applyFilterMatches(m *Model, cmd tea.Cmd) *Model {
+	if cmd == nil {
+		return m
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, batchCmd := range msg {
+			m = applyFilterMatches(m, batchCmd)
+		}
+	case list.FilterMatchesMsg:
+		m, _ = update(m, msg)
+	}
+	return m
+}
+
+func TestLoginAfterAuthResetDropsTheLibraryOfTheOldSession(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m, _ = update(m, login.LoginSuccessMsg{Token: "tok-old", ServerURL: "http://old.invalid", Username: "old", UserID: "usr-old"})
+	m.libraryScreen, _ = m.libraryScreen.Update(library.AlbumsLoadedMsg{
+		Albums: []jellyfin.Album{{ID: "alb-old", Name: "Old Album"}},
+	})
+	m.playlistsScreen, _ = m.playlistsScreen.Update(playlists.PlaylistsLoadedMsg{
+		Playlists: []jellyfin.Playlist{{ID: "pl-old", Name: "Old Playlist"}},
+	})
+
+	m, _ = update(m, library.TracksLoadedMsg{Err: &jellyfin.HTTPStatusError{StatusCode: http.StatusUnauthorized}})
+	if m.screen != ScreenLogin {
+		t.Fatalf("expected the login screen after 401, got %v", m.screen)
+	}
+	m, _ = update(m, login.LoginSuccessMsg{Token: "tok-new", ServerURL: "http://new.invalid", Username: "new", UserID: "usr-new"})
+
+	if albums := m.libraryScreen.Albums(); len(albums) != 0 {
+		t.Fatalf("albums of the old session remain after a new login: %+v", albums)
+	}
+	if lists := m.playlistsScreen.Playlists(); len(lists) != 0 {
+		t.Fatalf("playlists of the old session remain after a new login: %+v", lists)
+	}
+}
+
+func TestPaletteQueueResultJumpsToTheQueuedTrack(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.tracks = []jellyfin.Track{
+		{ID: "t-1", Name: "Airbag"},
+		{ID: "t-2", Name: "Lucky"},
+		{ID: "t-3", Name: "Karma Police"},
+	}
+	m.currentIndex = 0
+
+	var result *components.PaletteItem
+	for _, item := range m.contentSearchFunc()("Karma") {
+		if strings.HasPrefix(item.Label, "Queue: ") {
+			result = &item
+		}
+	}
+	if result == nil {
+		t.Fatal("expected a queue result for Karma")
+	}
+	newM, _ := m.handlePaletteAction(result.Action, result.ItemID, result.Data)
+	m = newM.(*Model)
+	if len(m.tracks) != 3 || m.currentIndex != 2 {
+		t.Fatalf("queue length = %d, current index = %d; want 3 tracks at index 2", len(m.tracks), m.currentIndex)
+	}
+}
+
+func TestAlbumMetadataSaveUpdatesTheAlbumList(t *testing.T) {
+	m := New(nil, nil)
+	m.SetSize(80, 24)
+	m.libraryScreen, _ = m.libraryScreen.Update(library.AlbumsLoadedMsg{
+		Albums: []jellyfin.Album{{ID: "alb-1", Name: "Old Name", Artists: []string{"Old Artist"}, ProductionYear: 1999}},
+	})
+
+	year := 2001
+	m, _ = update(m, metadataedit.SavedMsg{ItemID: "alb-1", Req: jellyfin.UpdateItemRequest{
+		ID:             "alb-1",
+		Name:           "New Name",
+		Artists:        []string{"New Artist"},
+		ProductionYear: &year,
+	}})
+
+	albums := m.libraryScreen.Albums()
+	if len(albums) != 1 || albums[0].Name != "New Name" || !slices.Equal(albums[0].Artists, []string{"New Artist"}) || albums[0].ProductionYear != 2001 {
+		t.Fatalf("albums after save = %+v", albums)
+	}
+	if album, ok := m.libraryScreen.SelectedAlbum(); !ok || album.Name != "New Name" {
+		t.Fatalf("album row after save = %+v", album)
+	}
+}
+
+func TestPreviousAtTheFirstTrackKeepsPlaying(t *testing.T) {
+	for name, msg := range map[string]tea.Msg{
+		"key":     keyMsg("p"),
+		"mpris":   mpris.PreviousMsg{},
+		"queue":   queue.QueueActionMsg{Action: "prev"},
+		"palette": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := New(nil, nil)
+			m.screen = ScreenLibrary
+			m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}, {ID: "t-2", Name: "Track 2"}}
+			m.currentIndex = 0
+			m.playerState.Position = 1
+			if msg == nil {
+				newM, _ := m.handlePaletteAction(components.ActionPrevTrack, "", nil)
+				m = newM.(*Model)
+			} else {
+				m, _ = update(m, msg)
+			}
+			if !m.IsPlaying() || m.currentIndex != 0 {
+				t.Fatalf("previous at the first track: playing=%v index=%d, want index 0", m.IsPlaying(), m.currentIndex)
+			}
+		})
+	}
+}
+
+func TestNextAtTheLastTrack(t *testing.T) {
+	for name, msg := range map[string]tea.Msg{
+		"key":     keyMsg("n"),
+		"mpris":   mpris.NextMsg{},
+		"queue":   queue.QueueActionMsg{Action: "next"},
+		"palette": nil,
+	} {
+		for _, repeatQueue := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/repeat=%v", name, repeatQueue), func(t *testing.T) {
+				m := New(nil, nil)
+				m.screen = ScreenLibrary
+				m.tracks = []jellyfin.Track{{ID: "t-1", Name: "Track 1"}, {ID: "t-2", Name: "Track 2"}}
+				m.currentIndex = 1
+				m.repeatQueue = repeatQueue
+				if msg == nil {
+					newM, _ := m.handlePaletteAction(components.ActionNextTrack, "", nil)
+					m = newM.(*Model)
+				} else {
+					m, _ = update(m, msg)
+				}
+				switch {
+				case repeatQueue:
+					if !m.IsPlaying() || m.currentIndex != 0 {
+						t.Fatalf("next with queue repeat: playing=%v index=%d, want index 0", m.IsPlaying(), m.currentIndex)
+					}
+				case name == "mpris":
+					// MPRIS Next stops the playback at the end of the tracklist.
+					if m.IsPlaying() {
+						t.Fatalf("MPRIS next at the last track: index=%d, want a stop", m.currentIndex)
+					}
+				default:
+					if !m.IsPlaying() || m.currentIndex != 1 {
+						t.Fatalf("next at the last track: playing=%v index=%d, want index 1", m.IsPlaying(), m.currentIndex)
+					}
+				}
+			})
+		}
+	}
 }

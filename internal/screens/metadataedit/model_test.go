@@ -2,11 +2,13 @@ package metadataedit
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/config"
 	"github.com/Thelost77/pine/internal/ui"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -65,6 +67,7 @@ func TestBuildRequestChangedSeriesNameOmitsOldID(t *testing.T) {
 		MediaType: "book",
 		Media: abs.Media{Metadata: abs.MediaMetadata{
 			Title:      "Title",
+			Series:     &abs.SeriesSequence{ID: "series-1", Name: "Old Series", Sequence: "1"},
 			SeriesList: []abs.SeriesSequence{{ID: "series-1", Name: "Old Series", Sequence: "1"}},
 		}},
 	}
@@ -225,6 +228,7 @@ func TestBuildRequestClearsSeries(t *testing.T) {
 		MediaType: "book",
 		Media: abs.Media{Metadata: abs.MediaMetadata{
 			Title:      "Title",
+			Series:     &abs.SeriesSequence{ID: "series-1", Name: "Old Series", Sequence: "1"},
 			SeriesList: []abs.SeriesSequence{{ID: "series-1", Name: "Old Series", Sequence: "1"}},
 		}},
 	}
@@ -248,6 +252,7 @@ func TestMultiAuthorAndSeriesFieldsAreReadOnly(t *testing.T) {
 		Media: abs.Media{Metadata: abs.MediaMetadata{
 			Title:      "Title",
 			Authors:    []abs.Author{{Name: "One"}, {Name: "Two"}},
+			Series:     &abs.SeriesSequence{Name: "One"},
 			SeriesList: []abs.SeriesSequence{{Name: "One"}, {Name: "Two"}},
 		}},
 	}
@@ -317,5 +322,77 @@ func TestSavedMsgStoresSaveError(t *testing.T) {
 	}
 	if m.SaveError() != err {
 		t.Fatalf("SaveError() = %v, want %v", m.SaveError(), err)
+	}
+}
+
+func TestSaveKeepsUntouchedFieldsThatTheInputChanges(t *testing.T) {
+	long := strings.Repeat("show notes ", 300)
+	episode := abs.PodcastEpisode{
+		ID:          "ep-1",
+		Title:       "Episode",
+		Description: "Line one\nLine two\t" + long,
+		Season:      "1",
+	}
+	item := abs.LibraryItem{ID: "pod-1", MediaType: "podcast", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Podcast"}}}
+
+	m := NewEpisode(testStyles(), item, episode)
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+		t.Fatal("enter returned no command")
+	} else if msg := cmd(); msg != (BackMsg{}) {
+		t.Fatalf("enter with no edit returned %T, want BackMsg", msg)
+	}
+
+	m.inputs[fieldTitle].SetValue("New Episode")
+	req, changed, errText := m.buildEpisodeRequest()
+	if errText != "" || !changed {
+		t.Fatalf("buildEpisodeRequest changed=%v err=%q", changed, errText)
+	}
+	if req.Description != nil {
+		t.Fatalf("Description = %.40q..., want nil: the user did not edit it", *req.Description)
+	}
+
+	book := abs.LibraryItem{ID: "item-1", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{
+		Title:   "Title\nSubtitle " + strings.Repeat("x", 300),
+		Authors: []abs.Author{{Name: "Ann\tAuthor"}},
+		Series:  &abs.SeriesSequence{ID: "series-1", Name: "Saga\nOne", Sequence: "1"},
+	}}}
+	if _, changed, errText := New(testStyles(), book).buildRequest(); errText != "" || changed {
+		t.Fatalf("book buildRequest changed=%v err=%q, want no change", changed, errText)
+	}
+}
+
+func TestEditKeepsTheLongValue(t *testing.T) {
+	long := strings.Repeat("d", 2500)
+	m := NewEpisode(testStyles(), abs.LibraryItem{ID: "pod-1", MediaType: "podcast"}, abs.PodcastEpisode{ID: "ep-1", Title: "Episode", Description: long})
+	m.focused = fieldDescription
+	_ = m.updateFocus()
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	req, _, _ := m.buildEpisodeRequest()
+	if req.Description == nil || *req.Description != long[:len(long)-1] {
+		t.Fatal("the edit of the description cut the text")
+	}
+}
+
+func TestBlinkKeepsErrors(t *testing.T) {
+	m := New(testStyles(), abs.LibraryItem{ID: "item-1", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Title"}}})
+	m.inputs[fieldTitle].SetValue("")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.Update(SavedMsg{ItemID: "item-1", Err: errors.New("forbidden")})
+	if m.ValidationError() == "" || m.SaveError() == nil {
+		t.Fatal("expected a validation error and a save error")
+	}
+
+	m, _ = m.Update(textinput.Blink())
+	if m.ValidationError() == "" {
+		t.Fatal("the blink of the cursor cleared the validation error")
+	}
+	if m.SaveError() == nil {
+		t.Fatal("the blink of the cursor cleared the save error")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	if m.ValidationError() != "" || m.SaveError() != nil {
+		t.Fatal("an edit did not clear the errors")
 	}
 }

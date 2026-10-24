@@ -124,3 +124,46 @@ func TestMprisPauseAndPlayMsgSendTheStateToThePlayer(t *testing.T) {
 		t.Error("PlayMsg should resume the player")
 	}
 }
+
+// TestPositionTickUpdatesMprisPosition verifies that the MPRIS property
+// Position follows the position ticks of a playback.
+func TestPositionTickUpdatesMprisPosition(t *testing.T) {
+	m := newMprisPlaybackTestModel(true)
+	m.syncMprisState()
+
+	m = listen(playingNow(m), 130)
+
+	if got := m.mprisState.PlayerPosition(); got != 130 {
+		t.Errorf("MPRIS position = %v; want 130", got)
+	}
+}
+
+// TestMprisTrackIDOfEpisode verifies that each episode of a podcast is a track
+// of its own for MPRIS, also after the playback stops.
+func TestMprisTrackIDOfEpisode(t *testing.T) {
+	m := newPlaybackTestModel()
+	play := func(m Model, episodeID string) Model {
+		result, _ := m.Update(PlaySessionMsg{Session: PlaySessionData{
+			SessionID:     "sess-" + episodeID,
+			ItemID:        "pod-1",
+			EpisodeID:     episodeID,
+			Duration:      1800,
+			TrackDuration: 1800,
+		}})
+		return result.(Model)
+	}
+
+	m = play(m, "ep-1")
+	first := m.mprisState.CurrentItemID()
+	m, _ = m.stopPlayback()
+	m = play(m, "ep-2")
+	second := m.mprisState.CurrentItemID()
+	if first == second {
+		t.Errorf("the episodes ep-1 and ep-2 have the same MPRIS track %q", first)
+	}
+
+	m, _ = m.stopPlayback()
+	if got := m.mprisState.CurrentItemID(); got != second {
+		t.Errorf("MPRIS track after the stop = %q, want %q", got, second)
+	}
+}

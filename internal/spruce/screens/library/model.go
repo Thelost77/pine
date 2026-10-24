@@ -288,6 +288,35 @@ func (m *Model) PatchTrack(id, name string, artists []string, album string) {
 	}
 }
 
+// PatchAlbum updates a single album in the album list without any network call.
+func (m *Model) PatchAlbum(id, name string, artists []string, year *int) tea.Cmd {
+	patch := func(a *jellyfin.Album) {
+		if name != "" {
+			a.Name = name
+		}
+		if artists != nil {
+			a.Artists = artists
+		}
+		if year != nil {
+			a.ProductionYear = *year
+		}
+	}
+	if m.selectedAlbum.ID == id {
+		patch(&m.selectedAlbum)
+	}
+	for i := range m.albums {
+		if m.albums[i].ID == id {
+			selectedID := ""
+			if selected, ok := m.albumList.SelectedItem().(albumItem); ok {
+				selectedID = selected.Album.ID
+			}
+			patch(&m.albums[i])
+			return libraryRefilterCmd(m.rebuildAlbumList(selectedID))
+		}
+	}
+	return nil
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case components.ItemFlashExpiredMsg:

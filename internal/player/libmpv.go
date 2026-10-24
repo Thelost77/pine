@@ -50,13 +50,20 @@ type mpvLogMessage struct {
 	text   *byte
 }
 
-// urlQuery matches the query of a URL in an mpv message.
-var urlQuery = regexp.MustCompile(`\?[^\s"']+`)
+var (
+	// urlUserinfo matches the user and the password of a URL in an mpv
+	// message.
+	urlUserinfo = regexp.MustCompile(`://[^/?#@\s"']+@`)
+	// urlQuery matches the query of a URL in an mpv message.
+	urlQuery = regexp.MustCompile(`\?[^\s"']+`)
+)
 
 // logText returns the text of the message for the app log. It removes the
-// query of each URL, because a query can hold a token.
+// user, the password, and the query of each URL, because they can hold a
+// secret.
 func (m *mpvLogMessage) logText() string {
-	return urlQuery.ReplaceAllString(strings.TrimSpace(cString(m.text)), "?<removed>")
+	text := urlUserinfo.ReplaceAllString(strings.TrimSpace(cString(m.text)), "://<removed>@")
+	return urlQuery.ReplaceAllString(text, "?<removed>")
 }
 
 // cString copies a NUL-terminated C string.

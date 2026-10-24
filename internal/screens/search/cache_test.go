@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +52,9 @@ func TestCacheReusesPodcastSnapshotAcrossQueries(t *testing.T) {
 	defer srv.Close()
 
 	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+	if err := cache.Prepare(context.Background(), "lib-pod", "podcast"); err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
 
 	first, err := cache.Search(context.Background(), "lib-pod", "podcast", "Joe")
 	if err != nil {
@@ -118,14 +122,14 @@ func TestCacheKeepsSnapshotsPerLibraryID(t *testing.T) {
 
 	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
 
-	if _, err := cache.Search(context.Background(), "lib-a", "book", "alp"); err != nil {
-		t.Fatalf("search lib-a: %v", err)
+	if err := cache.Prepare(context.Background(), "lib-a", "book"); err != nil {
+		t.Fatalf("prepare lib-a: %v", err)
 	}
-	if _, err := cache.Search(context.Background(), "lib-b", "book", "bet"); err != nil {
-		t.Fatalf("search lib-b: %v", err)
+	if err := cache.Prepare(context.Background(), "lib-b", "book"); err != nil {
+		t.Fatalf("prepare lib-b: %v", err)
 	}
-	if _, err := cache.Search(context.Background(), "lib-a", "book", "ann"); err != nil {
-		t.Fatalf("search lib-a again: %v", err)
+	if results, err := cache.Search(context.Background(), "lib-a", "book", "ann"); err != nil || len(results) != 1 {
+		t.Fatalf("search lib-a again = %d results, err %v; want 1", len(results), err)
 	}
 
 	if calls["lib-a"] != 1 {
@@ -164,12 +168,12 @@ func TestCacheRebuildsStaleSnapshot(t *testing.T) {
 	cache.ttl = time.Minute
 	cache.now = func() time.Time { return now }
 
-	if _, err := cache.Search(context.Background(), "lib-a", "book", "alp"); err != nil {
-		t.Fatalf("first search: %v", err)
+	if err := cache.Prepare(context.Background(), "lib-a", "book"); err != nil {
+		t.Fatalf("first prepare: %v", err)
 	}
 	now = now.Add(2 * time.Minute)
-	if _, err := cache.Search(context.Background(), "lib-a", "book", "alp"); err != nil {
-		t.Fatalf("second search: %v", err)
+	if err := cache.Prepare(context.Background(), "lib-a", "book"); err != nil {
+		t.Fatalf("second prepare: %v", err)
 	}
 
 	if listCalls != 2 {
@@ -239,6 +243,9 @@ func TestCachePodcastSearchMatchesNumericTokenAfterPunctuation(t *testing.T) {
 	defer srv.Close()
 
 	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+	if err := cache.Prepare(context.Background(), "lib-pod", "podcast"); err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
 
 	results, err := cache.Search(context.Background(), "lib-pod", "podcast", "100")
 	if err != nil {
@@ -276,6 +283,9 @@ func TestCacheBookSearchUsesFuzzyFallback(t *testing.T) {
 	defer srv.Close()
 
 	cache := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+	if err := cache.Prepare(context.Background(), "lib-a", "book"); err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
 
 	results, err := cache.Search(context.Background(), "lib-a", "book", "tgg")
 	if err != nil {
@@ -332,6 +342,9 @@ func TestCachePersistsSnapshotToDiskAndRestoresOnRestart(t *testing.T) {
 
 	// Build snapshot with first cache instance
 	firstCache := NewCache(client, cacheStore)
+	if err := firstCache.Prepare(context.Background(), "lib-a", "book"); err != nil {
+		t.Fatalf("first prepare: %v", err)
+	}
 	results1, err := firstCache.Search(context.Background(), "lib-a", "book", "alp")
 	if err != nil {
 		t.Fatalf("first search: %v", err)
@@ -417,5 +430,146 @@ func TestBuildSnapshotPagination(t *testing.T) {
 	}
 	if len(items) != 100 {
 		t.Fatalf("expected 100 items in cache, got %d", len(items))
+	}
+}
+
+// blockingLibraryServer serves lib-1 with one book. The first request for the
+// items waits until release is closed and gives the title "Old Title". Each
+// later request gives "New Title" at once.
+func blockingLibraryServer(t *testing.T, started chan<- struct{}, release <-chan struct{}) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	itemCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/items/book-1":
+			_, _ = w.Write([]byte(`{}`))
+		case r.URL.Path == "/api/libraries/lib-1/series":
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":50,"page":0}`))
+		case r.URL.Path == "/api/libraries/lib-1/items":
+			mu.Lock()
+			itemCalls++
+			first := itemCalls == 1
+			mu.Unlock()
+			title := "New Title"
+			if first {
+				started <- struct{}{}
+				<-release
+				title = "Old Title"
+			}
+			_, _ = fmt.Fprintf(w, `{"results":[{"id":"book-1","libraryId":"lib-1","mediaType":"book","media":{"metadata":{"title":%q}}}],"total":1,"limit":50,"page":0}`, title)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestSearchDoesNotWaitForTheNetwork(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := blockingLibraryServer(t, started, release)
+	c := NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+
+	searched := make(chan []abs.LibraryItem, 1)
+	go func() {
+		results, _ := c.Search(context.Background(), "lib-1", "book", "title")
+		searched <- results
+	}()
+	select {
+	case results := <-searched:
+		if len(results) != 0 {
+			t.Fatalf("results = %d with no snapshot, want 0", len(results))
+		}
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("Search waited for the network")
+	}
+
+	// The search started a build in the background.
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Search started no build")
+	}
+	close(release)
+	if err := c.Prepare(context.Background(), "lib-1", "book"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	results, err := c.Search(context.Background(), "lib-1", "book", "title")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("Search after the build = %d results, err %v; want 1", len(results), err)
+	}
+}
+
+func TestInvalidationDiscardsBuildInFlight(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := blockingLibraryServer(t, started, release)
+
+	dbStore, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = dbStore.Close() })
+	store := cache.NewStore(dbStore)
+	client := cache.NewClient(abs.NewClient(srv.URL, "tok"), store)
+	c := NewCache(client, store)
+
+	oldBuild := make(chan error, 1)
+	go func() { oldBuild <- c.Prepare(context.Background(), "lib-1", "book") }()
+	<-started
+
+	// The delete changes the library while the build reads it.
+	if err := client.DeleteItem(context.Background(), "book-1", false); err != nil {
+		t.Fatalf("DeleteItem: %v", err)
+	}
+	newBuild := make(chan error, 1)
+	go func() { newBuild <- c.Prepare(context.Background(), "lib-1", "book") }()
+	select {
+	case err := <-newBuild:
+		if err != nil {
+			t.Fatalf("Prepare after the delete: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Prepare after the delete waited for the build from before the delete")
+	}
+	close(release)
+	if err := <-oldBuild; err != nil {
+		t.Fatalf("old build: %v", err)
+	}
+
+	for name, cc := range map[string]*Cache{"memory": c, "disk": NewCache(client, store)} {
+		items, ok := cc.TryGetAll("lib-1", "book")
+		if !ok || len(items) != 1 || items[0].Media.Metadata.Title != "New Title" {
+			t.Errorf("%s: snapshot = %#v (ok %v), want the one book with New Title", name, items, ok)
+		}
+	}
+}
+
+func TestInvalidationRemovesSnapshotStoredBeforeTheHook(t *testing.T) {
+	release := make(chan struct{})
+	close(release)
+	srv := blockingLibraryServer(t, make(chan struct{}, 1), release)
+	dbStore, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = dbStore.Close() })
+	store := cache.NewStore(dbStore)
+	client := cache.NewClient(abs.NewClient(srv.URL, "tok"), store)
+	c := NewCache(client, store)
+
+	// The client clears the store and then calls OnInvalidate. A build can
+	// store its snapshot between the two steps, as this Prepare does.
+	if err := c.Prepare(context.Background(), "lib-1", "book"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	client.OnInvalidate()
+
+	if _, ok := NewCache(client, store).TryGetAll("lib-1", "book"); ok {
+		t.Fatal("the store keeps the snapshot after OnInvalidate")
 	}
 }

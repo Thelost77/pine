@@ -81,7 +81,7 @@ func (i listItem) FilterValue() string {
 			parts = append(parts, author)
 		}
 	}
-	if ps := i.item.Media.Metadata.PrimarySeries(); ps != nil && ps.Name != "" {
+	if ps := i.item.Media.Metadata.Series; ps != nil && ps.Name != "" {
 		parts = append(parts, ps.Name)
 	}
 	return strings.Join(parts, " ")
@@ -218,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.refreshListRows()
 			return m, nil
 		}
+		m.err = nil
 		if len(msg.Libraries) > 0 {
 			logger.Debug("personalized: updating libraries", "count", len(msg.Libraries))
 			m.libraries = msg.Libraries
@@ -342,7 +343,7 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 			if err != nil {
 				return PersonalizedMsg{Err: fmt.Errorf("fetch libraries: %w", err)}
 			}
-			libs, _ = client.FilterAudioLibraries(context.Background(), libs)
+			libs = client.FilterAudioLibraries(context.Background(), libs)
 		}
 		if len(libs) == 0 {
 			return PersonalizedMsg{Items: nil, Libraries: libs, LibraryID: currentLibID}

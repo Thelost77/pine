@@ -89,23 +89,24 @@ func (m Model) handleMetadataSaved(msg metadataedit.SavedMsg) (Model, tea.Cmd) {
 	mprisChanged := false
 	if msg.Item != nil {
 		updated := *msg.Item
-		if m.detail.ItemID() == updated.ID {
-			m.detail.SetItem(updated)
-		}
+		m.setDetailItem(updated)
 		mprisChanged = m.applyMetadataUpdate(updated)
 	}
+	// The save cleared the search snapshots. Build the snapshot again, as a
+	// delete does.
+	prewarmCmd := m.prewarmCacheCmd()
 	if activeEditor {
 		m.metadataEdit, _ = m.metadataEdit.Update(msg)
 		m, backCmd := m.back()
 		if mprisChanged {
-			return m, tea.Batch(backCmd, m.mprisTitleCmd())
+			return m, tea.Batch(backCmd, m.mprisTitleCmd(), prewarmCmd)
 		}
-		return m, backCmd
+		return m, tea.Batch(backCmd, prewarmCmd)
 	}
 	if mprisChanged {
-		return m, m.mprisTitleCmd()
+		return m, tea.Batch(m.mprisTitleCmd(), prewarmCmd)
 	}
-	return m, nil
+	return m, prewarmCmd
 }
 
 func (m Model) handleEpisodeMetadataSaved(msg metadataedit.SavedEpisodeMsg) (Model, tea.Cmd) {
@@ -123,33 +124,44 @@ func (m Model) handleEpisodeMetadataSaved(msg metadataedit.SavedEpisodeMsg) (Mod
 	mprisChanged := false
 	if msg.Item != nil {
 		updated := *msg.Item
-		if m.detail.ItemID() == updated.ID {
-			m.detail.SetItem(updated)
-		}
+		m.setDetailItem(updated)
 		mprisChanged = m.applyMetadataUpdate(updated)
 		mprisChanged = m.applyEpisodeMetadataUpdate(updated, msg.EpisodeID) || mprisChanged
 	}
+	// The save cleared the search snapshots. Build the snapshot again, as a
+	// delete does.
+	prewarmCmd := m.prewarmCacheCmd()
 	if activeEditor {
 		m.metadataEdit, _ = m.metadataEdit.Update(msg)
 		m, backCmd := m.back()
 		if mprisChanged {
-			return m, tea.Batch(backCmd, m.mprisTitleCmd())
+			return m, tea.Batch(backCmd, m.mprisTitleCmd(), prewarmCmd)
 		}
-		return m, backCmd
+		return m, tea.Batch(backCmd, prewarmCmd)
 	}
 	if mprisChanged {
-		return m, m.mprisTitleCmd()
+		return m, tea.Batch(m.mprisTitleCmd(), prewarmCmd)
 	}
-	return m, nil
+	return m, prewarmCmd
+}
+
+// setDetailItem shows updated on the detail screen if the screen shows that
+// item. The answer of a metadata save has no progress of the user, so the
+// progress on the screen stays.
+func (m *Model) setDetailItem(updated abs.LibraryItem) {
+	if m.detail.ItemID() != updated.ID {
+		return
+	}
+	if updated.UserMediaProgress == nil {
+		updated.UserMediaProgress = m.detail.Item().UserMediaProgress
+	}
+	m.detail.SetItem(updated)
 }
 
 func (m *Model) applyMetadataUpdate(updated abs.LibraryItem) bool {
 	mprisChanged := false
 	m.home.ReplaceItem(updated)
 	m.library.ReplaceItem(updated)
-	if m.searchCache != nil {
-		m.searchCache.UpdateItem(updated)
-	}
 
 	for i := range m.queue {
 		if m.queue[i].Item.ID == updated.ID {
@@ -163,7 +175,7 @@ func (m *Model) applyMetadataUpdate(updated abs.LibraryItem) bool {
 		m.syncMprisState()
 		mprisChanged = true
 	}
-	if m.lastPlayedItemID == updated.ID && updated.MediaType != "podcast" {
+	if m.lastPlayedTrackID == updated.ID && updated.MediaType != "podcast" {
 		m.lastPlayedTitle = updated.Media.Metadata.Title
 		m.lastPlayedAuthors = mprisAuthors(updated)
 		m.syncMprisState()

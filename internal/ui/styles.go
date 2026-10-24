@@ -11,7 +11,6 @@ type ThemeConfig struct {
 	Muted      string `toml:"muted"`
 	Selected   string `toml:"selected"`
 	Border     string `toml:"border"`
-	Warning    string `toml:"warning"`
 	Info       string `toml:"info"`
 }
 
@@ -25,7 +24,6 @@ func DefaultTheme() ThemeConfig {
 		Muted:      "#859289",
 		Selected:   "#475258",
 		Border:     "#4f585e",
-		Warning:    "#dbbc7f",
 		Info:       "#7fbbb3",
 	}
 }

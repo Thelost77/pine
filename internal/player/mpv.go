@@ -31,10 +31,10 @@ func SetAppName(name string) {
 	mpvSocketDir = ""
 }
 
-// MpvSocketDir returns the private runtime directory of the app:
+// runtimeDir returns the private runtime directory of the app:
 // /tmp/<app name>-runtime-<uid> with 0700 permissions. The media cache is in
 // this directory.
-func MpvSocketDir() (string, error) {
+func runtimeDir() (string, error) {
 	mpvSocketDirMu.Lock()
 	defer mpvSocketDirMu.Unlock()
 	if mpvSocketDir != "" {
@@ -80,10 +80,8 @@ type Player interface {
 	GetIdle() (bool, error)
 	SetPause(paused bool) error
 	Seek(seconds float64) error
-	SeekRelative(seconds float64) error
 	SetSpeed(speed float64) error
 	SetVolume(vol int) error
-	GetVolume() (int, error)
 	Quit() error
 }
 
@@ -97,8 +95,8 @@ type Mpv struct {
 	handle mpvHandle
 	play   *playback
 
-	// ForceSeekable sets force-seekable=yes at launch, so that mpv can start
-	// a long HTTP stream at a percent offset.
+	// ForceSeekable sets force-seekable=yes at launch, so that mpv can seek
+	// in an HTTP stream that it does not find seekable.
 	ForceSeekable bool
 
 	// audioOutput sets the mpv option ao. The tests use "null".
@@ -361,17 +359,6 @@ func (m *Mpv) Seek(seconds float64) error {
 	return err
 }
 
-// SeekRelative seeks by a relative offset in seconds.
-func (m *Mpv) SeekRelative(seconds float64) error {
-	err := m.withHandle("seek relative", func(h mpvHandle) error {
-		return h.command("seek", strconv.FormatFloat(seconds, 'f', -1, 64), "relative")
-	})
-	if err != nil {
-		logger.Warn("failed to seek relative mpv", "seconds", seconds, "err", err)
-	}
-	return err
-}
-
 // SetSpeed sets the playback speed multiplier.
 func (m *Mpv) SetSpeed(speed float64) error {
 	err := m.withHandle("set speed", func(h mpvHandle) error {
@@ -392,15 +379,6 @@ func (m *Mpv) SetVolume(vol int) error {
 		logger.Warn("failed to set mpv volume", "volume", vol, "err", err)
 	}
 	return err
-}
-
-// GetVolume returns the current volume level.
-func (m *Mpv) GetVolume() (int, error) {
-	v, err := m.getFloat("volume")
-	if err != nil {
-		return 0, err
-	}
-	return int(v), nil
 }
 
 // Quit stops playback and destroys the mpv handle.

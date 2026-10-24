@@ -87,9 +87,11 @@ type MarkFinishedCmd struct {
 	Undo    bool
 }
 
-// MarkFinishedMsg updates the item after marking it finished.
+// MarkFinishedMsg updates the item after marking it finished. EpisodeID is the
+// marked episode of a podcast, or empty if the item was marked.
 type MarkFinishedMsg struct {
-	Progress *abs.UserMediaProgress
+	EpisodeID string
+	Progress  *abs.UserMediaProgress
 }
 
 // BookmarksUpdatedMsg updates the bookmark list after a load or an
@@ -232,6 +234,10 @@ type Model struct {
 	episodes         []abs.PodcastEpisode
 	selectedEpisode  int
 	focusEpisodes    bool
+	// finishedEpisodes holds the result of each mark of an episode on this
+	// screen. The progress of the podcast item is not the progress of an
+	// episode, and the screen does not load the progress of an episode.
+	finishedEpisodes map[string]bool
 	confirm          components.ConfirmOverlay
 }
 
@@ -429,13 +435,11 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles messages for the detail screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	if m.confirm.Visible() {
-		cmd, handled := m.confirm.Update(msg)
-		if handled {
-			m.refreshContent()
-			return m, cmd
-		}
-		return m, nil
+	// The dialog takes each key. Other messages, such as the result of a
+	// load, go on to the screen.
+	if cmd, handled := m.confirm.Update(msg); handled {
+		m.refreshContent()
+		return m, cmd
 	}
 
 	switch msg := msg.(type) {
@@ -481,6 +485,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case MarkFinishedMsg:
+		if msg.Progress != nil && msg.EpisodeID != "" {
+			// The app also gives the message to the zero Model, before a
+			// detail screen opens.
+			if m.finishedEpisodes == nil {
+				m.finishedEpisodes = make(map[string]bool)
+			}
+			m.finishedEpisodes[msg.EpisodeID] = msg.Progress.IsFinished
+			return m, nil
+		}
 		if msg.Progress != nil {
 			m.item.UserMediaProgress = msg.Progress
 			if m.ready {
@@ -567,6 +580,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				episode = &ep
 			}
 			undo := item.UserMediaProgress != nil && item.UserMediaProgress.IsFinished
+			if episode != nil {
+				undo = m.finishedEpisodes[episode.ID]
+			}
 			return m, func() tea.Msg {
 				return MarkFinishedCmd{Item: item, Episode: episode, Undo: undo}
 			}

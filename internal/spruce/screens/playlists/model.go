@@ -117,7 +117,7 @@ func (m Model) fetchPlaylistTracksCmd(playlistID string) tea.Cmd {
 	return func() tea.Msg {
 		logger.Info("fetching playlist tracks", "playlistID", playlistID)
 		tracks, err := client.GetPlaylistTracks(context.Background(), playlistID)
-		return PlaylistTracksLoadedMsg{Tracks: tracks, Err: err}
+		return PlaylistTracksLoadedMsg{PlaylistID: playlistID, Tracks: tracks, Err: err}
 	}
 }
 
@@ -184,6 +184,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case PlaylistTracksLoadedMsg:
+		// Ignore a late reply for a playlist that is not open.
+		if msg.PlaylistID != "" && (msg.PlaylistID != m.selectedPlaylist.ID || m.level != LevelTracks) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {

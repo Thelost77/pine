@@ -2,6 +2,7 @@ package mpris
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -40,12 +41,18 @@ func readWrite(name string, get func() (float64, error), set func(float64) error
 	return p
 }
 
+// fromState returns a property getter that reads value from the app state on
+// each request.
+func fromState[T any](accessor func() ModelAccessor, value func(ModelAccessor) T) func() (T, error) {
+	return func() (T, error) { return value(accessor()), nil }
+}
+
 // Server is an MPRIS media player on the D-Bus session bus. It has the
 // org.mpris.MediaPlayer2 and org.mpris.MediaPlayer2.Player interfaces.
 type Server struct {
 	name       string
 	root       RootAdapter
-	player     PlayerAdapter
+	actions    PlayerActions
 	properties map[string][]property
 
 	mu      sync.Mutex
@@ -53,20 +60,18 @@ type Server struct {
 	stopped bool
 }
 
-// NewServer creates an MPRIS server for the app name with the given root and player adapters.
-func NewServer(name string, root RootAdapter, player PlayerAdapter) *Server {
-	status := func() (string, error) {
-		status, err := player.PlaybackStatus()
-		return string(status), err
-	}
-	metadata := func() (map[string]dbus.Variant, error) {
-		metadata, err := player.Metadata()
-		return metadata.variants(), err
-	}
+// NewServer creates an MPRIS server for the app name. The player properties
+// read the app state from accessor on each request, and the player methods
+// and the writable properties call actions.
+func NewServer(name string, root RootAdapter, accessor func() ModelAccessor, actions PlayerActions) *Server {
+	status := func(a ModelAccessor) string { return string(playbackStatus(a)) }
+	metadata := func(a ModelAccessor) map[string]dbus.Variant { return trackMetadata(name, a).variants() }
+	volume := func(a ModelAccessor) float64 { return float64(a.PlayerVolume()) / 100.0 }
+	position := func(a ModelAccessor) int64 { return int64(a.PlayerPosition() * 1_000_000) }
 	return &Server{
-		name:   name,
-		root:   root,
-		player: player,
+		name:    name,
+		root:    root,
+		actions: actions,
 		properties: map[string][]property{
 			rootInterface: {
 				readOnly("CanQuit", "b", root.CanQuit),
@@ -78,19 +83,19 @@ func NewServer(name string, root RootAdapter, player PlayerAdapter) *Server {
 				readOnly("SupportedMimeTypes", "as", root.SupportedMimeTypes),
 			},
 			playerInterface: {
-				readOnly("PlaybackStatus", "s", status),
-				readWrite("Rate", player.Rate, player.SetRate),
-				readOnly("Metadata", "a{sv}", metadata),
-				readWrite("Volume", player.Volume, player.SetVolume),
-				readOnly("Position", "x", player.Position),
-				readOnly("MinimumRate", "d", player.MinimumRate),
-				readOnly("MaximumRate", "d", player.MaximumRate),
-				readOnly("CanGoNext", "b", player.CanGoNext),
-				readOnly("CanGoPrevious", "b", player.CanGoPrevious),
-				readOnly("CanPlay", "b", player.CanPlay),
-				readOnly("CanPause", "b", player.CanPause),
-				readOnly("CanSeek", "b", player.CanSeek),
-				readOnly("CanControl", "b", player.CanControl),
+				readOnly("PlaybackStatus", "s", fromState(accessor, status)),
+				readWrite("Rate", fromState(accessor, ModelAccessor.PlayerSpeed), actions.SetRate),
+				readOnly("Metadata", "a{sv}", fromState(accessor, metadata)),
+				readWrite("Volume", fromState(accessor, volume), actions.SetVolume),
+				readOnly("Position", "x", fromState(accessor, position)),
+				readOnly("MinimumRate", "d", fromState(accessor, ModelAccessor.PlayerMinimumRate)),
+				readOnly("MaximumRate", "d", fromState(accessor, ModelAccessor.PlayerMaximumRate)),
+				readOnly("CanGoNext", "b", fromState(accessor, ModelAccessor.CanGoNext)),
+				readOnly("CanGoPrevious", "b", fromState(accessor, ModelAccessor.CanGoPrevious)),
+				readOnly("CanPlay", "b", fromState(accessor, ModelAccessor.HasActiveItem)),
+				readOnly("CanPause", "b", fromState(accessor, ModelAccessor.HasActiveItem)),
+				readOnly("CanSeek", "b", fromState(accessor, ModelAccessor.CanSeek)),
+				readOnly("CanControl", "b", func() (bool, error) { return true, nil }),
 			},
 		},
 	}
@@ -149,7 +154,7 @@ func (s *Server) Stop() error {
 
 // export puts the MPRIS object on the connection and then takes the bus name.
 func (s *Server) export(conn *dbus.Conn) error {
-	player := s.player
+	player := s.actions
 	call := func(method func() error) func() *dbus.Error {
 		return func() *dbus.Error { return failed(method()) }
 	}
@@ -171,7 +176,7 @@ func (s *Server) export(conn *dbus.Conn) error {
 			"SetPosition": func(trackID dbus.ObjectPath, position int64) *dbus.Error {
 				return failed(player.SetPosition(string(trackID), microseconds(position)))
 			},
-			"OpenUri": func(uri string) *dbus.Error { return failed(player.OpenUri(uri)) },
+			"OpenUri": func(string) *dbus.Error { return nil },
 		},
 		propertiesInterface: {
 			"Get":    s.get,
@@ -259,7 +264,8 @@ func (s *Server) set(iface, name string, value dbus.Variant) *dbus.Error {
 		return prop.ErrReadOnly
 	}
 	number, ok := value.Value().(float64)
-	if !ok {
+	// The writable properties are the rate and the volume. Each is finite.
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) {
 		return prop.ErrInvalidArg
 	}
 	return failed(p.set(number))
@@ -338,11 +344,14 @@ func (s *Server) changed(names ...string) {
 // PlaybackChanged tells MPRIS clients that the playback state, the rate, or
 // the track changed.
 func (s *Server) PlaybackChanged() {
-	s.changed("PlaybackStatus", "Rate", "Metadata", "MinimumRate", "MaximumRate")
+	s.changed("PlaybackStatus", "CanPlay", "CanPause", "CanGoNext", "CanGoPrevious", "Rate", "Metadata", "MinimumRate", "MaximumRate")
 }
 
-// StatusChanged tells MPRIS clients that the playback status changed.
-func (s *Server) StatusChanged() { s.changed("PlaybackStatus") }
+// StatusChanged tells MPRIS clients that the playback status changed, and with
+// it CanPlay, CanPause, CanGoNext, and CanGoPrevious.
+func (s *Server) StatusChanged() {
+	s.changed("PlaybackStatus", "CanPlay", "CanPause", "CanGoNext", "CanGoPrevious")
+}
 
 // MetadataChanged tells MPRIS clients that the track metadata changed.
 func (s *Server) MetadataChanged() { s.changed("Metadata") }
@@ -350,7 +359,9 @@ func (s *Server) MetadataChanged() { s.changed("Metadata") }
 // VolumeChanged tells MPRIS clients that the volume changed.
 func (s *Server) VolumeChanged() { s.changed("Volume") }
 
-// Seeked tells MPRIS clients the playback position, in seconds.
+// Seeked tells MPRIS clients that the position changed in a way that the rate
+// does not explain, for example by a seek. positionSeconds is the new
+// position. During playback, a client computes the position from the rate.
 func (s *Server) Seeked(positionSeconds float64) {
 	conn := s.connection()
 	if conn == nil {

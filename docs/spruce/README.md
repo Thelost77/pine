@@ -77,8 +77,8 @@ and the file uses mode `0600`; local file permissions are the security boundary.
 See [Auth token storage](../design/spruce/auth-token-storage.md) for the decision and
 operational details.
 
-Logs are written to the same config directory as `spruce.log` and rotated after
-5 MB.
+Logs are written to the same config directory as `spruce.log` and rotated at
+start when the file is over 5 MB.
 
 ## Common keybindings
 
@@ -94,11 +94,12 @@ Keys can be context-specific. Press `?` in Spruce for the complete active help.
 | `space` | Play or pause |
 | `h` / `l` | Seek backward or forward |
 | `n` / `>` | Next track |
-| `N` / `p` / `<` | Previous track |
+| `N` / `p` / `<` | Previous track in the first 3 seconds of a track. Later, or at the first track, play the track again from the start. |
 | `a` / `A` | Add selected track or collection to the queue |
-| `S` | Shuffle selected collection or cycle the sleep timer |
+| `S` | On the library and playlists screens: add the selected album or playlist to the queue in shuffled order |
+| `S` | On the queue screen during playback: cycle the sleep timer. The command palette also sets it. |
 | `s` | Shuffle the current queue |
-| `r` / `R` | Repeat current track or queue |
+| `r` / `R` | Repeat a track or the queue. On the queue screen, `r` repeats the selected track. On the other screens, it repeats the track that plays. |
 | `b` | Toggle subliminal mode from the queue |
 | `+` / `-` | Increase or decrease playback speed |
 | `]` / `[` | Increase or decrease volume |
@@ -108,6 +109,8 @@ Keys can be context-specific. Press `?` in Spruce for the complete active help.
 | `tab` | Switch between content and queue |
 | `ctrl+p` | Open the command palette |
 | `?` | Toggle help |
+
+With queue repeat, the next track key at the last track plays the first track.
 
 ## Repeat cache and subliminal mode
 
@@ -150,6 +153,11 @@ volume_down = "["
 sleep_timer = "S"
 back = "esc"
 ```
+
+On the library and playlists screens, `S` adds the selection to the queue in
+shuffled order. With `sleep_timer = "S"`, the sleep timer key does not work on
+these two screens. To use the sleep timer key on each screen, set a different
+key.
 
 The generated `[theme]` section contains the editable Everforest color values.
 See [Theme configuration](../design/spruce/theme-configuration.md) for the supported

@@ -232,6 +232,7 @@ func (m *Model) tryLoadFromCache() bool {
 			logger.Info("Library tryLoadFromCache HIT", "libraryID", m.libraryID, "items", len(items))
 			m.items = items
 			m.contentLibrary = m.libraryID
+			m.err = nil
 			m.loading = false
 			m.loadingVisible = false
 			m.totalItems = len(items)
@@ -294,10 +295,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.Err
 			return m, nil
 		}
+		m.err = nil
 
 		// If this is the initial page load, but the background cache has
 		// finished building in the meantime, prefer the full cache over the page.
 		if msg.Page == 0 && m.tryLoadFromCache() {
+			return m, nil
+		}
+		// The full list of the cache can replace the pages while the fetch of
+		// a later page is in flight. That page is already in the list.
+		if msg.Page > 0 && len(m.items) >= m.totalItems {
 			return m, nil
 		}
 
@@ -429,7 +436,7 @@ func (m *Model) fetchLibraryItemsCmd(page, limit int) tea.Cmd {
 			if err != nil {
 				return LibraryItemsMsg{LibraryID: libraryID, Err: fmt.Errorf("fetch libraries: %w", err)}
 			}
-			libs, _ = client.FilterAudioLibraries(context.Background(), libs)
+			libs = client.FilterAudioLibraries(context.Background(), libs)
 			if len(libs) == 0 {
 				return LibraryItemsMsg{Items: nil, Total: 0, Page: 0, LibraryID: libraryID}
 			}
@@ -774,7 +781,7 @@ func (i libraryListItem) FilterValue() string {
 			parts = append(parts, author)
 		}
 	}
-	if ps := i.Item.Media.Metadata.PrimarySeries(); ps != nil && ps.Name != "" {
+	if ps := i.Item.Media.Metadata.Series; ps != nil && ps.Name != "" {
 		parts = append(parts, ps.Name)
 	}
 	return strings.Join(parts, " ")
@@ -791,7 +798,7 @@ func (m Model) TotalItems() int {
 }
 
 func (m Model) SelectedPaletteActions() []components.PaletteItem {
-	sel, ok := m.list.SelectedItem().(ListItem)
+	sel, ok := m.selectedItem()
 	if !ok {
 		return nil
 	}
@@ -807,7 +814,7 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 	}
 	if m.SelectedLibraryMediaType() == "book" {
 		items = append(items,
-			components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries},
+			components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries, LibraryID: m.SelectedLibraryID(), Payload: m.selectedLibraryName()},
 		)
 	}
 	return items

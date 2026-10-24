@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -338,5 +339,35 @@ func TestClient_StreamHelpersAndProgress(t *testing.T) {
 	}
 	if !progressCalled {
 		t.Error("progress endpoint was not called")
+	}
+}
+
+func TestClient_UpdateItemSendsArtistItems(t *testing.T) {
+	var posted map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/user-123/Items/trk-1":
+			_, _ = w.Write([]byte(`{"Id":"trk-1","Name":"Old","Artists":["Old Artist"],"ArtistItems":[{"Name":"Old Artist","Id":"art-1"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/Items/trk-1":
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Errorf("decode update body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-xyz", "user-123", "Test device", "test-device")
+	err := client.UpdateItem(context.Background(), "trk-1", UpdateItemRequest{ID: "trk-1", Artists: []string{"New A", "New B"}})
+	if err != nil {
+		t.Fatalf("UpdateItem error: %v", err)
+	}
+	// Jellyfin sets the artists of an item from ArtistItems, not from Artists.
+	want := []any{map[string]any{"Name": "New A"}, map[string]any{"Name": "New B"}}
+	if !reflect.DeepEqual(posted["ArtistItems"], want) {
+		t.Fatalf("ArtistItems = %#v, want %#v", posted["ArtistItems"], want)
 	}
 }

@@ -138,9 +138,10 @@ error = "#e67e80"
 muted = "#859289"
 selected = "#475258"
 border = "#4f585e"
-warning = "#dbbc7f"
 info = "#7fbbb3"
 ```
+
+`player.speed` must be from 0.1 to 100, and `player.seek_seconds` must be more than 0. For a different value, pine stops at startup with an error that names the key.
 
 Pine creates a stable playback identity on first run:
 
@@ -155,6 +156,10 @@ or replace its `device_id` there so Pine generates a new one. `device_name` is
 display-only and can be changed without changing `device_id`.
 Audiobookshelf displays this as `Pine <device_name>` (without Pine's default
 `(Pine)` suffix), for example `Pine my-host`.
+
+Pine writes a generated `device_name` and `device_id` to `config.toml`. A
+read-only `config.toml`, for example a home-manager symlink, must set the two
+keys, or Pine cannot start.
 
 Pine sends its Go module build version as `clientVersion` to Audiobookshelf.
 Local development builds report `dev`.

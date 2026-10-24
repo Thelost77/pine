@@ -11,8 +11,9 @@ type PlaylistsLoadedMsg struct {
 }
 
 type PlaylistTracksLoadedMsg struct {
-	Tracks []jellyfin.Track
-	Err    error
+	PlaylistID string
+	Tracks     []jellyfin.Track
+	Err        error
 }
 
 // RefilterMsg routes an asynchronous list refilter back to the playlists model.

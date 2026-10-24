@@ -76,7 +76,7 @@ func resetMpvSocketDirForTest(t *testing.T) {
 	})
 }
 
-func TestMpvSocketDirRetriesAfterPreparationFailure(t *testing.T) {
+func TestRuntimeDirRetriesAfterPreparationFailure(t *testing.T) {
 	resetMpvSocketDirForTest(t)
 	root := t.TempDir()
 	setTempDir(t, root)
@@ -90,7 +90,7 @@ func TestMpvSocketDirRetriesAfterPreparationFailure(t *testing.T) {
 		}
 	}
 
-	if _, err := MpvSocketDir(); err == nil {
+	if _, err := runtimeDir(); err == nil {
 		t.Fatal("expected socket directory preparation error")
 	}
 	for _, path := range paths {
@@ -99,9 +99,9 @@ func TestMpvSocketDirRetriesAfterPreparationFailure(t *testing.T) {
 		}
 	}
 
-	dir, err := MpvSocketDir()
+	dir, err := runtimeDir()
 	if err != nil {
-		t.Fatalf("MpvSocketDir() retry error: %v", err)
+		t.Fatalf("runtimeDir() retry error: %v", err)
 	}
 	if dir != paths[0] {
 		t.Fatalf("socket directory = %q, want primary %q", dir, paths[0])
@@ -143,7 +143,7 @@ func TestDescribeStreamURLInvalid(t *testing.T) {
 	}
 }
 
-func TestSetAppNameNamesTheSocketDirectory(t *testing.T) {
+func TestSetAppNameNamesTheRuntimeDirectory(t *testing.T) {
 	resetMpvSocketDirForTest(t)
 	previous := appName
 	t.Cleanup(func() { SetAppName(previous) })
@@ -152,13 +152,13 @@ func TestSetAppNameNamesTheSocketDirectory(t *testing.T) {
 
 	SetAppName("pine")
 
-	dir, err := MpvSocketDir()
+	dir, err := runtimeDir()
 	if err != nil {
-		t.Fatalf("MpvSocketDir() error: %v", err)
+		t.Fatalf("runtimeDir() error: %v", err)
 	}
 	want := filepath.Join(root, fmt.Sprintf("pine-runtime-%d", os.Getuid()))
 	if dir != want {
-		t.Fatalf("MpvSocketDir() = %q, want %q", dir, want)
+		t.Fatalf("runtimeDir() = %q, want %q", dir, want)
 	}
 }
 
@@ -254,8 +254,7 @@ func TestMpvLaunchAppliesHeaderStartPauseAndVolume(t *testing.T) {
 	m := newTestMpv(t)
 	m.ForceSeekable = true
 
-	start := formatStartPosition(60, 120)
-	if err := m.Launch(srv.URL+"/long.wav", start, true, []string{testAuthHeader}, 35); err != nil {
+	if err := m.Launch(srv.URL+"/long.wav", "60", true, []string{testAuthHeader}, 35); err != nil {
 		t.Fatalf("Launch() error: %v", err)
 	}
 
@@ -271,11 +270,29 @@ func TestMpvLaunchAppliesHeaderStartPauseAndVolume(t *testing.T) {
 	if paused, err := m.GetPaused(); err != nil || !paused {
 		t.Errorf("GetPaused() = %v, %v, want true", paused, err)
 	}
-	if volume, err := m.GetVolume(); err != nil || volume != 35 {
-		t.Errorf("GetVolume() = %d, %v, want 35", volume, err)
+	if volume, err := m.handle.getDouble("volume"); err != nil || volume != 35 {
+		t.Errorf("volume = %v, %v, want 35", volume, err)
 	}
 	if forced, err := m.handle.getFlag("force-seekable"); err != nil || !forced {
 		t.Errorf("force-seekable = %v, %v, want true with ForceSeekable", forced, err)
+	}
+}
+
+// TestLaunchCmdStartsAtTheStartTime verifies that playback starts at the start
+// time in seconds. A percent start does not: mpv multiplies it by the length
+// that mpv finds, and the server can report another length.
+func TestLaunchCmdStartsAtTheStartTime(t *testing.T) {
+	srv := newAudioServer(t)
+	m := newTestMpv(t)
+	m.ForceSeekable = true
+
+	msg := LaunchCmd(m, srv.URL+"/long.wav", 60, true, []string{testAuthHeader}, 100, 1)()
+	if _, ok := msg.(PlayerReadyMsg); !ok {
+		t.Fatalf("LaunchCmd() = %#v, want PlayerReadyMsg", msg)
+	}
+
+	if position := waitPosition(t, m); position < 59 || position > 61 {
+		t.Errorf("GetPosition() = %.1f, want 60", position)
 	}
 }
 
@@ -294,16 +311,12 @@ func TestMpvControls(t *testing.T) {
 		t.Fatalf("Seek() error: %v", err)
 	}
 	waitPositionNear(t, m, 10)
-	if err := m.SeekRelative(5); err != nil {
-		t.Fatalf("SeekRelative() error: %v", err)
-	}
-	waitPositionNear(t, m, 15)
 
 	if err := m.SetVolume(40); err != nil {
 		t.Fatalf("SetVolume() error: %v", err)
 	}
-	if volume, err := m.GetVolume(); err != nil || volume != 40 {
-		t.Errorf("GetVolume() = %d, %v, want 40", volume, err)
+	if volume, err := m.handle.getDouble("volume"); err != nil || volume != 40 {
+		t.Errorf("volume = %v, %v, want 40", volume, err)
 	}
 	if err := m.SetSpeed(1.5); err != nil {
 		t.Fatalf("SetSpeed() error: %v", err)

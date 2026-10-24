@@ -151,8 +151,8 @@ func TestGroupLoopsTracksThroughLibmpv(t *testing.T) {
 		if paused, err := m.GetPaused(); err != nil || paused {
 			t.Errorf("member %d GetPaused() = %v, %v, want false", i, paused, err)
 		}
-		if volume, err := m.GetVolume(); err != nil || volume != 20 {
-			t.Errorf("member %d GetVolume() = %d, %v, want 20", i, volume, err)
+		if volume, err := m.handle.getDouble("volume"); err != nil || volume != 20 {
+			t.Errorf("member %d volume = %v, %v, want 20", i, volume, err)
 		}
 	}
 

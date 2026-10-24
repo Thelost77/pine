@@ -555,7 +555,13 @@ func (c *Client) UpdateItem(ctx context.Context, itemID string, req UpdateItemRe
 		itemData["Album"] = req.Album
 	}
 	if req.Artists != nil {
-		itemData["Artists"] = req.Artists
+		// Jellyfin sets the artists of an item from the names in ArtistItems.
+		// It ignores Artists.
+		artistItems := make([]map[string]string, len(req.Artists))
+		for i, name := range req.Artists {
+			artistItems[i] = map[string]string{"Name": name}
+		}
+		itemData["ArtistItems"] = artistItems
 	}
 	if req.IndexNumber != nil {
 		itemData["IndexNumber"] = *req.IndexNumber
