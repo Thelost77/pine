@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/Thelost77/pine/internal/ui"
+)
+
+// The limits of player.speed. mpv does not accept a speed above 100, and the
+// speed-down key stops at 0.1.
+const (
+	minSpeed = 0.1
+	maxSpeed = 100
 )
 
 type PlayerConfig struct {
@@ -90,6 +98,12 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if s := cfg.Player.Speed; math.IsNaN(s) || s < minSpeed || s > maxSpeed {
+		return Config{}, fmt.Errorf("player.speed is %v: it must be from %v to %v", s, minSpeed, maxSpeed)
+	}
+	if cfg.Player.SeekSeconds <= 0 {
+		return Config{}, fmt.Errorf("player.seek_seconds is %d: it must be more than 0", cfg.Player.SeekSeconds)
+	}
 	changed, err := ensurePlaybackIdentity(&cfg)
 	if err != nil {
 		return Config{}, fmt.Errorf("generate playback device identity: %w", err)
@@ -104,6 +118,9 @@ func Load(path string) (Config, error) {
 }
 
 func saveMigratedPlaybackIdentity(path string, data []byte, cfg Config) error {
+	// TOML allows a byte order mark only at the start of the file, and the
+	// identity comes before data.
+	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
 	var identity bytes.Buffer
 	if err := toml.NewEncoder(&identity).Encode(struct {
 		DeviceName string `toml:"device_name"`
@@ -163,13 +180,17 @@ func withoutTopLevelIdentity(data []byte) []byte {
 	return result.Bytes()
 }
 
+// isIdentityAssignment reports whether line sets key. The key can be bare or
+// quoted.
 func isIdentityAssignment(line []byte, key string) bool {
 	line = bytes.TrimLeft(line, " \t")
-	if !bytes.HasPrefix(line, []byte(key)) {
-		return false
+	for _, form := range []string{key, `"` + key + `"`, "'" + key + "'"} {
+		if rest, ok := bytes.CutPrefix(line, []byte(form)); ok {
+			rest = bytes.TrimLeft(rest, " \t")
+			return len(rest) > 0 && rest[0] == '='
+		}
 	}
-	line = bytes.TrimLeft(line[len(key):], " \t")
-	return len(line) > 0 && line[0] == '='
+	return false
 }
 
 func defaultDeviceName() string {

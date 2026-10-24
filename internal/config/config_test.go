@@ -181,6 +181,8 @@ func TestLoadUpsertsPartialPlaybackIdentity(t *testing.T) {
 		{"name only", "# keep me\ndevice_name = \"Desk Pine\" # keep this\n[player]\nspeed = 1.5\n"},
 		{"ID only", "device_id = \"pine-manual\"\n[server]\naddress = \"https://abs.example\"\n"},
 		{"empty values", "device_name = \"\"\ndevice_id = \"\"\n"},
+		{"quoted keys", "\"device_name\" = \"\"\n'device_id' = \"\"\n"},
+		{"byte order mark", "\xEF\xBB\xBF[player]\nspeed = 1.5\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.toml")
@@ -270,6 +272,41 @@ func TestLoadInvalidTOMLReturnsError(t *testing.T) {
 	_, err := Load(path)
 	if err == nil {
 		t.Error("expected error for invalid TOML, got nil")
+	}
+}
+
+func TestLoadChecksPlayerValues(t *testing.T) {
+	for _, test := range []struct {
+		player  string
+		wantErr string
+	}{
+		{"speed = 0.1\nseek_seconds = 1", ""},
+		{"speed = 100.0\nseek_seconds = 30", ""},
+		{"speed = 0.0", "player.speed"},
+		{"speed = -1.0", "player.speed"},
+		{"speed = 150.0", "player.speed"},
+		{"speed = nan", "player.speed"},
+		{"seek_seconds = 0", "player.seek_seconds"},
+		{"seek_seconds = -10", "player.seek_seconds"},
+	} {
+		t.Run(test.player, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			data := "device_name = \"Desk Pine\"\ndevice_id = \"pine-id\"\n[player]\n" + test.player + "\n"
+			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := Load(path)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load() error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Load() error = %v, want an error that names %s", err, test.wantErr)
+			}
+		})
 	}
 }
 
