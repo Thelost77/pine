@@ -4,6 +4,7 @@ package captions
 import (
 	"bytes"
 	"html"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -30,7 +31,8 @@ func ParseVTT(data []byte) []Cue {
 	}
 	if i < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i]), "WEBVTT") {
 		i++
-		for i < len(lines) && strings.TrimSpace(lines[i]) != "" {
+		// A timing line ends the header also with no blank line before it.
+		for i < len(lines) && strings.TrimSpace(lines[i]) != "" && !strings.Contains(lines[i], "-->") {
 			i++
 		}
 	}
@@ -153,6 +155,10 @@ func parseTimestamp(s string) (float64, error) {
 	default:
 		return 0, strconv.ErrSyntax
 	}
+	// ParseFloat accepts "inf" and "NaN", and Atoi accepts a sign.
+	if hours < 0 || minutes < 0 || seconds < 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+		return 0, strconv.ErrSyntax
+	}
 	return float64(hours)*3600 + float64(minutes)*60 + seconds, nil
 }
 
@@ -163,7 +169,7 @@ func stripTags(s string) string {
 		switch {
 		case r == '<':
 			inTag = true
-		case r == '>':
+		case r == '>' && inTag:
 			inTag = false
 		case !inTag:
 			b.WriteRune(r)

@@ -1,6 +1,8 @@
 package captions
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +83,53 @@ func TestParseVTTDecodesEntitiesAndStripsControls(t *testing.T) {
 	}
 	if containsRune(cues[1].Text, 0x1b) || containsRune(cues[1].Text, 0x07) {
 		t.Fatalf("control bytes survived: %q", cues[1].Text)
+	}
+}
+
+func TestParseVTTHeaderForms(t *testing.T) {
+	cues := "00:00:01.000 --> 00:00:02.000\nFirst\n\n00:00:03.000 --> 00:00:04.000\nSecond\n"
+	for _, test := range []struct {
+		name string
+		data string
+	}{
+		{"no blank line after the header", "WEBVTT\n" + cues},
+		{"header lines", "WEBVTT\nKind: captions\nLanguage: en\n\n" + cues},
+		{"byte order mark and CRLF", "\xEF\xBB\xBFWEBVTT\r\n\r\n" + strings.ReplaceAll(cues, "\n", "\r\n")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := ParseVTT([]byte(test.data))
+			want := []Cue{{Start: 1, End: 2, Text: "First"}, {Start: 3, End: 4, Text: "Second"}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("ParseVTT() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestParseVTTKeepsAGreaterThanSignOutsideATag(t *testing.T) {
+	data := []byte("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n5 > 3 and <i>x</i> -> y\n")
+
+	cues := ParseVTT(data)
+	if len(cues) != 1 || cues[0].Text != "5 > 3 and x -> y" {
+		t.Fatalf("ParseVTT() = %+v, want one cue with the text %q", cues, "5 > 3 and x -> y")
+	}
+}
+
+func TestParseVTTSkipsCuesWithTimesThatAreNotFiniteOrNegative(t *testing.T) {
+	data := []byte("WEBVTT\n\n" +
+		"00:00:00.000 --> 00:00:inf\nInfinite\n\n" +
+		"00:00:00.000 --> 00:00:NaN\nNot a number\n\n" +
+		"-1:00.000 --> 00:01.000\nNegative\n\n" +
+		"01:-5:00.000 --> 01:00:00.000\nNegative minutes\n\n" +
+		"00:00:05.000 --> 00:00:06.000\nValid\n")
+
+	cues := ParseVTT(data)
+	want := []Cue{{Start: 5, End: 6, Text: "Valid"}}
+	if !reflect.DeepEqual(cues, want) {
+		t.Fatalf("ParseVTT() = %+v, want %+v", cues, want)
+	}
+	if got := At(cues, 5.5); got != "Valid" {
+		t.Errorf("At(5.5) = %q, want Valid", got)
 	}
 }
 
