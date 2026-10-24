@@ -1,6 +1,7 @@
 package serieslist
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -32,6 +33,20 @@ func TestLoadedMsgPopulatesList(t *testing.T) {
 	}
 	if len(m.series) != 2 {
 		t.Fatalf("expected 2 series, got %d", len(m.series))
+	}
+}
+
+func TestLoadedMsgClearsEarlierError(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(LoadedMsg{Results: sampleSeries(), Total: 4, Page: 0})
+	m, _ = m.Update(LoadedMsg{Err: errors.New("network error")})
+	m, _ = m.Update(LoadedMsg{Results: []abs.Series{{ID: "series-foundation", Name: "Foundation"}}, Total: 4, Page: 1})
+
+	if m.err != nil {
+		t.Fatalf("err = %v after a successful load, want nil", m.err)
+	}
+	if v := m.View(); !strings.Contains(v, "Foundation") {
+		t.Fatalf("expected view to show the loaded series\n%s", v)
 	}
 }
 

@@ -978,6 +978,74 @@ func TestPodcastTabKey_CyclesEpisodesAndBookmarks(t *testing.T) {
 	}
 }
 
+func markFinishedPodcast() abs.LibraryItem {
+	return abs.LibraryItem{
+		ID:        "pod-001",
+		MediaType: "podcast",
+		Media: abs.Media{
+			Metadata: abs.MediaMetadata{Title: "Podcast Show"},
+			Episodes: []abs.PodcastEpisode{
+				{ID: "ep-1", Title: "Episode One", Duration: 1800},
+				{ID: "ep-2", Title: "Episode Two", Duration: 2400},
+			},
+		},
+	}
+}
+
+func pressMarkFinished(t *testing.T, m Model) MarkFinishedCmd {
+	t.Helper()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if cmd == nil {
+		t.Fatal("f returned no command")
+	}
+	finish, ok := cmd().(MarkFinishedCmd)
+	if !ok {
+		t.Fatalf("f returned %T, want MarkFinishedCmd", cmd())
+	}
+	return finish
+}
+
+func TestMarkFinishedEpisodeIgnoresPodcastProgress(t *testing.T) {
+	item := markFinishedPodcast()
+	// The progress of the podcast item is the progress of some episode.
+	item.UserMediaProgress = &abs.UserMediaProgress{IsFinished: true}
+	m := New(ui.DefaultStyles(), item)
+	m.SetSize(80, 24)
+	m.selectedEpisode = 1
+
+	finish := pressMarkFinished(t, m)
+	if finish.Episode == nil || finish.Episode.ID != "ep-2" {
+		t.Fatalf("episode = %#v, want ep-2", finish.Episode)
+	}
+	if finish.Undo {
+		t.Fatal("Undo = true for an episode that this screen did not mark finished")
+	}
+}
+
+func TestMarkFinishedEpisodeKeepsResultPerEpisode(t *testing.T) {
+	m := New(ui.DefaultStyles(), markFinishedPodcast())
+	m.SetSize(80, 24)
+
+	m, _ = m.Update(MarkFinishedMsg{EpisodeID: "ep-1", Progress: &abs.UserMediaProgress{IsFinished: true}})
+	if m.Item().UserMediaProgress != nil {
+		t.Fatalf("podcast progress = %#v, want nil: the result is of one episode", m.Item().UserMediaProgress)
+	}
+	if !pressMarkFinished(t, m).Undo {
+		t.Fatal("Undo = false on the finished episode ep-1")
+	}
+
+	m.selectedEpisode = 1
+	if pressMarkFinished(t, m).Undo {
+		t.Fatal("Undo = true on ep-2, which is not finished")
+	}
+
+	m.selectedEpisode = 0
+	m, _ = m.Update(MarkFinishedMsg{EpisodeID: "ep-1", Progress: &abs.UserMediaProgress{IsFinished: false}})
+	if pressMarkFinished(t, m).Undo {
+		t.Fatal("Undo = true on ep-1 after the undo")
+	}
+}
+
 func TestSetEpisodes_PreservesRecentEpisodeSelection(t *testing.T) {
 	styles := ui.DefaultStyles()
 	item := abs.LibraryItem{
@@ -1094,5 +1162,35 @@ func TestView_TruncatesLongEpisodeAndBookmarkTitles(t *testing.T) {
 	// Verify that they contain the ellipsis ...
 	if !strings.Contains(v, "...") {
 		t.Error("expected truncated content to contain ellipsis '...'")
+	}
+}
+
+func TestMarkFinishedEpisodeOnZeroModel(t *testing.T) {
+	var m Model
+	m, _ = m.Update(MarkFinishedMsg{EpisodeID: "ep-1", Progress: &abs.UserMediaProgress{IsFinished: true}})
+	if !m.finishedEpisodes["ep-1"] {
+		t.Fatal("the zero Model did not keep the result of ep-1")
+	}
+}
+
+func TestConfirmDialogKeepsAsyncResults(t *testing.T) {
+	m := New(ui.DefaultStyles(), sampleItem())
+	m.SetSize(80, 24)
+	m, _ = m.Update(ShowDeleteConfirmMsg{Target: "delete_item"})
+	if !m.ConfirmOverlayVisible() {
+		t.Fatal("expected the confirmation dialog")
+	}
+
+	m, _ = m.Update(BookmarksUpdatedMsg{ItemID: "li-001", Bookmarks: sampleBookmarks()})
+	m, _ = m.Update(MarkFinishedMsg{Progress: &abs.UserMediaProgress{IsFinished: true}})
+
+	if !m.bookmarksLoaded || len(m.Bookmarks()) != len(sampleBookmarks()) {
+		t.Fatalf("bookmarks = %d (loaded %v), want %d", len(m.Bookmarks()), m.bookmarksLoaded, len(sampleBookmarks()))
+	}
+	if p := m.Item().UserMediaProgress; p == nil || !p.IsFinished {
+		t.Fatalf("progress = %#v, want finished", p)
+	}
+	if !m.ConfirmOverlayVisible() {
+		t.Fatal("the dialog closed without a key")
 	}
 }

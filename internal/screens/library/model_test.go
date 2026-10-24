@@ -157,6 +157,21 @@ func TestLibraryItemsMsgError(t *testing.T) {
 	}
 }
 
+func TestLibraryItemsMsgClearsEarlierError(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	m, _ = m.Update(LibraryItemsMsg{Items: makeItems(2), Total: 4, Page: 0})
+	m, _ = m.Update(LibraryItemsMsg{Err: fmt.Errorf("network error")})
+	m, _ = m.Update(LibraryItemsMsg{Items: makeItems(2), Total: 4, Page: 1})
+
+	if m.Error() != nil {
+		t.Fatalf("Error() = %v after a successful load, want nil", m.Error())
+	}
+	if view := m.View(); containsString(view, "network error") {
+		t.Fatalf("view still shows the earlier error:\n%s", view)
+	}
+}
+
 func TestEnterEmitsNavigateDetailMsg(t *testing.T) {
 	m := newTestModel()
 	m.SetSize(80, 24)
@@ -178,6 +193,27 @@ func TestEnterEmitsNavigateDetailMsg(t *testing.T) {
 	}
 	if nav.Item.ID != items[0].ID {
 		t.Errorf("expected item ID %s, got %s", items[0].ID, nav.Item.ID)
+	}
+}
+
+func TestSelectedPaletteActionsUseSelectedItem(t *testing.T) {
+	libs := []abs.Library{{ID: "lib-001", Name: "Books", MediaType: "book"}}
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient("http://test", "tok"), nil), nil, "lib-001", libs)
+	m.SetSize(80, 24)
+	items := makeItems(2)
+	m, _ = m.Update(LibraryItemsMsg{Items: items, Total: 2, Page: 0})
+
+	actions := m.SelectedPaletteActions()
+	var labels []string
+	for _, action := range actions {
+		labels = append(labels, action.Label)
+		if action.Label == "Open Selected" && action.ItemID != items[0].ID {
+			t.Errorf("Open Selected item = %q, want %q", action.ItemID, items[0].ID)
+		}
+	}
+	want := []string{"Context Actions", "Open Selected", "Queue Item", "Play Next", "Browse Series"}
+	if strings.Join(labels, ",") != strings.Join(want, ",") {
+		t.Fatalf("palette actions = %v, want %v", labels, want)
 	}
 }
 
@@ -876,6 +912,62 @@ func TestLibraryItemsMsgPrefersCache(t *testing.T) {
 	}
 	if m.Items()[0].ID != "cache-1" {
 		t.Errorf("expected cached item 'cache-1', got '%s'", m.Items()[0].ID)
+	}
+}
+
+func newPreparedSearchCache(t *testing.T, libraryID string, items int) *search.Cache {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/series") {
+			_, _ = w.Write([]byte(`{"results":[],"total":0,"limit":50,"page":0}`))
+			return
+		}
+		results := make([]string, items)
+		for i := range results {
+			results[i] = fmt.Sprintf(`{"id":"item-%d","libraryId":%q,"mediaType":"book","media":{"metadata":{"title":"Book %d"}}}`, i, libraryID, i)
+		}
+		_, _ = fmt.Fprintf(w, `{"results":[%s],"total":%d,"limit":50,"page":0}`, strings.Join(results, ","), items)
+	}))
+	t.Cleanup(srv.Close)
+	return search.NewCache(cache.NewClient(abs.NewClient(srv.URL, "tok"), nil), nil)
+}
+
+func TestSearchCacheReadyClearsEarlierError(t *testing.T) {
+	c := newPreparedSearchCache(t, "lib-001", 2)
+	libs := []abs.Library{{ID: "lib-001", MediaType: "book"}}
+	m := New(ui.DefaultStyles(), nil, c, "lib-001", libs)
+	m, _ = m.Update(LibraryItemsMsg{LibraryID: "lib-001", Err: fmt.Errorf("network error")})
+
+	if err := c.Prepare(context.Background(), "lib-001", "book"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	m, _ = m.Update(search.CacheReadyMsg{LibraryID: "lib-001"})
+
+	if m.Error() != nil {
+		t.Fatalf("Error() = %v after the cache load, want nil", m.Error())
+	}
+	if len(m.Items()) != 2 {
+		t.Fatalf("items = %d, want 2", len(m.Items()))
+	}
+}
+
+func TestLatePageAfterCacheLoadIsDropped(t *testing.T) {
+	c := newPreparedSearchCache(t, "lib-001", 4)
+	libs := []abs.Library{{ID: "lib-001", MediaType: "book"}}
+	m := New(ui.DefaultStyles(), nil, c, "lib-001", libs)
+
+	// Page 0 comes from the server before the search cache is ready.
+	m, _ = m.Update(LibraryItemsMsg{Items: makeItems(2), Total: 4, Page: 0, LibraryID: "lib-001"})
+	// The search cache gets ready while the fetch of page 1 is in flight.
+	if err := c.Prepare(context.Background(), "lib-001", "book"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	m, _ = m.Update(search.CacheReadyMsg{LibraryID: "lib-001"})
+	m, _ = m.Update(LibraryItemsMsg{Items: makeItems(4)[2:], Total: 4, Page: 1, LibraryID: "lib-001"})
+
+	if len(m.Items()) != 4 {
+		t.Fatalf("items = %d, want the 4 items of the cache", len(m.Items()))
 	}
 }
 

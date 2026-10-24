@@ -210,6 +210,21 @@ func TestPersonalizedMsg_Error(t *testing.T) {
 	}
 }
 
+func TestPersonalizedMsg_SuccessClearsEarlierError(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+
+	m, _ = m.Update(PersonalizedMsg{Err: fmt.Errorf("network error")})
+	m, _ = m.Update(PersonalizedMsg{Items: sampleItems()})
+
+	if m.Error() != nil {
+		t.Fatalf("Error() = %v after a successful load, want nil", m.Error())
+	}
+	if v := m.View(); strings.Contains(v, "network error") {
+		t.Fatalf("view still shows the earlier error:\n%s", v)
+	}
+}
+
 func TestEnterKey_NavigateDetail(t *testing.T) {
 	m := newTestModel()
 	items := sampleItems()

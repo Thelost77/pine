@@ -218,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.refreshListRows()
 			return m, nil
 		}
+		m.err = nil
 		if len(msg.Libraries) > 0 {
 			logger.Debug("personalized: updating libraries", "count", len(msg.Libraries))
 			m.libraries = msg.Libraries
