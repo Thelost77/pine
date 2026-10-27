@@ -109,6 +109,8 @@ type playback struct {
 	ended chan struct{}
 	// reason is the end-file reason. Read it only after ended closes.
 	reason string
+	// err is the cause of the reason "error". Read it only after ended closes.
+	err error
 	// stopped closes when the event goroutine exits.
 	stopped chan struct{}
 }
@@ -235,12 +237,12 @@ func (m *Mpv) start(h mpvHandle, url, startTime string, paused bool, httpHeaders
 func (p *playback) watch(h mpvHandle) {
 	defer close(p.stopped)
 	ended := false
-	end := func(reason string) {
+	end := func(reason string, err error) {
 		if ended {
 			return
 		}
 		ended = true
-		p.reason = reason
+		p.reason, p.err = reason, err
 		close(p.ended)
 		logger.Info("mpv playback ended", "reason", reason)
 	}
@@ -257,12 +259,14 @@ func (p *playback) watch(h mpvHandle) {
 		case mpvEventEndFile:
 			file := (*mpvEndFile)(event.data)
 			reason := endFileReason(file.reason)
+			var err error
 			if reason == "error" {
-				logger.Warn("mpv failed to play the file", "err", mpvErrorString(file.err))
+				err = mpvError(file.err, "play file")
+				logger.Warn("mpv failed to play the file", "err", err)
 			}
-			end(reason)
+			end(reason, err)
 		case mpvEventShutdown:
-			end("quit")
+			end("quit", nil)
 			return
 		}
 	}

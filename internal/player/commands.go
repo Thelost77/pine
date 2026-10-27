@@ -27,7 +27,7 @@ type PositionMsg struct {
 type PlayerEndMsg struct {
 	Generation uint64
 	Reason     string // "eof" | "error" | "quit" | "stop" | "redirect" | "unknown"
-	Err        error
+	Err        error  // the cause for reason "error"
 }
 
 // CommandErrMsg reports that the player did not accept a new pause state, a
@@ -163,6 +163,6 @@ func (m *Mpv) WatchEvents(generation uint64) tea.Cmd {
 			return PlayerEndMsg{Generation: generation, Reason: "error", Err: fmt.Errorf("watch events: %w", ErrClosed)}
 		}
 		<-play.ended
-		return PlayerEndMsg{Generation: generation, Reason: play.reason}
+		return PlayerEndMsg{Generation: generation, Reason: play.reason, Err: play.err}
 	}
 }

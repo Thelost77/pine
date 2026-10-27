@@ -158,7 +158,6 @@ func (m *Model) handlePositionMsg(msg player.PositionMsg) (*Model, tea.Cmd) {
 
 	if msg.Err != nil {
 		if isMpvPropertyUnavailable(msg.Err) {
-			logger.Warn("player position poll temporarily unavailable", "err", msg.Err)
 			if m.mpv != nil {
 				return m, player.TickCmd(m.mpv, m.playGeneration)
 			}

@@ -425,8 +425,8 @@ func TestMpvLoadFailureGivesErrorAndClosesThePlayer(t *testing.T) {
 		t.Fatalf("Launch() error: %v", err)
 	}
 
-	if end := watchEnd(t, m, 1); end.Reason != "error" {
-		t.Fatalf("WatchEvents() = %+v, want reason error", end)
+	if end := watchEnd(t, m, 1); end.Reason != "error" || end.Err == nil {
+		t.Fatalf("WatchEvents() = %+v, want reason error with an error", end)
 	}
 	if _, err := m.GetPosition(); !errors.Is(err, ErrClosed) {
 		t.Errorf("GetPosition() error = %v, want ErrClosed", err)
