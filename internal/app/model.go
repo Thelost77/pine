@@ -37,6 +37,10 @@ const playerFooterHeight = 1
 const captionLineHeight = 1
 const syncInterval = 30 * time.Second
 
+// scanTimeout is the longest time that the palette action Scan Library waits
+// for the end of the scan on the server.
+const scanTimeout = 30 * time.Minute
+
 // Model is the root application model that manages screen routing.
 type Model struct {
 	screen    Screen
@@ -618,6 +622,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchCache.Invalidate(m.home.SelectedLibraryID())
 		}
 		m.detail, _ = m.detail.Update(msg)
+		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
+
+	case LibraryScannedMsg:
+		m.home.InvalidateLibrary(msg.LibraryID)
+		m.library.InvalidateLibrary(msg.LibraryID)
+		if m.searchCache != nil {
+			m.searchCache.Invalidate(msg.LibraryID)
+		}
 		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
 
 	case detail.SeekToBookmarkCmd:
@@ -1212,6 +1224,8 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 		{Label: "Go Library", Action: components.ActionGoLibrary},
 		{Label: "Go Series List", Action: components.ActionGoSeriesList},
 		{Label: "Listening History", Action: components.ActionShowSessions},
+		{Label: "Library", IsHeader: true},
+		{Label: "Scan Library", Action: components.ActionScanLibrary},
 	}
 
 	if !m.isPlaying() {
@@ -1612,6 +1626,8 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		return m.navigate(ScreenSeriesList)
 	case components.ActionSwitchLibrary:
 		return m, nil
+	case components.ActionScanLibrary:
+		return m, m.scanLibraryCmd()
 	case components.ActionDeleteItem:
 		if msg, ok := data.(detail.ShowDeleteConfirmMsg); ok && m.screen == ScreenDetail {
 			m.detail, _ = m.detail.Update(msg)
@@ -1634,6 +1650,28 @@ func (m Model) prewarmCacheCmd() tea.Cmd {
 		}
 		_ = cache.Prepare(context.Background(), libID, libMediaType)
 		return PrewarmDoneMsg{}
+	}
+}
+
+// scanLibraryCmd scans the library of the current screen on the server. At the
+// end of the scan, the cache client clears the cache, and LibraryScannedMsg
+// loads the screens again.
+func (m Model) scanLibraryCmd() tea.Cmd {
+	libraryID, _ := m.currentLibraryForSearch()
+	if m.client == nil || libraryID == "" {
+		return nil
+	}
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+		defer cancel()
+		if err := client.ScanLibrary(ctx, libraryID); err != nil {
+			if abs.IsHTTPStatus(err, http.StatusForbidden) {
+				err = fmt.Errorf("ABS user does not have the admin permission to scan: %w", err)
+			}
+			return components.ErrMsg{Err: fmt.Errorf("failed to scan library: %w", err)}
+		}
+		return LibraryScannedMsg{LibraryID: libraryID}
 	}
 }
 

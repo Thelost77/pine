@@ -13,11 +13,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Thelost77/pine/internal/logger"
 )
 
 const batchFetchConcurrency = 10
+
+// scanPollInterval is the time between two reads of a library while
+// ScanLibrary waits for the end of its scan.
+var scanPollInterval = 2 * time.Second
 
 // DeleteEpisode deletes a podcast episode from the server.
 func (c *Client) DeleteEpisode(ctx context.Context, podcastID string, episodeID string, hardDelete bool) error {
@@ -47,6 +52,50 @@ func (c *Client) GetLibraries(ctx context.Context) ([]Library, error) {
 		return nil, fmt.Errorf("decode libraries response: %w", err)
 	}
 	return resp.Libraries, nil
+}
+
+// ScanLibrary starts a scan of a library on the server and waits until the
+// scan ends. The server answers the scan request before the scan, so
+// ScanLibrary reads the scan time of the library (lastScan) until it changes.
+// The server must give the user admin rights. ctx limits the wait.
+func (c *Client) ScanLibrary(ctx context.Context, libraryID string) error {
+	before, err := c.lastScan(ctx, libraryID)
+	if err != nil {
+		return fmt.Errorf("scan library: %w", err)
+	}
+	if _, err := c.do(ctx, http.MethodPost, fmt.Sprintf("/api/libraries/%s/scan", libraryID), nil); err != nil {
+		return fmt.Errorf("scan library: %w", err)
+	}
+	for {
+		last, err := c.lastScan(ctx, libraryID)
+		if err != nil {
+			return fmt.Errorf("scan library: %w", err)
+		}
+		if last != before {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("scan library: wait for the end of the scan: %w", ctx.Err())
+		case <-time.After(scanPollInterval):
+		}
+	}
+}
+
+// lastScan returns the time of the last scan of a library, in milliseconds.
+// It is 0 for a library with no scan.
+func (c *Client) lastScan(ctx context.Context, libraryID string) (int64, error) {
+	data, err := c.do(ctx, http.MethodGet, "/api/libraries/"+libraryID, nil)
+	if err != nil {
+		return 0, fmt.Errorf("get library: %w", err)
+	}
+	var resp struct {
+		LastScan int64 `json:"lastScan"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return 0, fmt.Errorf("decode library response: %w", err)
+	}
+	return resp.LastScan, nil
 }
 
 // DeleteItem deletes a library item from the server.

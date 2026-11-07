@@ -34,6 +34,7 @@ The remaining sections describe pine. For spruce, see [docs/spruce/README.md](do
 - Automatic progress sync every 30 seconds
 - Multiple library support with tab switching
 - Delete books and podcast episodes from the server
+- Scan a library on the server from the command palette (admin users only), then reload the lists when the scan ends
 - Keyboard-driven navigation
 - Configurable colors and keys, with the Everforest dark theme as the default
 - Session restore — pick up where you left off

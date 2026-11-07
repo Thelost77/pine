@@ -2650,3 +2650,40 @@ func TestE2E_LoginClearsCacheStore(t *testing.T) {
 		t.Error("the login sets no client")
 	}
 }
+
+// TestE2E_PaletteScanLibraryReloadsAfterTheScan verifies that the palette
+// action Scan Library scans the library of the screen on the server, and loads
+// the home screen again after the end of the scan.
+func TestE2E_PaletteScanLibraryReloadsAfterTheScan(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	loads := log.count(http.MethodGet, "/api/libraries/lib-001/personalized")
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	m = e2eTypeString(m, "scan")
+	m, _ = e2ePressSpecial(m, tea.KeyEnter)
+	m, scanCmd := e2ePressSpecial(m, tea.KeyEnter)
+	if scanCmd == nil {
+		t.Fatal("Scan Library returns no command")
+	}
+
+	m, reloadCmd := feedCmdWithin(m, scanCmd, slowCmdWait)
+	if got := log.count(http.MethodPost, "/api/libraries/lib-001/scan"); got != 1 {
+		t.Fatalf("scan requests = %d, want 1", got)
+	}
+	if m.err.HasError() {
+		t.Fatalf("error after the scan: %v", m.err.Error())
+	}
+	feedCmdChain(m, reloadCmd, 5)
+	if got := log.count(http.MethodGet, "/api/libraries/lib-001/personalized"); got <= loads {
+		t.Errorf("home loads = %d, want more than %d after the scan", got, loads)
+	}
+}

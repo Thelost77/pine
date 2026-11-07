@@ -172,6 +172,16 @@ func (c *Client) invalidate() {
 	}
 }
 
+// ScanLibrary scans a library on the server, waits for the end of the scan,
+// and invalidates the caches.
+func (c *Client) ScanLibrary(ctx context.Context, libraryID string) error {
+	if err := c.Client.ScanLibrary(ctx, libraryID); err != nil {
+		return err
+	}
+	c.invalidate()
+	return nil
+}
+
 // DeleteItem deletes a library item from the API and invalidates the caches.
 func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool) error {
 	if err := c.Client.DeleteItem(ctx, itemID, hardDelete); err != nil {

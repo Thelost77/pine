@@ -66,6 +66,7 @@ const (
 	ActionSubliminalMode
 	ActionToggleCaptions
 	ActionShowSessions
+	ActionScanLibrary
 )
 
 type PaletteItem struct {

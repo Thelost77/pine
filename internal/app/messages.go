@@ -157,6 +157,12 @@ type SeriesContinueMsg struct {
 	Err  error
 }
 
+// LibraryScannedMsg is sent after the end of a scan of a library on the
+// server. The screens then load the data of the library again.
+type LibraryScannedMsg struct {
+	LibraryID string
+}
+
 // PrewarmDoneMsg is sent after cache pre-warming completes. No action needed,
 // just used to keep the command chain alive.
 type PrewarmDoneMsg struct{}

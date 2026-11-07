@@ -114,6 +114,19 @@ type e2eServerState struct {
 	meStatus        int                       // GET /api/me status override
 	force401        bool                      // when true, next API call returns 401
 	noTrackEpisode  map[string]bool           // itemID|episodeID → return play session without tracks
+	lastScan        int64                     // lastScan of lib-001; a scan request sets it
+}
+
+func (s *e2eServerState) getLastScan() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastScan
+}
+
+func (s *e2eServerState) scan() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastScan = 1700000000000
 }
 
 func (s *e2eServerState) shouldReturnNoTracks(itemID, episodeID string) bool {
@@ -270,6 +283,15 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				Bookmarks: state.allBookmarks(),
 			}
 			_ = json.NewEncoder(w).Encode(resp)
+
+		// --- Library scan ---
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-001":
+			resp := map[string]any{"id": "lib-001", "lastScan": state.getLastScan()}
+			_ = json.NewEncoder(w).Encode(resp)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/libraries/lib-001/scan":
+			state.scan()
+			w.WriteHeader(http.StatusOK)
 
 		// --- Libraries ---
 		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries":

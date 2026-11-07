@@ -493,3 +493,59 @@ func TestClient_FetchThatEndsAfterAnInvalidationIsNotCached(t *testing.T) {
 		t.Errorf("title after the change = %q, want new", got)
 	}
 }
+
+// TestClient_ScanLibraryClearsCacheAfterTheScan verifies that ScanLibrary
+// clears the cache after the end of the scan, and keeps it if the server
+// refuses the scan.
+func TestClient_ScanLibraryClearsCacheAfterTheScan(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		wantCleared bool
+	}{
+		{name: "scan", status: http.StatusOK, wantCleared: true},
+		{name: "refused scan", status: http.StatusForbidden, wantCleared: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var scanned atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					w.WriteHeader(tt.status)
+					scanned.Store(tt.status == http.StatusOK)
+					return
+				}
+				lastScan := "null"
+				if scanned.Load() {
+					lastScan = "1700000000000"
+				}
+				_, _ = w.Write([]byte(`{"id":"lib1","lastScan":` + lastScan + `}`))
+			}))
+			defer srv.Close()
+
+			store := NewStore(openTestDB(t))
+			client := NewClient(abs.NewClient(srv.URL, "tok"), store)
+			invalidated := false
+			client.OnInvalidate = func() { invalidated = true }
+			if err := store.Put(librariesKey, []abs.Library{{ID: "lib1"}}, time.Minute); err != nil {
+				t.Fatalf("seed cache: %v", err)
+			}
+
+			err := client.ScanLibrary(context.Background(), "lib1")
+			if (err == nil) != tt.wantCleared {
+				t.Fatalf("ScanLibrary() error = %v", err)
+			}
+			var libs []abs.Library
+			hit, err := store.Get(librariesKey, &libs)
+			if err != nil {
+				t.Fatalf("read cache: %v", err)
+			}
+			if hit == tt.wantCleared {
+				t.Errorf("cache hit = %v, want %v", hit, !tt.wantCleared)
+			}
+			if invalidated != tt.wantCleared {
+				t.Errorf("OnInvalidate called = %v, want %v", invalidated, tt.wantCleared)
+			}
+		})
+	}
+}

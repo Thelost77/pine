@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 //go:embed testdata/libraries.json
@@ -728,4 +730,83 @@ func TestGetLibraryItemsBatchWithACanceledContextReturnsAnError(t *testing.T) {
 			t.Fatalf("GetLibraryItemsBatch() = %v, %v; want context.Canceled", items, err)
 		}
 	}
+}
+
+// TestScanLibraryWaitsForTheEndOfTheScan verifies that ScanLibrary starts the
+// scan and returns only after the scan time of the library changed. The server
+// answers the scan request before the scan.
+func TestScanLibraryWaitsForTheEndOfTheScan(t *testing.T) {
+	setScanPollInterval(t, time.Millisecond)
+	var scans, readsAfterScan atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/libraries/lib1/scan":
+			scans.Add(1)
+			_, _ = w.Write([]byte("OK"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib1":
+			// The library has no scan. The scan ends at the third read after
+			// the scan request.
+			lastScan := "null"
+			if scans.Load() > 0 && readsAfterScan.Add(1) >= 3 {
+				lastScan = "1700000000000"
+			}
+			_, _ = w.Write([]byte(`{"id":"lib1","lastScan":` + lastScan + `}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL, "tok").ScanLibrary(context.Background(), "lib1"); err != nil {
+		t.Fatalf("ScanLibrary() error: %v", err)
+	}
+	if got := scans.Load(); got != 1 {
+		t.Errorf("scan requests = %d, want 1", got)
+	}
+	if got := readsAfterScan.Load(); got != 3 {
+		t.Errorf("reads after the scan request = %d, want 3", got)
+	}
+}
+
+// TestScanLibraryStopsWhenTheContextEnds verifies that ScanLibrary stops its
+// wait for a scan time that does not change.
+func TestScanLibraryStopsWhenTheContextEnds(t *testing.T) {
+	setScanPollInterval(t, time.Millisecond)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"lib1","lastScan":1700000000000}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := NewClient(srv.URL, "tok").ScanLibrary(ctx, "lib1")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ScanLibrary() error = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// TestScanLibraryReturnsTheRefusalOfTheServer verifies that ScanLibrary
+// returns the status of a refused scan request, for a user with no admin
+// rights.
+func TestScanLibraryReturnsTheRefusalOfTheServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"lib1","lastScan":1700000000000}`))
+	}))
+	defer srv.Close()
+
+	err := NewClient(srv.URL, "tok").ScanLibrary(context.Background(), "lib1")
+	if !IsHTTPStatus(err, http.StatusForbidden) {
+		t.Fatalf("ScanLibrary() error = %v, want the error of the status 403", err)
+	}
+}
+
+func setScanPollInterval(t *testing.T, interval time.Duration) {
+	t.Helper()
+	old := scanPollInterval
+	scanPollInterval = interval
+	t.Cleanup(func() { scanPollInterval = old })
 }
