@@ -66,6 +66,7 @@ const (
 	ActionToggleCaptions
 	ActionShowSessions
 	ActionScanLibrary
+	ActionRefresh
 )
 
 type PaletteItem struct {

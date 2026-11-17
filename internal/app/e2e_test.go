@@ -2732,3 +2732,53 @@ func TestE2E_PaletteScanLibraryReloadsSeriesScreens(t *testing.T) {
 		t.Errorf("the series list does not show %q after the scan", testScannedSeries.Name)
 	}
 }
+
+// TestE2E_PaletteRefreshLoadsLibrariesAgain verifies that the palette entry
+// Refresh clears the persistent cache, and reads the library list and the home
+// shelves from the server again.
+func TestE2E_PaletteRefreshLoadsLibrariesAgain(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+	libraryLoads := func() int {
+		n := 0
+		for _, r := range log.get() {
+			if r.Method == http.MethodGet && r.Path == "/api/libraries" {
+				n++
+			}
+		}
+		return n
+	}
+
+	store, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	cacheStore := cache.NewStore(store)
+	client := cache.NewClient(abs.NewClient(srv.URL, "jwt-token-e2e"), cacheStore)
+	m := NewWithPlayer(config.Default(), nil, client, cacheStore, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, _ = feedCmdWithin(m, m.home.Init(), slowCmdWait)
+	libraries := libraryLoads()
+	shelves := log.count(http.MethodGet, "/api/libraries/lib-001/personalized")
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	m = e2eTypeString(m, "refresh")
+	m, _ = e2ePressSpecial(m, tea.KeyEnter)
+	m, refreshCmd := e2ePressSpecial(m, tea.KeyEnter)
+	if refreshCmd == nil {
+		t.Fatal("Refresh returns no command")
+	}
+	m, reloadCmd := feedCmdWithin(m, refreshCmd, slowCmdWait)
+	feedCmdWithin(m, reloadCmd, slowCmdWait)
+
+	if got := libraryLoads(); got <= libraries {
+		t.Errorf("library list loads = %d, want more than %d after Refresh", got, libraries)
+	}
+	if got := log.count(http.MethodGet, "/api/libraries/lib-001/personalized"); got <= shelves {
+		t.Errorf("home loads = %d, want more than %d after Refresh", got, shelves)
+	}
+}

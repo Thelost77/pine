@@ -543,6 +543,13 @@ func (m *Model) ReloadCmd() tea.Cmd {
 	return tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
 }
 
+// RefreshCmd reads the library list from the client again, and loads the
+// shelves of the current library.
+func (m *Model) RefreshCmd() tea.Cmd {
+	m.libraries = nil
+	return m.ReloadCmd()
+}
+
 // Libraries returns the available libraries.
 func (m Model) Libraries() []abs.Library {
 	return m.libraries

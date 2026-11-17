@@ -165,6 +165,10 @@ type LibraryScannedMsg struct {
 	Err       error
 }
 
+// CacheClearedMsg is sent after the palette entry Refresh clears the cache.
+// The screens and the library list then load again.
+type CacheClearedMsg struct{}
+
 // PrewarmDoneMsg is sent after cache pre-warming completes. No action needed,
 // just used to keep the command chain alive.
 type PrewarmDoneMsg struct{}

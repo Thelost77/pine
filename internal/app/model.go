@@ -655,6 +655,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd(), m.reloadOpenScreensCmd(msg.LibraryID))
 
+	case CacheClearedMsg:
+		for _, lib := range m.home.Libraries() {
+			m.library.InvalidateLibrary(lib.ID)
+		}
+		// The warm-up of the search index starts with home.PersonalizedMsg.
+		cmd := tea.Batch(m.home.RefreshCmd(), m.library.ReloadCmd(), m.reloadOpenScreensCmd(""))
+		return m, cmd
+
 	case spinner.TickMsg:
 		// The ticks end with the scan.
 		if m.scanStatus == "" {
@@ -1283,6 +1291,7 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 		components.PaletteItem{Label: "Listening History", Action: components.ActionShowSessions},
 		components.PaletteItem{Label: "Library", IsHeader: true},
 		components.PaletteItem{Label: scanLabel, Action: components.ActionScanLibrary},
+		components.PaletteItem{Label: "Refresh", Action: components.ActionRefresh},
 	)
 
 	if !m.isPlaying() {
@@ -1696,6 +1705,15 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		// The tick is first, because feedCmdWithin of the tests runs each
 		// command of a batch and gives the command of the last one.
 		return m, tea.Batch(m.scanSpinner.Tick, scanCmd)
+	case components.ActionRefresh:
+		if m.client == nil {
+			return m, nil
+		}
+		client := m.client
+		return m, func() tea.Msg {
+			client.Invalidate()
+			return CacheClearedMsg{}
+		}
 	case components.ActionDeleteItem:
 		if msg, ok := data.(detail.ShowDeleteConfirmMsg); ok && m.screen == ScreenDetail {
 			m.detail, _ = m.detail.Update(msg)
