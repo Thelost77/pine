@@ -211,7 +211,7 @@ func TestSelectedPaletteActionsUseSelectedItem(t *testing.T) {
 			t.Errorf("Open Selected item = %q, want %q", action.ItemID, items[0].ID)
 		}
 	}
-	want := []string{"Context Actions", "Open Selected", "Queue Item", "Play Next", "Browse Series"}
+	want := []string{"Context Actions", "Open Selected", "Queue Item", "Play Next"}
 	if strings.Join(labels, ",") != strings.Join(want, ",") {
 		t.Fatalf("palette actions = %v, want %v", labels, want)
 	}

@@ -1198,12 +1198,15 @@ func (m Model) contentSearchFunc() components.SearchFunc {
 // currentLibraryForSearch returns the library ID and media type that should be
 // searched based on the active screen. This ensures the palette searches the
 // library the user is currently browsing, not just the home screen's library.
+// Browse Series of the palette opens the series of the same library.
 func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
 	switch m.screen {
 	case ScreenLibrary:
 		return m.library.SelectedLibraryID(), m.library.SelectedLibraryMediaType()
 	case ScreenSeriesList:
 		return m.seriesList.SelectedLibraryID(), "book"
+	case ScreenSeries:
+		return m.series.LibraryID(), "book"
 	case ScreenDetail:
 		item := m.detail.Item()
 		if item.LibraryID != "" {
@@ -1217,16 +1220,31 @@ func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
 	}
 }
 
+// libraryName returns the name of a library, or an empty string.
+func (m Model) libraryName(id string) string {
+	for _, lib := range m.home.Libraries() {
+		if lib.ID == id {
+			return lib.Name
+		}
+	}
+	return ""
+}
+
 func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) {
 	nav = []components.PaletteItem{
 		{Label: "Navigation", IsHeader: true},
 		{Label: "Go Home", Action: components.ActionGoHome},
 		{Label: "Go Library", Action: components.ActionGoLibrary},
-		{Label: "Go Series List", Action: components.ActionGoSeriesList},
-		{Label: "Listening History", Action: components.ActionShowSessions},
-		{Label: "Library", IsHeader: true},
-		{Label: "Scan Library", Action: components.ActionScanLibrary},
 	}
+	// Only a book library has series. The series list is the target of the entry.
+	if libID, mediaType := m.currentLibraryForSearch(); mediaType == "book" && m.screen != ScreenSeriesList {
+		nav = append(nav, components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries, LibraryID: libID, Payload: m.libraryName(libID)})
+	}
+	nav = append(nav,
+		components.PaletteItem{Label: "Listening History", Action: components.ActionShowSessions},
+		components.PaletteItem{Label: "Library", IsHeader: true},
+		components.PaletteItem{Label: "Scan Library", Action: components.ActionScanLibrary},
+	)
 
 	if !m.isPlaying() {
 		return nil, nav
@@ -1324,9 +1342,6 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 		return m.navigate(ScreenHome)
 	case components.ActionGoLibrary:
 		return m.navigate(ScreenLibrary)
-	case components.ActionGoSeriesList:
-		m.seriesList = serieslist.New(m.styles, m.client, m.home.SelectedLibraryID(), "")
-		return m.navigate(ScreenSeriesList)
 	case components.ActionShowSessions:
 		if entry, ok := data.(detail.AddToQueueCmd); ok {
 			return m.openSessions(sessionsTarget(entry.Item, entry.Episode))

@@ -22,6 +22,8 @@ import (
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/login"
 	"github.com/Thelost77/pine/internal/screens/metadataedit"
+	"github.com/Thelost77/pine/internal/screens/series"
+	"github.com/Thelost77/pine/internal/screens/serieslist"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
@@ -2468,32 +2470,91 @@ func TestSleepTimerOfFailedTrackChangeDoesNotStopNextPlayback(t *testing.T) {
 	}
 }
 
-// TestLibraryPaletteBrowseSeriesOpensLibraryOfScreen verifies that Browse
-// Series of the palette on the library screen opens the series of the library
-// that the screen shows, as the key s does.
-func TestLibraryPaletteBrowseSeriesOpensLibraryOfScreen(t *testing.T) {
-	m := newTestModelAuthenticated()
-	libs := []abs.Library{{ID: "lib-a", Name: "A", MediaType: "book"}, {ID: "lib-b", Name: "B", MediaType: "book"}}
-	m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: libs, LibraryID: "lib-a"})
-	m.library.Configure("lib-b", libs)
-	m.library.SetSize(80, 24)
-	m.library, _ = m.library.Update(library.LibraryItemsMsg{LibraryID: "lib-b", Total: 1, Items: []abs.LibraryItem{
-		{ID: "b-1", LibraryID: "lib-b", MediaType: "book", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "B one"}}},
-	}})
-	m.screen = ScreenLibrary
+// TestPaletteBrowseSeriesOpensBookLibraryOfScreen verifies that the palette
+// shows Browse Series on each screen whose library is a book library, and that
+// the entry opens the series of that library. A podcast library has no series,
+// and the series list is the target of the entry, so they show no entry.
+func TestPaletteBrowseSeriesOpensBookLibraryOfScreen(t *testing.T) {
+	libA := abs.Library{ID: "lib-a", Name: "A", MediaType: "book"}
+	libB := abs.Library{ID: "lib-b", Name: "B", MediaType: "book"}
+	libPod := abs.Library{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"}
+	// The home screen shows the first library.
+	homeOnBooks := []abs.Library{libA, libB, libPod}
+	homeOnPodcasts := []abs.Library{libPod, libA, libB}
+	book := abs.LibraryItem{ID: "b-1", LibraryID: "lib-b", MediaType: "book"}
+	podcast := abs.LibraryItem{ID: "p-1", LibraryID: "lib-pod", MediaType: "podcast"}
 
-	var browse *components.PaletteItem
-	for _, item := range m.buildContextPaletteItems() {
-		if item.Action == components.ActionBrowseSeries {
-			browse = &item
-		}
+	tests := []struct {
+		name     string
+		libs     []abs.Library
+		setup    func(m *Model)
+		wantLib  string
+		wantName string
+	}{
+		{"home on a book library", homeOnBooks, func(m *Model) { m.screen = ScreenHome }, "lib-a", "A"},
+		{"home on a podcast library", homeOnPodcasts, func(m *Model) { m.screen = ScreenHome }, "", ""},
+		{"library screen", homeOnPodcasts, func(m *Model) {
+			m.library.Configure("lib-b", homeOnPodcasts)
+			m.screen = ScreenLibrary
+		}, "lib-b", "B"},
+		{"library screen on a podcast library", homeOnBooks, func(m *Model) {
+			m.library.Configure("lib-pod", homeOnBooks)
+			m.screen = ScreenLibrary
+		}, "", ""},
+		{"detail of a book", homeOnPodcasts, func(m *Model) {
+			m.detail = detail.New(m.styles, book)
+			m.screen = ScreenDetail
+		}, "lib-b", "B"},
+		{"detail of a podcast", homeOnBooks, func(m *Model) {
+			m.detail = detail.New(m.styles, podcast)
+			m.screen = ScreenDetail
+		}, "", ""},
+		{"series", homeOnPodcasts, func(m *Model) {
+			m.series = series.New(m.styles, m.client, "lib-b", "ser-1", "")
+			m.screen = ScreenSeries
+		}, "lib-b", "B"},
+		{"series list", homeOnBooks, func(m *Model) {
+			m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
+			m.screen = ScreenSeriesList
+		}, "", ""},
 	}
-	if browse == nil {
-		t.Fatal("the palette of the library screen has no Browse Series")
-	}
-	m, _ = m.handlePaletteAction(browse.Action, browse.Payload, browse.LibraryID, browse.ItemID, browse.Data)
-	if got := m.seriesList.SelectedLibraryID(); got != "lib-b" {
-		t.Errorf("series list library = %q, want lib-b", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModelAuthenticated()
+			m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: tt.libs})
+			tt.setup(&m)
+
+			var browse *components.PaletteItem
+			_, nav := m.buildStaticPaletteItems()
+			for _, item := range append(nav, m.buildContextPaletteItems()...) {
+				if item.Action == components.ActionBrowseSeries {
+					if browse != nil {
+						t.Fatal("the palette has two Browse Series entries")
+					}
+					browse = &item
+				}
+			}
+			if tt.wantLib == "" {
+				if browse != nil {
+					t.Fatalf("the palette has Browse Series for the library %q", browse.LibraryID)
+				}
+				return
+			}
+			if browse == nil {
+				t.Fatal("the palette has no Browse Series")
+			}
+			if browse.Payload != tt.wantName {
+				t.Errorf("library name = %q, want %q", browse.Payload, tt.wantName)
+			}
+			m, _ = m.handlePaletteAction(browse.Action, browse.Payload, browse.LibraryID, browse.ItemID, browse.Data)
+			if m.screen != ScreenSeriesList {
+				t.Errorf("screen = %v, want the series list", m.screen)
+			}
+			if got := m.seriesList.SelectedLibraryID(); got != tt.wantLib {
+				t.Errorf("series list library = %q, want %q", got, tt.wantLib)
+			}
+		})
 	}
 }
 

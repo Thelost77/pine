@@ -312,6 +312,11 @@ func (i seriesSkeletonItem) FilterValue() string {
 	return ""
 }
 
+// LibraryID returns the ID of the library of the series.
+func (m Model) LibraryID() string {
+	return m.libraryID
+}
+
 func (m Model) SelectedPaletteActions() []components.PaletteItem {
 	sel, ok := m.list.SelectedItem().(seriesBookItem)
 	if !ok {

@@ -27,7 +27,6 @@ const (
 	ActionGoHome
 	ActionGoLibrary
 	ActionGoPlaylists
-	ActionGoSeriesList
 	ActionTogglePlay
 	ActionNextTrack
 	ActionPrevTrack

@@ -812,11 +812,6 @@ func (m Model) SelectedPaletteActions() []components.PaletteItem {
 			components.PaletteItem{Label: "Play Next", Action: components.ActionPlayNextItem, LibraryID: sel.Item.LibraryID, ItemID: sel.Item.ID, Data: sel.Item},
 		)
 	}
-	if m.SelectedLibraryMediaType() == "book" {
-		items = append(items,
-			components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries, LibraryID: m.SelectedLibraryID(), Payload: m.selectedLibraryName()},
-		)
-	}
 	return items
 }
 
