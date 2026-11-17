@@ -2558,6 +2558,70 @@ func TestPaletteBrowseSeriesOpensBookLibraryOfScreen(t *testing.T) {
 	}
 }
 
+// TestPaletteGoLibraryOpensLibraryOfScreen verifies that Go Library of the
+// palette opens the library of the current screen, also before the library
+// screen opens for the first time. The library screen shows no Go Library.
+func TestPaletteGoLibraryOpensLibraryOfScreen(t *testing.T) {
+	// The home screen shows the first library.
+	libs := []abs.Library{
+		{ID: "lib-a", Name: "A", MediaType: "book"},
+		{ID: "lib-b", Name: "B", MediaType: "book"},
+	}
+	book := abs.LibraryItem{ID: "b-1", LibraryID: "lib-b", MediaType: "book"}
+
+	tests := []struct {
+		name    string
+		setup   func(m *Model)
+		wantLib string
+	}{
+		{"home on a book library", func(m *Model) { m.screen = ScreenHome }, "lib-a"},
+		{"detail of a book of a different library", func(m *Model) {
+			m.detail = detail.New(m.styles, book)
+			m.screen = ScreenDetail
+		}, "lib-b"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModelAuthenticated()
+			m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: libs})
+			tt.setup(&m)
+
+			var goLibrary *components.PaletteItem
+			_, nav := m.buildStaticPaletteItems()
+			for _, item := range nav {
+				if item.Action == components.ActionGoLibrary {
+					goLibrary = &item
+				}
+			}
+			if goLibrary == nil {
+				t.Fatal("the palette has no Go Library")
+			}
+			m, _ = m.handlePaletteAction(goLibrary.Action, goLibrary.Payload, goLibrary.LibraryID, goLibrary.ItemID, goLibrary.Data)
+			if m.screen != ScreenLibrary {
+				t.Errorf("screen = %v, want the library", m.screen)
+			}
+			if got := m.library.SelectedLibraryID(); got != tt.wantLib {
+				t.Errorf("library = %q, want %q", got, tt.wantLib)
+			}
+		})
+	}
+
+	t.Run("library screen", func(t *testing.T) {
+		m := newTestModelAuthenticated()
+		m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: libs})
+		m.library.Configure("lib-b", libs)
+		m.screen = ScreenLibrary
+
+		_, nav := m.buildStaticPaletteItems()
+		for _, item := range nav {
+			if item.Action == components.ActionGoLibrary {
+				t.Error("the library screen has Go Library")
+			}
+		}
+	})
+}
+
 // TestPaletteSpeedActions verifies that Speed Up of the palette does not lower
 // a speed above the range of the palette, and Speed Down does not raise a speed
 // below it: the speed keys and MPRIS can set such a speed. MPRIS gets the new

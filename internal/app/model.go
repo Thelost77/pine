@@ -1234,7 +1234,9 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 	nav = []components.PaletteItem{
 		{Label: "Navigation", IsHeader: true},
 		{Label: "Go Home", Action: components.ActionGoHome},
-		{Label: "Go Library", Action: components.ActionGoLibrary},
+	}
+	if m.screen != ScreenLibrary {
+		nav = append(nav, components.PaletteItem{Label: "Go Library", Action: components.ActionGoLibrary})
 	}
 	// Only a book library has series. The series list is the target of the entry.
 	if libID, mediaType := m.currentLibraryForSearch(); mediaType == "book" && m.screen != ScreenSeriesList {
@@ -1341,6 +1343,8 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	case components.ActionGoHome:
 		return m.navigate(ScreenHome)
 	case components.ActionGoLibrary:
+		libID, _ := m.currentLibraryForSearch()
+		m.library.Configure(libID, m.home.Libraries())
 		return m.navigate(ScreenLibrary)
 	case components.ActionShowSessions:
 		if entry, ok := data.(detail.AddToQueueCmd); ok {
