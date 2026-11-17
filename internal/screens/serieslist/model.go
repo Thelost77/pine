@@ -19,12 +19,16 @@ const pageLimit = 50
 // thresholdPercent is the fraction of loaded items at which a prefetch fires.
 const thresholdPercent = 0.8
 
-// LoadedMsg carries a loaded page of series.
+// LoadedMsg carries a loaded page of series. LibraryID and Generation name the
+// load, so that the screen drops the answer of an earlier load and the answer
+// for a different library.
 type LoadedMsg struct {
-	Results []abs.Series
-	Total   int
-	Page    int
-	Err     error
+	Results    []abs.Series
+	Total      int
+	Page       int
+	Err        error
+	LibraryID  string
+	Generation int
 }
 
 // NavigateSeriesMsg requests opening a specific series detail view.
@@ -70,6 +74,7 @@ type Model struct {
 	page        int
 	total       int
 	loading     bool
+	generation  int
 	err         error
 }
 
@@ -109,10 +114,21 @@ func (m Model) Init() tea.Cmd {
 	return m.fetchSeriesCmd(0)
 }
 
+// ReloadCmd loads the first page again. The rows stay until that page comes.
+// The screen drops the answer of each load that started before the reload,
+// and it starts no load of a next page during the reload.
+func (m *Model) ReloadCmd() tea.Cmd {
+	m.generation++
+	return m.fetchSeriesCmd(0)
+}
+
 // Update handles messages for the series browser.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LoadedMsg:
+		if msg.LibraryID != m.libraryID || msg.Generation != m.generation {
+			return m, nil
+		}
 		m.loading = false
 		if msg.Err != nil {
 			m.err = msg.Err
@@ -193,23 +209,23 @@ func (m *Model) maybePrefetch() tea.Cmd {
 }
 
 func (m *Model) fetchSeriesCmd(page int) tea.Cmd {
+	msg := LoadedMsg{LibraryID: m.libraryID, Generation: m.generation}
 	if m.client == nil {
-		return func() tea.Msg {
-			return LoadedMsg{Err: fmt.Errorf("not authenticated")}
-		}
+		msg.Err = fmt.Errorf("not authenticated")
+		return func() tea.Msg { return msg }
 	}
 	m.loading = true
 	client := m.client
-	libraryID := m.libraryID
 	return func() tea.Msg {
-		resp, err := client.GetLibrarySeries(context.Background(), libraryID, page, pageLimit)
+		resp, err := client.GetLibrarySeries(context.Background(), msg.LibraryID, page, pageLimit)
 		if err != nil {
-			return LoadedMsg{Err: fmt.Errorf("fetch series: %w", err)}
+			msg.Err = fmt.Errorf("fetch series: %w", err)
+			return msg
 		}
-		if resp == nil {
-			return LoadedMsg{}
+		if resp != nil {
+			msg.Results, msg.Total, msg.Page = resp.Results, resp.Total, resp.Page
 		}
-		return LoadedMsg{Results: resp.Results, Total: resp.Total, Page: resp.Page}
+		return msg
 	}
 }
 

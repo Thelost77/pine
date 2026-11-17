@@ -14,10 +14,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// LoadedMsg carries a loaded series payload.
+// LoadedMsg carries a loaded series payload. SeriesID names the series of the
+// load, so that the screen drops the answer for a different series.
 type LoadedMsg struct {
 	Contents abs.SeriesContents
 	Err      error
+	SeriesID string
 }
 
 // NavigateDetailMsg requests opening a book from the series list.
@@ -107,6 +109,9 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case LoadedMsg:
+		if msg.SeriesID != m.seriesID {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err != nil {
@@ -191,23 +196,23 @@ func (m Model) SelectedItemID() string {
 }
 
 func (m Model) fetchSeriesCmd() tea.Cmd {
+	seriesID := m.seriesID
 	if m.client == nil {
 		return func() tea.Msg {
-			return LoadedMsg{Err: fmt.Errorf("not authenticated")}
+			return LoadedMsg{SeriesID: seriesID, Err: fmt.Errorf("not authenticated")}
 		}
 	}
 	client := m.client
 	libraryID := m.libraryID
-	seriesID := m.seriesID
 	return func() tea.Msg {
 		contents, err := client.GetSeriesContents(context.Background(), libraryID, seriesID)
 		if err != nil {
-			return LoadedMsg{Err: fmt.Errorf("fetch series: %w", err)}
+			return LoadedMsg{SeriesID: seriesID, Err: fmt.Errorf("fetch series: %w", err)}
 		}
 		if contents == nil {
-			return LoadedMsg{Err: fmt.Errorf("series not found")}
+			return LoadedMsg{SeriesID: seriesID, Err: fmt.Errorf("series not found")}
 		}
-		return LoadedMsg{Contents: *contents}
+		return LoadedMsg{SeriesID: seriesID, Contents: *contents}
 	}
 }
 

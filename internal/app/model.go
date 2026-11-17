@@ -653,7 +653,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.searchCache != nil {
 			m.searchCache.Invalidate(msg.LibraryID)
 		}
-		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd(), m.reloadOpenScreensCmd(msg.LibraryID))
+		cmd := tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd(), m.reloadOpenScreensCmd(msg.LibraryID))
+		return m, cmd
 
 	case CacheClearedMsg:
 		for _, lib := range m.home.Libraries() {
@@ -1793,13 +1794,13 @@ func (m Model) scanLibraryCmd() tea.Cmd {
 // reloadOpenScreensCmd loads the open series list, series screen, and detail
 // screen of a library again. With an empty libraryID, it loads them for each
 // library.
-func (m Model) reloadOpenScreensCmd(libraryID string) tea.Cmd {
+func (m *Model) reloadOpenScreensCmd(libraryID string) tea.Cmd {
 	inLibrary := func(id string) bool {
 		return libraryID == "" || id == libraryID
 	}
 	var cmds []tea.Cmd
 	if m.screenOpen(ScreenSeriesList) && inLibrary(m.seriesList.SelectedLibraryID()) {
-		cmds = append(cmds, m.seriesList.Init())
+		cmds = append(cmds, m.seriesList.ReloadCmd())
 	}
 	if m.screenOpen(ScreenSeries) && inLibrary(m.series.LibraryID()) {
 		cmds = append(cmds, m.series.Init())

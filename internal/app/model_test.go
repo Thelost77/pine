@@ -2622,6 +2622,35 @@ func TestPaletteGoLibraryOpensLibraryOfScreen(t *testing.T) {
 	})
 }
 
+// TestScanReloadBlocksNextPageOfSeriesList verifies that the reload after a
+// scan marks the open series list as loading, so that the list starts no load
+// of a next page that can mix an old page into the new list.
+func TestScanReloadBlocksNextPageOfSeriesList(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
+	m.seriesList, _ = m.seriesList.Update(serieslist.LoadedMsg{LibraryID: "lib-a", Results: []abs.Series{{ID: "ser-1", Name: "Dune"}}, Total: 120})
+	m.backStack = []Screen{ScreenHome}
+	m.screen = ScreenSeriesList
+	if m.seriesList.Loading() {
+		t.Fatal("the series list loads before the scan")
+	}
+
+	res, _ := m.Update(LibraryScannedMsg{LibraryID: "lib-a"})
+	m = res.(Model)
+	if !m.seriesList.Loading() {
+		t.Error("the series list does not load after the scan")
+	}
+
+	// The answer of a load from before the scan does not change the list.
+	res, _ = m.Update(serieslist.LoadedMsg{LibraryID: "lib-a", Results: []abs.Series{{ID: "ser-9", Name: "Old Page"}}, Total: 120, Page: 1})
+	m = res.(Model)
+	m.width, m.height = 100, 30
+	m.propagateSize()
+	if containsString(m.seriesList.View(), "Old Page") {
+		t.Error("the series list shows a page of a load from before the scan")
+	}
+}
+
 // TestSeriesLoadedMsgReachesScreenBehindActiveScreen verifies that a load of
 // the series list or of a series reaches its screen model also when a
 // different screen is active: a scan loads the screens in the back stack again.
@@ -2633,10 +2662,13 @@ func TestSeriesLoadedMsgReachesScreenBehindActiveScreen(t *testing.T) {
 		m.backStack = []Screen{ScreenHome, ScreenSeriesList}
 		m.screen = ScreenSeries
 
-		res, _ := m.Update(serieslist.LoadedMsg{Results: []abs.Series{{ID: "ser-1", Name: "Dune"}}, Total: 1})
+		m.width, m.height = 100, 30
+		m.propagateSize()
+
+		res, _ := m.Update(serieslist.LoadedMsg{LibraryID: "lib-a", Results: []abs.Series{{ID: "ser-1", Name: "Dune"}}, Total: 1})
 		m = res.(Model)
-		if m.seriesList.Loading() {
-			t.Error("the series list did not get the loaded page")
+		if m.seriesList.Loading() || !containsString(m.seriesList.View(), "Dune") {
+			t.Errorf("the series list did not get the loaded page\n%s", m.seriesList.View())
 		}
 	})
 
@@ -2647,10 +2679,16 @@ func TestSeriesLoadedMsgReachesScreenBehindActiveScreen(t *testing.T) {
 		m.backStack = []Screen{ScreenHome, ScreenSeries}
 		m.screen = ScreenDetail
 
-		res, _ := m.Update(series.LoadedMsg{Contents: abs.SeriesContents{Series: abs.Series{ID: "ser-1", Name: "Dune"}}})
+		m.width, m.height = 100, 30
+		m.propagateSize()
+
+		res, _ := m.Update(series.LoadedMsg{SeriesID: "ser-1", Contents: abs.SeriesContents{
+			Series: abs.Series{ID: "ser-1", Name: "Dune"},
+			Items:  []abs.LibraryItem{{ID: "b-1", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Dune Messiah"}}}},
+		}})
 		m = res.(Model)
-		if m.series.Loading() {
-			t.Error("the series screen did not get the loaded series")
+		if m.series.Loading() || !containsString(m.series.View(), "Dune Messiah") {
+			t.Errorf("the series screen did not get the loaded series\n%s", m.series.View())
 		}
 	})
 }
