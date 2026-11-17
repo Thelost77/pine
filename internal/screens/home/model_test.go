@@ -837,7 +837,7 @@ func TestFetchPersonalizedPodcastLibraryUsesRecentEpisodes(t *testing.T) {
 	m.libraries = []abs.Library{{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"}}
 	m.selectedLibrary = 0
 
-	cmd := m.fetchPersonalizedCmd()
+	cmd := m.fetchPersonalizedCmd(false)
 	msg := cmd()
 	pMsg, ok := msg.(PersonalizedMsg)
 	if !ok {
@@ -879,5 +879,95 @@ func TestListItemFilterValue_PodcastEpisode(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(fv), "daily news") {
 		t.Errorf("FilterValue() = %q, want it to contain 'daily news'", fv)
+	}
+}
+
+func refreshTestLibraries() []abs.Library {
+	return []abs.Library{
+		{ID: "lib-1", Name: "One", MediaType: "podcast"},
+		{ID: "lib-2", Name: "Two", MediaType: "podcast"},
+	}
+}
+
+// TestRefreshDropsAnswerOfEarlierLoad verifies that the answer of a load from
+// before a refresh does not replace the answer of the refresh.
+func TestRefreshDropsAnswerOfEarlierLoad(t *testing.T) {
+	libs := refreshTestLibraries()
+	item := func(id string) []abs.LibraryItem {
+		return []abs.LibraryItem{{ID: id, LibraryID: "lib-1", MediaType: "podcast"}}
+	}
+	m := newTestModel()
+	m, _ = m.Update(PersonalizedMsg{Libraries: libs, LibraryID: "lib-1", Items: item("old")})
+	early := PersonalizedMsg{Libraries: libs, LibraryID: "lib-1", Items: item("early"), generation: m.loadingGen}
+
+	_ = m.RefreshCmd()
+	if got := m.SelectedLibraryID(); got != "lib-1" {
+		t.Fatalf("selected library during the refresh = %q, want lib-1", got)
+	}
+	m, _ = m.Update(PersonalizedMsg{Libraries: libs, LibraryID: "lib-1", Items: item("new"), generation: m.loadingGen, refreshed: true})
+	m, _ = m.Update(early)
+
+	if len(m.items) != 1 || m.items[0].ID != "new" {
+		t.Errorf("items = %+v, want the item of the refresh", m.items)
+	}
+}
+
+// TestRefreshKeepsSelectedLibraryByID verifies that the answer of a refresh
+// selects the same library in the new library list, and the first library
+// when the new list does not have it.
+func TestRefreshKeepsSelectedLibraryByID(t *testing.T) {
+	libs := refreshTestLibraries()
+	m := newTestModel()
+	m, _ = m.Update(PersonalizedMsg{Libraries: libs, LibraryID: "lib-1"})
+	m.selectedLibrary = 1
+
+	_ = m.RefreshCmd()
+	newLibs := append([]abs.Library{{ID: "lib-0", Name: "Zero", MediaType: "podcast"}}, libs...)
+	m, _ = m.Update(PersonalizedMsg{Libraries: newLibs, LibraryID: "lib-2", generation: m.loadingGen, refreshed: true})
+	if got := m.SelectedLibraryID(); got != "lib-2" {
+		t.Errorf("selected library = %q, want lib-2", got)
+	}
+
+	_ = m.RefreshCmd()
+	m, _ = m.Update(PersonalizedMsg{Libraries: libs[:1], LibraryID: "lib-1", generation: m.loadingGen, refreshed: true})
+	if got := m.SelectedLibraryID(); got != "lib-1" || m.loading {
+		t.Errorf("selected library = %q, loading = %v, want lib-1 and no load", got, m.loading)
+	}
+}
+
+// TestRefreshLoadsShelvesOfSelectedLibraryByID verifies that the command of a
+// refresh reads the library list again and loads the shelves of the selected
+// library, also when its position in the new list is different.
+func TestRefreshLoadsShelvesOfSelectedLibraryByID(t *testing.T) {
+	var shelves []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/libraries":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"libraries": append([]abs.Library{{ID: "lib-0", Name: "Zero", MediaType: "podcast"}}, refreshTestLibraries()...),
+			})
+		case strings.HasSuffix(r.URL.Path, "/personalized"):
+			shelves = append(shelves, r.URL.Path)
+			_ = json.NewEncoder(w).Encode([]abs.PersonalizedResponse{})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"episodes": []any{}})
+		}
+	}))
+	defer srv.Close()
+
+	m := New(ui.DefaultStyles(), cache.NewClient(abs.NewClient(srv.URL, "tok"), nil))
+	m.libraries = refreshTestLibraries()
+	m.selectedLibrary = 1
+
+	msg, ok := m.fetchPersonalizedCmd(true)().(PersonalizedMsg)
+	if !ok {
+		t.Fatal("the command gives no PersonalizedMsg")
+	}
+	if msg.LibraryID != "lib-2" || len(msg.Libraries) != 3 {
+		t.Errorf("library = %q with %d libraries, want lib-2 with 3 libraries", msg.LibraryID, len(msg.Libraries))
+	}
+	if len(shelves) != 1 || shelves[0] != "/api/libraries/lib-2/personalized" {
+		t.Errorf("shelves requests = %v, want only lib-2", shelves)
 	}
 }
