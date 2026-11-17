@@ -2622,6 +2622,39 @@ func TestPaletteGoLibraryOpensLibraryOfScreen(t *testing.T) {
 	})
 }
 
+// TestSeriesLoadedMsgReachesScreenBehindActiveScreen verifies that a load of
+// the series list or of a series reaches its screen model also when a
+// different screen is active: a scan loads the screens in the back stack again.
+func TestSeriesLoadedMsgReachesScreenBehindActiveScreen(t *testing.T) {
+	t.Run("series list behind the series screen", func(t *testing.T) {
+		m := newTestModelAuthenticated()
+		m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
+		m.series = series.New(m.styles, m.client, "lib-a", "ser-1", "")
+		m.backStack = []Screen{ScreenHome, ScreenSeriesList}
+		m.screen = ScreenSeries
+
+		res, _ := m.Update(serieslist.LoadedMsg{Results: []abs.Series{{ID: "ser-1", Name: "Dune"}}, Total: 1})
+		m = res.(Model)
+		if m.seriesList.Loading() {
+			t.Error("the series list did not get the loaded page")
+		}
+	})
+
+	t.Run("series behind the detail screen", func(t *testing.T) {
+		m := newTestModelAuthenticated()
+		m.series = series.New(m.styles, m.client, "lib-a", "ser-1", "")
+		m.detail = detail.New(m.styles, abs.LibraryItem{ID: "b-1", LibraryID: "lib-a", MediaType: "book"})
+		m.backStack = []Screen{ScreenHome, ScreenSeries}
+		m.screen = ScreenDetail
+
+		res, _ := m.Update(series.LoadedMsg{Contents: abs.SeriesContents{Series: abs.Series{ID: "ser-1", Name: "Dune"}}})
+		m = res.(Model)
+		if m.series.Loading() {
+			t.Error("the series screen did not get the loaded series")
+		}
+	})
+}
+
 // TestPaletteSpeedActions verifies that Speed Up of the palette does not lower
 // a speed above the range of the palette, and Speed Down does not raise a speed
 // below it: the speed keys and MPRIS can set such a speed. MPRIS gets the new

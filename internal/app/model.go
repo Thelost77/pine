@@ -589,6 +589,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case serieslist.BackMsg:
 		return m.back()
 
+	// A load reaches its screen also behind the active screen: a scan loads
+	// the screens in the back stack again.
+	case serieslist.LoadedMsg:
+		var cmd tea.Cmd
+		m.seriesList, cmd = m.seriesList.Update(msg)
+		return m, cmd
+
+	case series.LoadedMsg:
+		var cmd tea.Cmd
+		m.series, cmd = m.series.Update(msg)
+		return m, cmd
+
 	case detail.MarkFinishedCmd:
 		return m.handleMarkFinished(msg)
 
@@ -630,7 +642,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.searchCache != nil {
 			m.searchCache.Invalidate(msg.LibraryID)
 		}
-		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
+		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd(), m.reloadOpenScreensCmd(msg.LibraryID))
 
 	case detail.SeekToBookmarkCmd:
 		return m.handleSeekToBookmark(msg)
@@ -1692,6 +1704,26 @@ func (m Model) scanLibraryCmd() tea.Cmd {
 		}
 		return LibraryScannedMsg{LibraryID: libraryID}
 	}
+}
+
+// reloadOpenScreensCmd loads the open series list, series screen, and detail
+// screen of a library again. With an empty libraryID, it loads them for each
+// library.
+func (m Model) reloadOpenScreensCmd(libraryID string) tea.Cmd {
+	inLibrary := func(id string) bool {
+		return libraryID == "" || id == libraryID
+	}
+	var cmds []tea.Cmd
+	if m.screenOpen(ScreenSeriesList) && inLibrary(m.seriesList.SelectedLibraryID()) {
+		cmds = append(cmds, m.seriesList.Init())
+	}
+	if m.screenOpen(ScreenSeries) && inLibrary(m.series.LibraryID()) {
+		cmds = append(cmds, m.series.Init())
+	}
+	if item := m.detail.Item(); m.screenOpen(ScreenDetail) && inLibrary(item.LibraryID) {
+		cmds = append(cmds, m.detailLoadCmds(item, nil)...)
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) handleDeleteItem(cmd detail.DeleteItemCmd) (Model, tea.Cmd) {

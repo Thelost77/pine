@@ -2687,3 +2687,44 @@ func TestE2E_PaletteScanLibraryReloadsAfterTheScan(t *testing.T) {
 		t.Errorf("home loads = %d, want more than %d after the scan", got, loads)
 	}
 }
+
+// TestE2E_PaletteScanLibraryReloadsSeriesScreens verifies that a scan loads
+// the series screen of the library again, and the series list in the back
+// stack. The series list shows the series that the scan finds.
+func TestE2E_PaletteScanLibraryReloadsSeriesScreens(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	res, cmd := m.Update(library.NavigateSeriesListMsg{LibraryID: "lib-001", LibraryName: "Audiobooks"})
+	m = res.(Model)
+	m, _ = feedCmd(m, cmd)
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m = feedCmdChain(m, cmd, 3)
+	assertScreen(t, m, ScreenSeries)
+	seriesPath := "/api/libraries/lib-001/series/" + testSeries.ID
+	loads := log.count(http.MethodGet, seriesPath)
+
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	m = e2eTypeString(m, "scan")
+	m, _ = e2ePressSpecial(m, tea.KeyEnter)
+	m, scanCmd := e2ePressSpecial(m, tea.KeyEnter)
+	m, reloadCmd := feedCmdWithin(m, scanCmd, slowCmdWait)
+	if got := log.count(http.MethodPost, "/api/libraries/lib-001/scan"); got != 1 {
+		t.Fatalf("scan requests = %d, want 1", got)
+	}
+	m = feedCmdChain(m, reloadCmd, 5)
+
+	if got := log.count(http.MethodGet, seriesPath); got <= loads {
+		t.Errorf("series loads = %d, want more than %d after the scan", got, loads)
+	}
+	if !strings.Contains(m.seriesList.View(), testScannedSeries.Name) {
+		t.Errorf("the series list does not show %q after the scan", testScannedSeries.Name)
+	}
+}

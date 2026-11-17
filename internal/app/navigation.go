@@ -1,6 +1,8 @@
 package app
 
 import (
+	"slices"
+
 	"github.com/Thelost77/pine/internal/logger"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -39,6 +41,11 @@ func (m Model) BackStack() []Screen {
 	cp := make([]Screen, len(m.backStack))
 	copy(cp, m.backStack)
 	return cp
+}
+
+// screenOpen reports whether s is the active screen or is in the back stack.
+func (m Model) screenOpen(s Screen) bool {
+	return m.screen == s || slices.Contains(m.backStack, s)
 }
 
 // screenHeight returns the available height for screen content.
