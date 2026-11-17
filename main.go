@@ -18,6 +18,20 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of pine:\n")
+		flag.PrintDefaults()
+	}
+	clearCache := flag.Bool("clear-cache", false, "Clear all local application cache")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "Print version and exit")
+	flag.BoolVar(&showVersion, "v", false, "Print version and exit")
+	flag.Parse()
+	if showVersion {
+		fmt.Printf("pine %s\n", app.Version())
+		return
+	}
+
 	cfgDir := config.ConfigDir()
 	closeLog := logger.Init(cfgDir, "pine")
 	defer closeLog()
@@ -52,13 +66,6 @@ func main() {
 	if absClient != nil {
 		cachedClient = cache.NewClient(absClient, cacheStore)
 	}
-
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of pine:\n")
-		flag.PrintDefaults()
-	}
-	clearCache := flag.Bool("clear-cache", false, "Clear all local application cache")
-	flag.Parse()
 
 	if *clearCache {
 		if err := cacheStore.ClearAll(); err != nil {

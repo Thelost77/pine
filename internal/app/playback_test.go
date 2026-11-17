@@ -1997,7 +1997,7 @@ func TestPlaybackDeviceUsesConfiguredIdentity(t *testing.T) {
 	if got.DeviceID != cfg.DeviceID || got.Manufacturer != "Pine" || got.Model != "Workstation" {
 		t.Fatalf("configured identity not used: %#v", got)
 	}
-	if got.ClientName != "pine" || got.ClientVersion != pineVersion() {
+	if got.ClientName != "pine" || got.ClientVersion != Version() {
 		t.Fatalf("Pine client metadata incorrect: %#v", got)
 	}
 }

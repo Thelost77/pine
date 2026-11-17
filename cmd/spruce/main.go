@@ -17,12 +17,14 @@ import (
 
 func main() {
 	flag.Usage = func() {
-		_, _ = fmt.Fprintln(flag.CommandLine.Output(), "Usage: spruce [--version]")
+		_, _ = fmt.Fprintln(flag.CommandLine.Output(), "Usage: spruce [-v | --version]")
 		flag.PrintDefaults()
 	}
-	showVersion := flag.Bool("version", false, "Print version and exit")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "Print version and exit")
+	flag.BoolVar(&showVersion, "v", false, "Print version and exit")
 	flag.Parse()
-	if *showVersion {
+	if showVersion {
 		fmt.Printf("spruce %s\n", buildinfo.Current())
 		return
 	}

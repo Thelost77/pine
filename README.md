@@ -67,6 +67,7 @@ Each release from v0.8.0 also has archives with a binary for Linux, macOS, and W
 ```sh
 pine                # start the TUI
 pine --clear-cache  # clear local cache and exit
+pine --version      # print the version and exit (also -v)
 ```
 
 On first run, you'll be prompted to log in to your Audiobookshelf server.

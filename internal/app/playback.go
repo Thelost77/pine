@@ -39,7 +39,8 @@ const (
 // errNoAudioTracks is the error of a play session that has no audio track.
 var errNoAudioTracks = errors.New("no audio tracks")
 
-func pineVersion() string {
+// Version returns the module version of the pine binary, or dev for a local build.
+func Version() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		return buildVersion(info.Main.Version)
 	}
@@ -59,7 +60,7 @@ func (m Model) playbackDevice() abs.DeviceInfo {
 		Manufacturer:  "Pine",
 		Model:         strings.TrimSuffix(m.config.DeviceName, " (Pine)"),
 		ClientName:    "pine",
-		ClientVersion: pineVersion(),
+		ClientVersion: Version(),
 	}
 }
 

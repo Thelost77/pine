@@ -62,7 +62,7 @@ go build -o spruce ./cmd/spruce
 
 ```sh
 spruce
-spruce --version
+spruce --version  # print the version and exit (also -v)
 ```
 
 The first run opens the login screen. Enter the Jellyfin server address,
