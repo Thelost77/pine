@@ -214,7 +214,7 @@ func strPtr(s string) *string {
 
 // GetLibraryItems returns a paginated list of items in a library.
 func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, limit int) (*LibraryItemsResponse, error) {
-	return c.getLibraryItems(ctx, libraryID, page, limit, "")
+	return c.getLibraryItems(ctx, libraryID, page, limit, nil)
 }
 
 // GetLibrarySeries returns a paginated list of series in a library.
@@ -237,12 +237,12 @@ func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, l
 	return &resp, nil
 }
 
-func (c *Client) getLibraryItems(ctx context.Context, libraryID string, page, limit int, filter string) (*LibraryItemsResponse, error) {
+func (c *Client) getLibraryItems(ctx context.Context, libraryID string, page, limit int, extra url.Values) (*LibraryItemsResponse, error) {
 	query := url.Values{}
 	query.Set("page", strconv.Itoa(page))
 	query.Set("limit", strconv.Itoa(limit))
-	if filter != "" {
-		query.Set("filter", filter)
+	for key, values := range extra {
+		query[key] = values
 	}
 	path := fmt.Sprintf("/api/libraries/%s/items?%s", libraryID, query.Encode())
 	data, err := c.do(ctx, http.MethodGet, path, nil)
@@ -346,7 +346,7 @@ func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID stri
 
 	items := make([]LibraryItem, 0)
 	for page := 0; ; page++ {
-		resp, err := c.getLibraryItems(ctx, libraryID, page, seriesPageLimit, "series."+encodeLibraryFilterValue(seriesID))
+		resp, err := c.getLibraryItems(ctx, libraryID, page, seriesPageLimit, url.Values{"filter": {"series." + encodeLibraryFilterValue(seriesID)}})
 		if err != nil {
 			return nil, fmt.Errorf("get series items: %w", err)
 		}
@@ -452,11 +452,9 @@ func encodeLibraryFilterValue(value string) string {
 	return base64.StdEncoding.EncodeToString([]byte(value))
 }
 
-const audioCheckSampleSize = 10
-
 // FilterAudioLibraries filters out "book" type libraries that contain no audio content
-// (ebooks without audio). Podcasts are always kept. For book libraries, it samples
-// items and checks if any has Duration > 0 to determine if it's an audio library.
+// (ebooks without audio). Podcasts are always kept. A book library is kept if its
+// longest item has audio, or if it has no items.
 // Audio checks for book libraries run in parallel. A failed check goes to the log,
 // and the library is kept.
 func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) []Library {
@@ -514,38 +512,37 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []Library) []Lib
 	return result
 }
 
-// libraryHasAudio checks if a "book" type library contains any audio items
-// by sampling items and checking if any has Duration > 0.
-//
-// This function assumes libraries contain homogeneous content (all audiobooks or all ebooks).
-// If a library contains mixed content, the sampling may not detect audio content if it falls
-// outside the sampled range. In practice, ABS typically separates audiobooks and ebooks
-// into distinct libraries, so this is not expected to be an issue.
+// libraryHasAudio checks if a "book" type library contains audio. It reads the
+// item with the longest duration, because an ebook has no duration. A library
+// with no items gives true: it can get audiobooks later.
 func (c *Client) libraryHasAudio(ctx context.Context, libraryID string) (bool, error) {
-	resp, err := c.GetLibraryItems(ctx, libraryID, 0, audioCheckSampleSize)
+	resp, err := c.getLibraryItems(ctx, libraryID, 0, 1, url.Values{"sort": {"media.duration"}, "desc": {"1"}})
 	if err != nil {
 		return false, err
 	}
-
-	for i, item := range resp.Results {
-		if item.Media.Duration != nil && *item.Media.Duration > 0 {
-			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "media.duration")
-			return true, nil
-		}
-		if item.Media.Metadata.Duration != nil && *item.Media.Metadata.Duration > 0 {
-			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "metadata.duration")
-			return true, nil
-		}
-		if item.Media.NumAudioFiles != nil && *item.Media.NumAudioFiles > 0 {
-			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "numAudioFiles")
-			return true, nil
-		}
-		if item.Media.NumTracks != nil && *item.Media.NumTracks > 0 {
-			logger.Debug("library audio detected", "libraryID", libraryID, "sampleSize", len(resp.Results), "sampleIndex", i, "signal", "numTracks")
-			return true, nil
-		}
+	if len(resp.Results) == 0 {
+		logger.Debug("library has no items", "libraryID", libraryID)
+		return true, nil
 	}
 
-	logger.Debug("library audio not detected in sample", "libraryID", libraryID, "sampleSize", len(resp.Results))
+	item := resp.Results[0]
+	if item.Media.Duration != nil && *item.Media.Duration > 0 {
+		logger.Debug("library audio detected", "libraryID", libraryID, "signal", "media.duration")
+		return true, nil
+	}
+	if item.Media.Metadata.Duration != nil && *item.Media.Metadata.Duration > 0 {
+		logger.Debug("library audio detected", "libraryID", libraryID, "signal", "metadata.duration")
+		return true, nil
+	}
+	if item.Media.NumAudioFiles != nil && *item.Media.NumAudioFiles > 0 {
+		logger.Debug("library audio detected", "libraryID", libraryID, "signal", "numAudioFiles")
+		return true, nil
+	}
+	if item.Media.NumTracks != nil && *item.Media.NumTracks > 0 {
+		logger.Debug("library audio detected", "libraryID", libraryID, "signal", "numTracks")
+		return true, nil
+	}
+
+	logger.Debug("library audio not detected", "libraryID", libraryID)
 	return false, nil
 }
