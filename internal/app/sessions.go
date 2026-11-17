@@ -26,7 +26,7 @@ func (m Model) handleSessionsKey() (Model, tea.Cmd) {
 		}
 		return m.openSessions(sessionsTarget(item, episode))
 	case m.isPlaying():
-		return m.openSessions(sessions.Target{ItemID: m.itemID, EpisodeID: m.episodeID, Title: m.player.Title})
+		return m.openSessions(sessions.Target{ItemID: m.itemID, EpisodeID: m.episodeID, Title: m.player.Title, LibraryID: m.playbackLibraryID})
 	}
 	return m.openSessions(sessions.Target{})
 }
@@ -44,9 +44,9 @@ func (m Model) openSessions(target sessions.Target) (Model, tea.Cmd) {
 
 func sessionsTarget(item abs.LibraryItem, episode *abs.PodcastEpisode) sessions.Target {
 	if episode != nil {
-		return sessions.Target{ItemID: item.ID, EpisodeID: episode.ID, Title: episode.Title}
+		return sessions.Target{ItemID: item.ID, EpisodeID: episode.ID, Title: episode.Title, LibraryID: item.LibraryID}
 	}
-	return sessions.Target{ItemID: item.ID, Title: item.Media.Metadata.Title}
+	return sessions.Target{ItemID: item.ID, Title: item.Media.Metadata.Title, LibraryID: item.LibraryID}
 }
 
 // handlePlayFromSession leaves the sessions screen and plays the item of a

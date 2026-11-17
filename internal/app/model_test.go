@@ -24,6 +24,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/screens/series"
 	"github.com/Thelost77/pine/internal/screens/serieslist"
+	"github.com/Thelost77/pine/internal/screens/sessions"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
@@ -2517,6 +2518,14 @@ func TestPaletteBrowseSeriesOpensBookLibraryOfScreen(t *testing.T) {
 			m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
 			m.screen = ScreenSeriesList
 		}, "", ""},
+		{"sessions of a book", homeOnPodcasts, func(m *Model) {
+			m.sessions = sessions.New(m.styles, m.client, sessions.Target{ItemID: "b-1", LibraryID: "lib-b"}, "")
+			m.screen = ScreenSessions
+		}, "lib-b", "B"},
+		{"sessions of all items", homeOnBooks, func(m *Model) {
+			m.sessions = sessions.New(m.styles, m.client, sessions.Target{}, "")
+			m.screen = ScreenSessions
+		}, "lib-a", "A"},
 	}
 
 	for _, tt := range tests {

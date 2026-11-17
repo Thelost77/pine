@@ -1283,6 +1283,12 @@ func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
 			return item.LibraryID, item.MediaType
 		}
 		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
+	case ScreenSessions:
+		// The sessions of all items have no library.
+		if lib, ok := m.libraryByID(m.sessions.LibraryID()); ok {
+			return lib.ID, lib.MediaType
+		}
+		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
 	case ScreenHome:
 		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
 	default:
@@ -1292,12 +1298,18 @@ func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
 
 // libraryName returns the name of a library, or an empty string.
 func (m Model) libraryName(id string) string {
+	lib, _ := m.libraryByID(id)
+	return lib.Name
+}
+
+// libraryByID returns a library of the library list of the home screen.
+func (m Model) libraryByID(id string) (abs.Library, bool) {
 	for _, lib := range m.home.Libraries() {
 		if lib.ID == id {
-			return lib.Name
+			return lib, true
 		}
 	}
-	return ""
+	return abs.Library{}, false
 }
 
 func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) {
