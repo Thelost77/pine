@@ -382,12 +382,12 @@ func (m Model) overlayChapterModal(content string) string {
 }
 
 // overlayScanBox shows the box of a running scan at the right edge, below the
-// header.
+// header and the error banner.
 func (m Model) overlayScanBox(content string) string {
 	if m.scanStatus == "" {
 		return content
 	}
-	overlay := m.styles.Border.Render(m.scanSpinner.View() + " " + m.scanStatus)
+	overlay := m.styles.Border.Padding(0, 1).Render(m.scanSpinner.View() + " " + m.scanStatus)
 	if m.width <= 0 || m.height <= 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
 	}
@@ -402,6 +402,9 @@ func (m Model) overlayScanBox(content string) string {
 
 	x := max(0, w-overlayWidth)
 	y := headerHeight
+	if m.err.HasError() {
+		y++
+	}
 	for i, line := range overlayLines {
 		if y+i >= len(baseLines) {
 			break

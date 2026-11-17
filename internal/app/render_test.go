@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -390,5 +391,29 @@ func TestViewShowsScanBox(t *testing.T) {
 	}
 	if line := strings.TrimRight(ansi.Strip(lines[row]), " "); !strings.HasSuffix(line, "│") || ansi.StringWidth(line) != normalizeViewWidth(m.width) {
 		t.Errorf("the scan box is not at the right edge: %q", line)
+	}
+}
+
+// TestScanBoxDoesNotCoverErrorBanner verifies that the box of a running scan
+// is below the error banner, so that the end of a long error stays visible.
+func TestScanBoxDoesNotCoverErrorBanner(t *testing.T) {
+	m := newTestModelAuthenticated()
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = result.(Model)
+	m.scanStatus = "Scanning Audiobooks…"
+	_ = m.err.SetError(errors.New(strings.Repeat("long error ", 20)))
+	m.propagateSize()
+
+	banner := ""
+	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(line, "⚠") {
+			banner = line
+		}
+	}
+	if banner == "" {
+		t.Fatal("the view shows no error banner")
+	}
+	if strings.ContainsAny(banner, "╭│╰") {
+		t.Errorf("the scan box covers the error banner: %q", banner)
 	}
 }
