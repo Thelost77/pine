@@ -45,6 +45,10 @@ func (m Model) View() string {
 		content = strings.Join(normalizeOverlayCanvas(content, w, m.height), "\n")
 	}
 
+	// The chapter overlay, the confirmation dialog, and the palette cover the
+	// scan box.
+	content = m.overlayScanBox(content)
+
 	if m.chapterOverlayVisible {
 		content = m.overlayChapterModal(content)
 	}
@@ -52,9 +56,6 @@ func (m Model) View() string {
 	if m.screen == ScreenDetail {
 		content = m.overlayDetailConfirmModal(content)
 	}
-
-	// The palette covers the scan box.
-	content = m.overlayScanBox(content)
 
 	if m.palette.Visible() {
 		content = m.overlayPaletteModal(content)

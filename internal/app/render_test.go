@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -391,6 +392,31 @@ func TestViewShowsScanBox(t *testing.T) {
 	}
 	if line := strings.TrimRight(ansi.Strip(lines[row]), " "); !strings.HasSuffix(line, "│") || ansi.StringWidth(line) != normalizeViewWidth(m.width) {
 		t.Errorf("the scan box is not at the right edge: %q", line)
+	}
+}
+
+// TestScanBoxDoesNotCoverChapterOverlay verifies that the chapter overlay
+// covers the box of a running scan, and not the reverse.
+func TestScanBoxDoesNotCoverChapterOverlay(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 100
+	m.height = 30
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	for i := 0; i < 25; i++ {
+		m.chapters = append(m.chapters, abs.Chapter{ID: i, Start: float64(i * 60), End: float64(i*60 + 60), Title: fmt.Sprintf("Chapter %d", i+1)})
+	}
+	m.chapterOverlayVisible = true
+
+	// The footer covers the last lines of a high overlay, also with no scan.
+	noScan := ansi.Strip(m.View())
+	m.scanStatus = "Scanning Audiobooks…"
+	view := ansi.Strip(m.View())
+	for _, line := range strings.Split(ansi.Strip(m.viewChapterOverlay()), "\n") {
+		if strings.Contains(noScan, line) && !strings.Contains(view, line) {
+			t.Fatalf("the scan box covers the line %q of the chapter overlay", line)
+		}
 	}
 }
 
