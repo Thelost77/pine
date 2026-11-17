@@ -2674,6 +2674,7 @@ func TestE2E_PaletteScanLibraryReloadsAfterTheScan(t *testing.T) {
 	if scanCmd == nil {
 		t.Fatal("Scan Library returns no command")
 	}
+	assertViewContains(t, m, "Scanning Audiobooks")
 
 	m, reloadCmd := feedCmdWithin(m, scanCmd, slowCmdWait)
 	if got := log.count(http.MethodPost, "/api/libraries/lib-001/scan"); got != 1 {
@@ -2681,6 +2682,9 @@ func TestE2E_PaletteScanLibraryReloadsAfterTheScan(t *testing.T) {
 	}
 	if m.err.HasError() {
 		t.Fatalf("error after the scan: %v", m.err.Error())
+	}
+	if strings.Contains(m.View(), "Scanning") {
+		t.Error("the view shows the scan box after the end of the scan")
 	}
 	feedCmdChain(m, reloadCmd, 5)
 	if got := log.count(http.MethodGet, "/api/libraries/lib-001/personalized"); got <= loads {

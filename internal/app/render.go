@@ -53,6 +53,9 @@ func (m Model) View() string {
 		content = m.overlayDetailConfirmModal(content)
 	}
 
+	// The palette covers the scan box.
+	content = m.overlayScanBox(content)
+
 	if m.palette.Visible() {
 		content = m.overlayPaletteModal(content)
 	}
@@ -365,6 +368,40 @@ func (m Model) overlayChapterModal(content string) string {
 
 	x := max(0, (m.width-overlayWidth)/2)
 	y := max(0, (m.height-overlayHeight)/2)
+	for i, line := range overlayLines {
+		if y+i >= len(baseLines) {
+			break
+		}
+		lineWidth := lipgloss.Width(line)
+		left := ansi.Truncate(baseLines[y+i], x, "")
+		right := ansi.TruncateLeft(baseLines[y+i], x+lineWidth, "")
+		baseLines[y+i] = left + line + right
+	}
+
+	return strings.Join(baseLines, "\n")
+}
+
+// overlayScanBox shows the box of a running scan at the right edge, below the
+// header.
+func (m Model) overlayScanBox(content string) string {
+	if m.scanStatus == "" {
+		return content
+	}
+	overlay := m.styles.Border.Render(m.scanSpinner.View() + " " + m.scanStatus)
+	if m.width <= 0 || m.height <= 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, content, "", overlay)
+	}
+
+	w := normalizeViewWidth(m.width)
+	baseLines := normalizeOverlayCanvas(content, w, m.height)
+	overlayLines := strings.Split(overlay, "\n")
+	overlayWidth := lipgloss.Width(overlay)
+	if overlayWidth <= 0 || len(overlayLines) == 0 {
+		return content
+	}
+
+	x := max(0, w-overlayWidth)
+	y := headerHeight
 	for i, line := range overlayLines {
 		if y+i >= len(baseLines) {
 			break

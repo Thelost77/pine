@@ -27,6 +27,7 @@ import (
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -107,6 +108,11 @@ type Model struct {
 
 	palette components.Palette
 
+	// scanStatus is the text of the box of a running scan. It is empty when
+	// no scan runs.
+	scanStatus  string
+	scanSpinner spinner.Model
+
 	lastPlayedTitle   string
 	lastPlayedTrackID string
 	lastPlayedAuthors []string
@@ -158,6 +164,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		mprisLink:    &mprisLink{},
 		mprisState:   &MprisState{},
 		palette:      palette,
+		scanSpinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Accent)),
 	}
 }
 
@@ -637,12 +644,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
 
 	case LibraryScannedMsg:
+		m.scanStatus = ""
+		if msg.Err != nil {
+			return m.Update(components.ErrMsg{Err: msg.Err})
+		}
 		m.home.InvalidateLibrary(msg.LibraryID)
 		m.library.InvalidateLibrary(msg.LibraryID)
 		if m.searchCache != nil {
 			m.searchCache.Invalidate(msg.LibraryID)
 		}
 		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd(), m.reloadOpenScreensCmd(msg.LibraryID))
+
+	case spinner.TickMsg:
+		// The ticks end with the scan.
+		if m.scanStatus == "" {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.scanSpinner, cmd = m.scanSpinner.Update(msg)
+		return m, cmd
 
 	case detail.SeekToBookmarkCmd:
 		return m.handleSeekToBookmark(msg)
@@ -1250,14 +1270,19 @@ func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) 
 	if m.screen != ScreenLibrary {
 		nav = append(nav, components.PaletteItem{Label: "Go Library", Action: components.ActionGoLibrary})
 	}
+	libID, mediaType := m.currentLibraryForSearch()
 	// Only a book library has series. The series list is the target of the entry.
-	if libID, mediaType := m.currentLibraryForSearch(); mediaType == "book" && m.screen != ScreenSeriesList {
+	if mediaType == "book" && m.screen != ScreenSeriesList {
 		nav = append(nav, components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries, LibraryID: libID, Payload: m.libraryName(libID)})
+	}
+	scanLabel := "Scan Library"
+	if name := m.libraryName(libID); name != "" {
+		scanLabel += ": " + name
 	}
 	nav = append(nav,
 		components.PaletteItem{Label: "Listening History", Action: components.ActionShowSessions},
 		components.PaletteItem{Label: "Library", IsHeader: true},
-		components.PaletteItem{Label: "Scan Library", Action: components.ActionScanLibrary},
+		components.PaletteItem{Label: scanLabel, Action: components.ActionScanLibrary},
 	)
 
 	if !m.isPlaying() {
@@ -1658,7 +1683,19 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	case components.ActionSwitchLibrary:
 		return m, nil
 	case components.ActionScanLibrary:
-		return m, m.scanLibraryCmd()
+		scanCmd := m.scanLibraryCmd()
+		if m.scanStatus != "" || scanCmd == nil {
+			return m, nil
+		}
+		libID, _ := m.currentLibraryForSearch()
+		name := m.libraryName(libID)
+		if name == "" {
+			name = "library"
+		}
+		m.scanStatus = "Scanning " + name + "…"
+		// The tick is first, because feedCmdWithin of the tests runs each
+		// command of a batch and gives the command of the last one.
+		return m, tea.Batch(m.scanSpinner.Tick, scanCmd)
 	case components.ActionDeleteItem:
 		if msg, ok := data.(detail.ShowDeleteConfirmMsg); ok && m.screen == ScreenDetail {
 			m.detail, _ = m.detail.Update(msg)
@@ -1686,7 +1723,7 @@ func (m Model) prewarmCacheCmd() tea.Cmd {
 
 // scanLibraryCmd scans the library of the current screen on the server. At the
 // end of the scan, the cache client clears the cache, and LibraryScannedMsg
-// loads the screens again.
+// closes the scan box and loads the screens again, or shows the error.
 func (m Model) scanLibraryCmd() tea.Cmd {
 	libraryID, _ := m.currentLibraryForSearch()
 	if m.client == nil || libraryID == "" {
@@ -1700,7 +1737,7 @@ func (m Model) scanLibraryCmd() tea.Cmd {
 			if abs.IsHTTPStatus(err, http.StatusForbidden) {
 				err = fmt.Errorf("ABS user does not have the admin permission to scan: %w", err)
 			}
-			return components.ErrMsg{Err: fmt.Errorf("failed to scan library: %w", err)}
+			return LibraryScannedMsg{LibraryID: libraryID, Err: fmt.Errorf("failed to scan library: %w", err)}
 		}
 		return LibraryScannedMsg{LibraryID: libraryID}
 	}

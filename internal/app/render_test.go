@@ -10,6 +10,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestViewRendersChapterOverlay(t *testing.T) {
@@ -358,5 +359,36 @@ func TestViewHidesCaptionWithoutCues(t *testing.T) {
 	}
 	if containsString(view, "Hello world") {
 		t.Fatal("View() showed caption text without cues")
+	}
+}
+
+// TestViewShowsScanBox verifies that the view shows the box of a running scan
+// at the right edge below the header, and no box when no scan runs.
+func TestViewShowsScanBox(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.width = 100
+	m.height = 30
+	m.propagateSize()
+	if containsString(m.View(), "Scanning") {
+		t.Fatal("the view shows a scan box with no scan")
+	}
+
+	m.scanStatus = "Scanning Audiobooks…"
+	lines := strings.Split(m.View(), "\n")
+	row := -1
+	for i, line := range lines {
+		if strings.Contains(line, m.scanStatus) {
+			row = i
+			break
+		}
+	}
+	if row < 0 {
+		t.Fatalf("the view does not show the scan status\n%s", strings.Join(lines, "\n"))
+	}
+	if row < headerHeight {
+		t.Errorf("the scan status is on the line %d, in the header", row)
+	}
+	if line := strings.TrimRight(ansi.Strip(lines[row]), " "); !strings.HasSuffix(line, "│") || ansi.StringWidth(line) != normalizeViewWidth(m.width) {
+		t.Errorf("the scan box is not at the right edge: %q", line)
 	}
 }

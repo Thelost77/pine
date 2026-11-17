@@ -2655,6 +2655,45 @@ func TestSeriesLoadedMsgReachesScreenBehindActiveScreen(t *testing.T) {
 	})
 }
 
+// TestPaletteScanLibraryShowsScanBox verifies that Scan Library shows the box
+// of the scan, that a second Scan Library does nothing while the scan runs,
+// and that the end of a scan that failed closes the box and shows the error.
+func TestPaletteScanLibraryShowsScanBox(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: []abs.Library{{ID: "lib-a", Name: "A", MediaType: "book"}}})
+
+	var scan *components.PaletteItem
+	_, nav := m.buildStaticPaletteItems()
+	for _, item := range nav {
+		if item.Action == components.ActionScanLibrary {
+			scan = &item
+		}
+	}
+	if scan == nil || scan.Label != "Scan Library: A" {
+		t.Fatalf("Scan Library entry = %+v, want the label %q", scan, "Scan Library: A")
+	}
+
+	m, cmd := m.handlePaletteAction(components.ActionScanLibrary, "", "", "", nil)
+	if cmd == nil {
+		t.Fatal("Scan Library returns no command")
+	}
+	if m.scanStatus != "Scanning A…" {
+		t.Errorf("scan status = %q, want %q", m.scanStatus, "Scanning A…")
+	}
+	if _, cmd := m.handlePaletteAction(components.ActionScanLibrary, "", "", "", nil); cmd != nil {
+		t.Error("a second Scan Library returns a command while a scan runs")
+	}
+
+	res, _ := m.Update(LibraryScannedMsg{LibraryID: "lib-a", Err: errors.New("failed to scan library: boom")})
+	m = res.(Model)
+	if m.scanStatus != "" {
+		t.Errorf("scan status = %q after the scan failed, want none", m.scanStatus)
+	}
+	if !m.err.HasError() {
+		t.Error("no error banner after the scan failed")
+	}
+}
+
 // TestPaletteSpeedActions verifies that Speed Up of the palette does not lower
 // a speed above the range of the palette, and Speed Down does not raise a speed
 // below it: the speed keys and MPRIS can set such a speed. MPRIS gets the new
