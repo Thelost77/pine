@@ -826,11 +826,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case search.CacheReadyMsg:
-		// The palette shows the results of its query when the snapshot of its
-		// library is ready.
-		if libID, _ := m.currentLibraryForSearch(); msg.LibraryID == libID {
-			m.palette.Refresh()
-		}
+		// The palette searches each library, so it shows the results of its
+		// query again when the snapshot of a library is ready.
+		m.palette.Refresh()
 		return m.updateScreen(msg)
 
 	case SleepTimerExpiredMsg:
@@ -1177,9 +1175,9 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 }
 
 // openGlobalPalette opens the palette. The search of the palette answers only
-// from a snapshot that is ready, so if the snapshot of the library is not
-// ready, it returns a command that builds it. CacheReadyMsg then shows the
-// results of the query.
+// from a snapshot that is ready, so it returns a command that builds the
+// snapshot of each library that has none. CacheReadyMsg then shows the results
+// of the query.
 func (m *Model) openGlobalPalette() tea.Cmd {
 	playerItems, navItems := m.buildStaticPaletteItems()
 	contextItems := m.buildContextPaletteItems()
@@ -1191,45 +1189,76 @@ func (m *Model) openGlobalPalette() tea.Cmd {
 	items = append(items, navItems...)
 	m.palette.Open(items, m.contentSearchFunc())
 
-	libID, libMediaType := m.currentLibraryForSearch()
-	if m.searchCache == nil || libID == "" {
+	if m.searchCache == nil {
 		return nil
 	}
-	if _, ok := m.searchCache.TryGetAll(libID, libMediaType); ok {
-		return nil
+	var cmds []tea.Cmd
+	for _, lib := range m.searchLibraries() {
+		if _, ok := m.searchCache.TryGetAll(lib.ID, lib.MediaType); !ok {
+			cmds = append(cmds, m.searchCache.PrebuildCmd(lib.ID, lib.MediaType))
+		}
 	}
-	return m.searchCache.PrebuildCmd(libID, libMediaType)
+	return tea.Batch(cmds...)
 }
 
+// searchLibraries returns the libraries of the palette search: the library of
+// the current screen first, then the other libraries.
+func (m Model) searchLibraries() []abs.Library {
+	libID, libMediaType := m.currentLibraryForSearch()
+	var libs []abs.Library
+	if libID != "" {
+		libs = append(libs, abs.Library{ID: libID, Name: m.libraryName(libID), MediaType: libMediaType})
+	}
+	for _, lib := range m.home.Libraries() {
+		if lib.ID != libID {
+			libs = append(libs, lib)
+		}
+	}
+	return libs
+}
+
+// contentSearchFunc searches the library of the current screen first, then
+// each other library. The items of a different library are below a header with
+// its name. A row at the end shows that an index is not ready.
 func (m Model) contentSearchFunc() components.SearchFunc {
 	return func(query string) []components.PaletteItem {
 		if m.searchCache == nil {
 			return nil
 		}
-		libID, libMediaType := m.currentLibraryForSearch()
-		if libID == "" {
-			return nil
-		}
+		currentID, _ := m.currentLibraryForSearch()
 		ctx := context.Background()
-		results, err := m.searchCache.Search(ctx, libID, libMediaType, query)
-		if err != nil || len(results) == 0 {
-			return nil
-		}
-		items := make([]components.PaletteItem, 0, len(results))
-		for _, res := range results {
-			label := res.Media.Metadata.Title
-			if res.MediaType == "podcast" && res.RecentEpisode != nil {
-				label = res.RecentEpisode.Title + " — " + res.Media.Metadata.Title
+		var items []components.PaletteItem
+		building := false
+		for _, lib := range m.searchLibraries() {
+			if _, ok := m.searchCache.TryGetAll(lib.ID, lib.MediaType); !ok {
+				building = true
 			}
-			itemCopy := res
-			items = append(items, components.PaletteItem{
-				Label:      label,
-				Action:     components.ActionContentNavigate,
-				PlayAction: components.ActionPlayDirect,
-				LibraryID:  res.LibraryID,
-				ItemID:     res.ID,
-				Data:       itemCopy,
-			})
+			// With no ready index, Search builds it in the background.
+			results, err := m.searchCache.Search(ctx, lib.ID, lib.MediaType, query)
+			if err != nil || len(results) == 0 {
+				continue
+			}
+			if lib.ID != currentID {
+				items = append(items, components.PaletteItem{Label: lib.Name, IsHeader: true})
+			}
+			for _, res := range results {
+				label := res.Media.Metadata.Title
+				if res.MediaType == "podcast" && res.RecentEpisode != nil {
+					label = res.RecentEpisode.Title + " — " + res.Media.Metadata.Title
+				}
+				itemCopy := res
+				items = append(items, components.PaletteItem{
+					Label:      label,
+					Action:     components.ActionContentNavigate,
+					PlayAction: components.ActionPlayDirect,
+					LibraryID:  res.LibraryID,
+					ItemID:     res.ID,
+					Data:       itemCopy,
+				})
+			}
+		}
+		if building {
+			items = append(items, components.PaletteItem{Label: "Building index…", IsHeader: true})
 		}
 		return items
 	}
@@ -1723,18 +1752,18 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	return m, nil
 }
 
+// prewarmCacheCmd builds the search snapshot of each library, the library of
+// the current screen first.
 func (m Model) prewarmCacheCmd() tea.Cmd {
+	cache := m.searchCache
+	libs := m.searchLibraries()
 	return func() tea.Msg {
-		cache := m.searchCache
 		if cache == nil {
 			return PrewarmDoneMsg{}
 		}
-		libID := m.home.SelectedLibraryID()
-		libMediaType := m.home.SelectedLibraryMediaType()
-		if libID == "" {
-			return PrewarmDoneMsg{}
+		for _, lib := range libs {
+			_ = cache.Prepare(context.Background(), lib.ID, lib.MediaType)
 		}
-		_ = cache.Prepare(context.Background(), libID, libMediaType)
 		return PrewarmDoneMsg{}
 	}
 }
