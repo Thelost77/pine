@@ -1046,6 +1046,39 @@ func TestMarkFinishedEpisodeKeepsResultPerEpisode(t *testing.T) {
 	}
 }
 
+// TestSetEpisodes_KeepsSelectedEpisodeOnReload verifies that a second load of
+// the episodes keeps the episode that the user selected. The recent episode is
+// only the selection of the first load.
+func TestSetEpisodes_KeepsSelectedEpisodeOnReload(t *testing.T) {
+	item := abs.LibraryItem{
+		ID:            "pod-001",
+		MediaType:     "podcast",
+		RecentEpisode: &abs.PodcastEpisode{ID: "ep-2"},
+	}
+	episodes := func() []abs.PodcastEpisode {
+		return []abs.PodcastEpisode{
+			{ID: "ep-1", Title: "Episode One"},
+			{ID: "ep-2", Title: "Episode Two"},
+			{ID: "ep-3", Title: "Episode Three"},
+		}
+	}
+
+	m := New(ui.DefaultStyles(), item)
+	m.SetEpisodes(episodes())
+	m.selectedEpisode = 2
+
+	m.SetEpisodes(episodes())
+	if m.SelectedEpisode() != 2 {
+		t.Errorf("selected episode after a reload = %d, want 2", m.SelectedEpisode())
+	}
+
+	// The selected episode is not in the new list: the recent episode.
+	m.SetEpisodes(episodes()[:2])
+	if m.SelectedEpisode() != 1 {
+		t.Errorf("selected episode after its removal = %d, want 1", m.SelectedEpisode())
+	}
+}
+
 func TestSetEpisodes_PreservesRecentEpisodeSelection(t *testing.T) {
 	styles := ui.DefaultStyles()
 	item := abs.LibraryItem{

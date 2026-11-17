@@ -1805,7 +1805,11 @@ func (m Model) reloadOpenScreensCmd(libraryID string) tea.Cmd {
 		cmds = append(cmds, m.series.Init())
 	}
 	if item := m.detail.Item(); m.screenOpen(ScreenDetail) && inLibrary(item.LibraryID) {
-		cmds = append(cmds, m.detailLoadCmds(item, nil)...)
+		cmds = append(cmds, m.detailItemCmd(item))
+		// A load of the bookmarks closes the bookmark title editor.
+		if !m.detail.EditingBookmark() {
+			cmds = append(cmds, m.fetchBookmarksCmd(item.ID))
+		}
 	}
 	return tea.Batch(cmds...)
 }

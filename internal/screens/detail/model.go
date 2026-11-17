@@ -232,6 +232,7 @@ type Model struct {
 	bookmarkEditErr  string
 	bookmarkInput    textinput.Model
 	episodes         []abs.PodcastEpisode
+	episodesLoaded   bool
 	selectedEpisode  int
 	focusEpisodes    bool
 	// finishedEpisodes holds the result of each mark of an episode on this
@@ -351,8 +352,15 @@ func (m Model) ItemID() string {
 	return m.item.ID
 }
 
-// SetEpisodes updates the episode list and refreshes the viewport content.
+// SetEpisodes updates the episode list and refreshes the viewport content. The
+// first load selects the recent episode. A later load keeps the selected
+// episode while it is in the list.
 func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
+	selectedID := ""
+	if m.episodesLoaded && m.selectedEpisode < len(m.episodes) {
+		selectedID = m.episodes[m.selectedEpisode].ID
+	}
+	m.episodesLoaded = true
 	slices.SortFunc(episodes, func(a, b abs.PodcastEpisode) int {
 		aIdx, bIdx := 0, 0
 		if a.Index != nil {
@@ -364,13 +372,15 @@ func (m *Model) SetEpisodes(episodes []abs.PodcastEpisode) {
 		return aIdx - bIdx
 	})
 	m.episodes = episodes
-	if m.item.RecentEpisode != nil {
-		for i, episode := range episodes {
-			if episode.ID == m.item.RecentEpisode.ID {
-				m.selectedEpisode = i
-				break
-			}
-		}
+	selected := -1
+	if selectedID != "" {
+		selected = slices.IndexFunc(episodes, func(e abs.PodcastEpisode) bool { return e.ID == selectedID })
+	}
+	if selected < 0 && m.item.RecentEpisode != nil {
+		selected = slices.IndexFunc(episodes, func(e abs.PodcastEpisode) bool { return e.ID == m.item.RecentEpisode.ID })
+	}
+	if selected >= 0 {
+		m.selectedEpisode = selected
 	}
 	if m.selectedEpisode >= len(episodes) {
 		m.selectedEpisode = max(0, len(episodes)-1)

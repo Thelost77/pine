@@ -880,6 +880,22 @@ func e2eSaveBookmarkTitle(m Model, state *e2eServerState) string {
 	return state.getBookmarks("item-001")[0].Title
 }
 
+// TestE2E_ScanDuringBookmarkTitleEditKeepsTheEdit verifies that the reload of
+// the detail screen after a scan does not close the bookmark title editor.
+func TestE2E_ScanDuringBookmarkTitleEditKeepsTheEdit(t *testing.T) {
+	m, _ := e2eDetailWithBookmark(t)
+	m, _ = e2ePressKey(m, 'e')
+	if !m.detail.EditingBookmark() {
+		t.Fatal("the bookmark editor did not open")
+	}
+
+	res, cmd := m.Update(LibraryScannedMsg{LibraryID: m.detail.Item().LibraryID})
+	m, _ = feedCmdWithin(res.(Model), cmd, slowCmdWait)
+	if !m.detail.EditingBookmark() {
+		t.Error("the reload after the scan closed the bookmark editor")
+	}
+}
+
 // TestE2E_BookmarkTitleEditGetsEachKey verifies that the bookmark title editor
 // gets each key during a playback. Outside the editor, these keys have a
 // global function or a playback function.

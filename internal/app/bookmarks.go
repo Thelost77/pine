@@ -225,14 +225,18 @@ func (m Model) fetchBookDetailCmd(item abs.LibraryItem) tea.Cmd {
 }
 
 func (m Model) detailLoadCmds(item abs.LibraryItem, navCmd tea.Cmd) []tea.Cmd {
-	cmds := []tea.Cmd{navCmd, m.fetchBookmarksCmd(item.ID)}
-	if item.MediaType == "podcast" {
-		return append(cmds, m.fetchEpisodesCmd(item.ID))
+	return []tea.Cmd{navCmd, m.fetchBookmarksCmd(item.ID), m.detailItemCmd(item)}
+}
+
+// detailItemCmd loads the episodes of a podcast or the full item of a book.
+func (m Model) detailItemCmd(item abs.LibraryItem) tea.Cmd {
+	switch item.MediaType {
+	case "podcast":
+		return m.fetchEpisodesCmd(item.ID)
+	case "book":
+		return m.fetchBookDetailCmd(item)
 	}
-	if item.MediaType == "book" {
-		return append(cmds, m.fetchBookDetailCmd(item))
-	}
-	return cmds
+	return nil
 }
 
 // nextChapter returns the start time of the next chapter after current position (book-global).
