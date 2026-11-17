@@ -82,3 +82,20 @@ func TestEnterNavigatesToSeries(t *testing.T) {
 		t.Fatalf("series ID = %q, want series-expanse", navMsg.SeriesID)
 	}
 }
+
+// TestViewShowsNumberOfBooks verifies that a row shows the number of books of
+// the series, and the description after it.
+func TestViewShowsNumberOfBooks(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(LoadedMsg{Results: []abs.Series{
+		{ID: "series-dune", Name: "Dune", Books: []abs.SeriesBook{{ID: "b1"}, {ID: "b2"}}},
+		{ID: "series-expanse", Name: "The Expanse", Description: "Space opera", Books: []abs.SeriesBook{{ID: "b3"}}},
+	}, Total: 2, Page: 0})
+
+	v := m.View()
+	for _, want := range []string{"2 books", "1 book · Space opera"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("expected view to contain %q\n%s", want, v)
+		}
+	}
+}

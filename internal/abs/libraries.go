@@ -222,6 +222,8 @@ func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, l
 	query := url.Values{}
 	query.Set("page", strconv.Itoa(page))
 	query.Set("limit", strconv.Itoa(limit))
+	// With no sort, ABS gives the series in no defined order.
+	query.Set("sort", "name")
 	path := fmt.Sprintf("/api/libraries/%s/series?%s", libraryID, query.Encode())
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {

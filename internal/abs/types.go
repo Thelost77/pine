@@ -225,14 +225,21 @@ type SeriesSequence struct {
 	Sequence string `json:"sequence,omitempty"`
 }
 
-// Series contains series metadata returned by ABS.
+// Series contains series metadata returned by ABS. Only the series list of a
+// library has the books.
 type Series struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	LibraryID   string `json:"libraryId,omitempty"`
-	AddedAt     int64  `json:"addedAt,omitempty"`
-	UpdatedAt   int64  `json:"updatedAt,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	LibraryID   string       `json:"libraryId,omitempty"`
+	AddedAt     int64        `json:"addedAt,omitempty"`
+	UpdatedAt   int64        `json:"updatedAt,omitempty"`
+	Books       []SeriesBook `json:"books,omitempty"`
+}
+
+// SeriesBook is a book in the series list of a library.
+type SeriesBook struct {
+	ID string `json:"id"`
 }
 
 // SeriesContents combines series metadata with the library items in that series.

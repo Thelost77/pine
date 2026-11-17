@@ -14,7 +14,7 @@ import (
 // keyVersion is the prefix of each key in the database. Raise it when the
 // type of a cached value changes: the store then does not read the old rows,
 // and EvictExpired deletes them when they expire.
-const keyVersion = "v1-"
+const keyVersion = "v2-"
 
 // Store provides generic get/put/delete/evict operations over a SQLite table.
 type Store struct {

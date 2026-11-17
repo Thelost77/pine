@@ -230,10 +230,14 @@ func (i seriesListItem) Title() string {
 }
 
 func (i seriesListItem) Description() string {
-	if strings.TrimSpace(i.series.Description) != "" {
-		return i.series.Description
+	books := fmt.Sprintf("%d books", len(i.series.Books))
+	if len(i.series.Books) == 1 {
+		books = "1 book"
 	}
-	return "Series"
+	if strings.TrimSpace(i.series.Description) != "" {
+		return books + " · " + i.series.Description
+	}
+	return books
 }
 
 func (i seriesListItem) FilterValue() string {

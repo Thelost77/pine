@@ -97,7 +97,7 @@ The Architecture Map below describes pine and the shared packages.
 |------|---------------|
 | `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly. On a miss, it fetches from the API in the command of the caller and stores the result. Each cached method calls `cached(c, key, ttl, fetch)`, which returns the data of the server. A cache read or write error goes to the log and does not fail the request. A fetch that started before an invalidation does not store its value (`generation`, under `mu`). `Invalidate` calls `OnInvalidate` also when the store is nil. |
 | `keys.go` | The names of all cache keys. Code outside the package uses `ItemKey`, `PersonalizedKey`, `SeriesContentsKey`, `BookmarksKey`, and `SearchSnapshotKey`, not key strings. A key has no account, so a login (`LoginSuccessMsg`) clears the persistent cache with `ClearAll`. |
-| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v1-`). Raise it when the type of a cached value changes. |
+| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v2-`). Raise it when the type of a cached value changes. |
 
 ### MPRIS (internal/mpris/, shared)
 
