@@ -26,9 +26,9 @@ type Client struct {
 	store        *Store
 	OnInvalidate func()
 
-	// generation counts the calls of invalidate. cached does not store the
+	// generation counts the calls of Invalidate. cached does not store the
 	// value of a fetch that started in an earlier generation, because the
-	// value can be from before the change. invalidate holds mu while it
+	// value can be from before the change. Invalidate holds mu while it
 	// clears the store, and cached holds it while it checks the generation
 	// and stores the value, so no old value comes after the clear.
 	mu         sync.RWMutex
@@ -155,10 +155,10 @@ func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]abs.Bookmar
 	})
 }
 
-// invalidate wipes the persistent cache after a change on the server, and
+// Invalidate wipes the persistent cache after a change on the server, and
 // tells the in-memory caches (the search cache) to drop their snapshots. A
 // change is rare, so it clears each key.
-func (c *Client) invalidate() {
+func (c *Client) Invalidate() {
 	if c.store != nil {
 		c.mu.Lock()
 		c.generation++
@@ -178,7 +178,7 @@ func (c *Client) ScanLibrary(ctx context.Context, libraryID string) error {
 	if err := c.Client.ScanLibrary(ctx, libraryID); err != nil {
 		return err
 	}
-	c.invalidate()
+	c.Invalidate()
 	return nil
 }
 
@@ -187,7 +187,7 @@ func (c *Client) DeleteItem(ctx context.Context, itemID string, hardDelete bool)
 	if err := c.Client.DeleteItem(ctx, itemID, hardDelete); err != nil {
 		return err
 	}
-	c.invalidate()
+	c.Invalidate()
 	return nil
 }
 
@@ -196,7 +196,7 @@ func (c *Client) DeleteEpisode(ctx context.Context, podcastID string, episodeID 
 	if err := c.Client.DeleteEpisode(ctx, podcastID, episodeID, hardDelete); err != nil {
 		return err
 	}
-	c.invalidate()
+	c.Invalidate()
 	return nil
 }
 
@@ -206,7 +206,7 @@ func (c *Client) UpdateLibraryItemMedia(ctx context.Context, itemID string, req 
 	if err != nil {
 		return nil, err
 	}
-	c.invalidate()
+	c.Invalidate()
 	return updated, nil
 }
 
@@ -216,6 +216,6 @@ func (c *Client) UpdatePodcastEpisode(ctx context.Context, itemID, episodeID str
 	if err != nil {
 		return nil, err
 	}
-	c.invalidate()
+	c.Invalidate()
 	return updated, nil
 }

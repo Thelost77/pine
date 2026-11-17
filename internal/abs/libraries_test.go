@@ -371,13 +371,17 @@ func TestGetLibrarySeriesHTTP(t *testing.T) {
 		if got := r.URL.Query().Get("limit"); got != "50" {
 			t.Errorf("limit = %q, want 50", got)
 		}
+		if got := r.URL.Query().Get("sort"); got != "name" {
+			t.Errorf("sort = %q, want name", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"results": [
 				{
 					"id": "series-expanse",
 					"name": "The Expanse",
-					"libraryId": "lib-books-001"
+					"libraryId": "lib-books-001",
+					"books": [{"id": "book-1"}, {"id": "book-2"}]
 				}
 			],
 			"total": 1,
@@ -401,6 +405,9 @@ func TestGetLibrarySeriesHTTP(t *testing.T) {
 	}
 	if resp.Results[0].ID != "series-expanse" {
 		t.Fatalf("series ID = %q, want series-expanse", resp.Results[0].ID)
+	}
+	if got := len(resp.Results[0].Books); got != 2 {
+		t.Fatalf("books = %d, want 2", got)
 	}
 }
 

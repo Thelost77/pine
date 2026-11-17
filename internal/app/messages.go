@@ -158,10 +158,16 @@ type SeriesContinueMsg struct {
 }
 
 // LibraryScannedMsg is sent after the end of a scan of a library on the
-// server. The screens then load the data of the library again.
+// server. The screens then load the data of the library again. Err is the
+// error of a scan that failed.
 type LibraryScannedMsg struct {
 	LibraryID string
+	Err       error
 }
+
+// CacheClearedMsg is sent after the palette entry Refresh clears the cache.
+// The screens and the library list then load again.
+type CacheClearedMsg struct{}
 
 // PrewarmDoneMsg is sent after cache pre-warming completes. No action needed,
 // just used to keep the command chain alive.

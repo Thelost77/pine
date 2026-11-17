@@ -19,11 +19,13 @@ import (
 const pageSize = 50
 
 // Target is the book or the podcast episode whose sessions the screen shows.
-// The zero Target shows the sessions of all items.
+// The zero Target shows the sessions of all items. LibraryID is the library of
+// the item.
 type Target struct {
 	ItemID    string
 	EpisodeID string
 	Title     string
+	LibraryID string
 }
 
 // LoadedMsg carries the sessions of a target.
@@ -191,6 +193,12 @@ func (m *Model) SetSize(width, height int) {
 }
 
 // IsFiltering reports whether the filter input is active.
+// LibraryID returns the library of the target item. It is empty for the
+// sessions of all items.
+func (m Model) LibraryID() string {
+	return m.target.LibraryID
+}
+
 func (m Model) IsFiltering() bool {
 	return m.list.FilterState() == list.Filtering
 }

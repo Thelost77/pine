@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/library"
 	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestViewRendersChapterOverlay(t *testing.T) {
@@ -358,5 +361,85 @@ func TestViewHidesCaptionWithoutCues(t *testing.T) {
 	}
 	if containsString(view, "Hello world") {
 		t.Fatal("View() showed caption text without cues")
+	}
+}
+
+// TestViewShowsScanBox verifies that the view shows the box of a running scan
+// at the right edge below the header, and no box when no scan runs.
+func TestViewShowsScanBox(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.width = 100
+	m.height = 30
+	m.propagateSize()
+	if containsString(m.View(), "Scanning") {
+		t.Fatal("the view shows a scan box with no scan")
+	}
+
+	m.scanStatus = "Scanning Audiobooks…"
+	lines := strings.Split(m.View(), "\n")
+	row := -1
+	for i, line := range lines {
+		if strings.Contains(line, m.scanStatus) {
+			row = i
+			break
+		}
+	}
+	if row < 0 {
+		t.Fatalf("the view does not show the scan status\n%s", strings.Join(lines, "\n"))
+	}
+	if row < headerHeight {
+		t.Errorf("the scan status is on the line %d, in the header", row)
+	}
+	if line := strings.TrimRight(ansi.Strip(lines[row]), " "); !strings.HasSuffix(line, "│") || ansi.StringWidth(line) != normalizeViewWidth(m.width) {
+		t.Errorf("the scan box is not at the right edge: %q", line)
+	}
+}
+
+// TestScanBoxDoesNotCoverChapterOverlay verifies that the chapter overlay
+// covers the box of a running scan, and not the reverse.
+func TestScanBoxDoesNotCoverChapterOverlay(t *testing.T) {
+	m := newPlaybackTestModel()
+	m.width = 100
+	m.height = 30
+	m.sessionID = "sess-123"
+	m.player.Title = "Test Book"
+	m.player.Playing = true
+	for i := 0; i < 25; i++ {
+		m.chapters = append(m.chapters, abs.Chapter{ID: i, Start: float64(i * 60), End: float64(i*60 + 60), Title: fmt.Sprintf("Chapter %d", i+1)})
+	}
+	m.chapterOverlayVisible = true
+
+	// The footer covers the last lines of a high overlay, also with no scan.
+	noScan := ansi.Strip(m.View())
+	m.scanStatus = "Scanning Audiobooks…"
+	view := ansi.Strip(m.View())
+	for _, line := range strings.Split(ansi.Strip(m.viewChapterOverlay()), "\n") {
+		if strings.Contains(noScan, line) && !strings.Contains(view, line) {
+			t.Fatalf("the scan box covers the line %q of the chapter overlay", line)
+		}
+	}
+}
+
+// TestScanBoxDoesNotCoverErrorBanner verifies that the box of a running scan
+// is below the error banner, so that the end of a long error stays visible.
+func TestScanBoxDoesNotCoverErrorBanner(t *testing.T) {
+	m := newTestModelAuthenticated()
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = result.(Model)
+	m.scanStatus = "Scanning Audiobooks…"
+	_ = m.err.SetError(errors.New(strings.Repeat("long error ", 20)))
+	m.propagateSize()
+
+	banner := ""
+	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(line, "⚠") {
+			banner = line
+		}
+	}
+	if banner == "" {
+		t.Fatal("the view shows no error banner")
+	}
+	if strings.ContainsAny(banner, "╭│╰") {
+		t.Errorf("the scan box covers the error banner: %q", banner)
 	}
 }

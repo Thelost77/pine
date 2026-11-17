@@ -181,3 +181,25 @@ func TestPaletteListeningSessionsOfDetailTarget(t *testing.T) {
 	_, _ = feedCmd(m, cmd)
 	assertAPICallMade(t, log, "GET", "/api/me/item/listening-sessions/pod-001/pod-001-ep-001")
 }
+
+// TestSessionsTargetHasLibraryOfItem verifies that the sessions of an item
+// keep the library of the item, so that the palette of the sessions screen
+// uses that library and not the library of the home screen.
+func TestSessionsTargetHasLibraryOfItem(t *testing.T) {
+	item := abs.LibraryItem{ID: "b-1", LibraryID: "lib-b"}
+	if got := sessionsTarget(item, nil).LibraryID; got != "lib-b" {
+		t.Errorf("library of a book target = %q, want lib-b", got)
+	}
+	if got := sessionsTarget(item, &abs.PodcastEpisode{ID: "ep-1"}).LibraryID; got != "lib-b" {
+		t.Errorf("library of an episode target = %q, want lib-b", got)
+	}
+
+	m := newTestModelAuthenticated()
+	m.sessionID = "sess-1"
+	m.itemID = "b-1"
+	m.playbackLibraryID = "lib-b"
+	m, _ = m.handleSessionsKey()
+	if got := m.sessions.LibraryID(); got != "lib-b" {
+		t.Errorf("library of the item that plays = %q, want lib-b", got)
+	}
+}

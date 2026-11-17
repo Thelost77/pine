@@ -217,6 +217,40 @@ func TestPaletteSearchFunctionCalled(t *testing.T) {
 	}
 }
 
+// TestPaletteRefreshKeepsTheSelectedItem verifies that Refresh keeps the
+// selected item while it is in the list, and selects the first item when it is
+// not. Results that come later then do not move the selection.
+func TestPaletteRefreshKeepsTheSelectedItem(t *testing.T) {
+	p := NewPalette()
+	results := []PaletteItem{
+		{Label: "Dune", Action: ActionContentNavigate, ItemID: "dune-1"},
+		{Label: "Dune Messiah", Action: ActionContentNavigate, ItemID: "dune-2"},
+	}
+	p.Open(nil, func(string) []PaletteItem { return results })
+	p.input.SetValue("dune")
+	p.applyFilter("dune")
+	for i, item := range p.list.Items() {
+		if pi, ok := item.(PaletteItem); ok && pi.ItemID == "dune-2" {
+			p.list.Select(i)
+		}
+	}
+
+	results = append(results,
+		PaletteItem{Label: "Podcasts", IsHeader: true},
+		PaletteItem{Label: "Dune Talk", Action: ActionContentNavigate, ItemID: "pod-1"},
+	)
+	p.Refresh()
+	if sel, _ := p.list.SelectedItem().(PaletteItem); sel.ItemID != "dune-2" {
+		t.Errorf("selected item = %q, want dune-2", sel.ItemID)
+	}
+
+	results = []PaletteItem{{Label: "Dune Talk", Action: ActionContentNavigate, ItemID: "pod-1"}}
+	p.Refresh()
+	if sel, _ := p.list.SelectedItem().(PaletteItem); sel.ItemID != "pod-1" {
+		t.Errorf("selected item = %q, want pod-1", sel.ItemID)
+	}
+}
+
 func TestPaletteViewWhenNotVisible(t *testing.T) {
 	p := NewPalette()
 	if v := p.View(); v != "" {

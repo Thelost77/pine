@@ -3,6 +3,7 @@ package home
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,6 +28,13 @@ type PersonalizedMsg struct {
 	Libraries     []abs.Library
 	LibraryID     string
 	Err           error
+
+	// generation is the loadingGen of the load. The screen drops the answer
+	// of an earlier load.
+	generation uint64
+	// refreshed is true when the load read the library list again. Libraries
+	// is then the new list, and LibraryID is the library to select in it.
+	refreshed bool
 }
 
 type rowKind int
@@ -197,15 +205,20 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command that fetches personalized data.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
+	return tea.Batch(m.fetchPersonalizedCmd(false), m.loadingRevealCmd())
 }
 
 // Update handles messages for the home screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case PersonalizedMsg:
+		if msg.generation != m.loadingGen {
+			logger.Debug("STALE: discarding personalized msg of an earlier load", "msgLib", msg.LibraryID)
+			return m, nil
+		}
 		currentLib := m.SelectedLibraryID()
-		if msg.LibraryID != "" && currentLib != "" && msg.LibraryID != currentLib {
+		// The answer of a refresh selects its library in the new library list.
+		if !msg.refreshed && msg.LibraryID != "" && currentLib != "" && msg.LibraryID != currentLib {
 			logger.Debug("STALE: discarding personalized msg", "msgLib", msg.LibraryID, "currentLib", currentLib)
 			return m, nil
 		}
@@ -219,7 +232,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		if len(msg.Libraries) > 0 {
+		if msg.refreshed {
+			m.libraries = msg.Libraries
+			m.selectedLibrary = max(0, slices.IndexFunc(m.libraries, func(lib abs.Library) bool { return lib.ID == msg.LibraryID }))
+		} else if len(msg.Libraries) > 0 {
 			logger.Debug("personalized: updating libraries", "count", len(msg.Libraries))
 			m.libraries = msg.Libraries
 		}
@@ -297,7 +313,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				// Keep current content visible briefly; show skeletons only if
 				// the fetch outlives the reveal delay.
 				m.refreshListRows()
-				return m, tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
+				return m, tea.Batch(m.fetchPersonalizedCmd(false), m.loadingRevealCmd())
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.PageDown):
@@ -324,15 +340,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // fetchPersonalizedCmd creates a command that fetches personalized shelves.
-func (m *Model) fetchPersonalizedCmd() tea.Cmd {
+// With refreshLibraries, the command also reads the library list again, and
+// it loads the shelves of the selected library by its ID.
+func (m *Model) fetchPersonalizedCmd(refreshLibraries bool) tea.Cmd {
+	msg := PersonalizedMsg{generation: m.loadingGen, refreshed: refreshLibraries}
 	if m.client == nil {
-		return func() tea.Msg {
-			return PersonalizedMsg{Err: fmt.Errorf("not authenticated")}
-		}
+		msg.Err = fmt.Errorf("not authenticated")
+		return func() tea.Msg { return msg }
 	}
 	client := m.client
 	selectedIdx := m.selectedLibrary
 	existingLibs := m.libraries
+	if refreshLibraries {
+		existingLibs = nil
+	}
 	currentLibID := m.SelectedLibraryID()
 	return func() tea.Msg {
 		libs := existingLibs
@@ -341,47 +362,48 @@ func (m *Model) fetchPersonalizedCmd() tea.Cmd {
 			var err error
 			libs, err = client.GetLibraries(context.Background())
 			if err != nil {
-				return PersonalizedMsg{Err: fmt.Errorf("fetch libraries: %w", err)}
+				msg.Err = fmt.Errorf("fetch libraries: %w", err)
+				return msg
 			}
 			libs = client.FilterAudioLibraries(context.Background(), libs)
 		}
+		msg.Libraries = libs
 		if len(libs) == 0 {
-			return PersonalizedMsg{Items: nil, Libraries: libs, LibraryID: currentLibID}
+			msg.LibraryID = currentLibID
+			return msg
 		}
 
 		idx := selectedIdx
+		if refreshLibraries {
+			idx = max(0, slices.IndexFunc(libs, func(lib abs.Library) bool { return lib.ID == currentLibID }))
+		}
 		if idx >= len(libs) {
 			idx = 0
 		}
+		msg.LibraryID = libs[idx].ID
 
 		sections, err := client.GetPersonalized(context.Background(), libs[idx].ID)
 		if err != nil {
-			return PersonalizedMsg{Err: fmt.Errorf("fetch personalized: %w", err), Libraries: libs, LibraryID: libs[idx].ID}
+			msg.Err = fmt.Errorf("fetch personalized: %w", err)
+			return msg
 		}
 
-		var continueListening []abs.LibraryItem
-		var recentlyAdded []abs.LibraryItem
 		for _, section := range sections {
 			switch section.ID {
 			case "continue-listening":
-				continueListening = section.Entities
+				msg.Items = section.Entities
 			case "recently-added":
-				recentlyAdded = section.Entities
+				msg.RecentlyAdded = section.Entities
 			}
 		}
 
 		if libs[idx].MediaType == "podcast" {
 			if eps, err := client.GetRecentEpisodes(context.Background(), libs[idx].ID, recentlyAddedLimit); err == nil {
-				recentlyAdded = eps
+				msg.RecentlyAdded = eps
 			}
 		}
 
-		return PersonalizedMsg{
-			Items:         continueListening,
-			RecentlyAdded: recentlyAdded,
-			Libraries:     libs,
-			LibraryID:     libs[idx].ID,
-		}
+		return msg
 	}
 }
 
@@ -536,11 +558,22 @@ func removeEpisodeFromItems(items []abs.LibraryItem, itemID, episodeID string) (
 
 // ReloadCmd forces a fresh data fetch for the current library.
 func (m *Model) ReloadCmd() tea.Cmd {
+	return m.reloadCmd(false)
+}
+
+// RefreshCmd reads the library list from the client again, and loads the
+// shelves of the selected library. The library list and the selected library
+// stay on the model until the answer comes.
+func (m *Model) RefreshCmd() tea.Cmd {
+	return m.reloadCmd(true)
+}
+
+func (m *Model) reloadCmd(refreshLibraries bool) tea.Cmd {
 	m.loading = true
 	m.loadingVisible = false
 	m.loadingGen++
 	m.refreshListRows()
-	return tea.Batch(m.fetchPersonalizedCmd(), m.loadingRevealCmd())
+	return tea.Batch(m.fetchPersonalizedCmd(refreshLibraries), m.loadingRevealCmd())
 }
 
 // Libraries returns the available libraries.

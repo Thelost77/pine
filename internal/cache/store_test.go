@@ -92,14 +92,14 @@ func TestStore_KeysHaveVersion(t *testing.T) {
 	if err := s.Put("k", "value", time.Minute); err != nil {
 		t.Fatalf("Put error: %v", err)
 	}
-	if n := rows("v1-k"); n != 1 {
-		t.Fatalf("rows with key v1-k = %d, want 1", n)
+	if n := rows("v2-k"); n != 1 {
+		t.Fatalf("rows with key v2-k = %d, want 1", n)
 	}
 	if err := s.Delete("k"); err != nil {
 		t.Fatalf("Delete error: %v", err)
 	}
-	if n := rows("v1-k"); n != 0 {
-		t.Fatalf("rows with key v1-k after Delete = %d, want 0", n)
+	if n := rows("v2-k"); n != 0 {
+		t.Fatalf("rows with key v2-k after Delete = %d, want 0", n)
 	}
 
 	// A row of an older pine, with no version and data that does not decode.

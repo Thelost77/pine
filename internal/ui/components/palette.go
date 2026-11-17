@@ -66,6 +66,7 @@ const (
 	ActionToggleCaptions
 	ActionShowSessions
 	ActionScanLibrary
+	ActionRefresh
 )
 
 type PaletteItem struct {
@@ -215,11 +216,23 @@ func (p *Palette) Close() {
 
 // Refresh applies the query again, for results that the search function did
 // not have at the last change of the query. With no query, it does nothing.
+// The selected item stays selected while it is in the list.
 func (p *Palette) Refresh() {
 	if !p.visible || strings.TrimSpace(p.input.Value()) == "" {
 		return
 	}
+	sel, hadSelection := p.list.SelectedItem().(PaletteItem)
 	p.applyFilter(p.input.Value())
+	if !hadSelection || sel.IsHeader {
+		return
+	}
+	for i, item := range p.list.Items() {
+		pi, ok := item.(PaletteItem)
+		if ok && !pi.IsHeader && pi.Action == sel.Action && pi.ItemID == sel.ItemID && pi.LibraryID == sel.LibraryID && pi.Label == sel.Label {
+			p.list.Select(i)
+			return
+		}
+	}
 }
 
 func (p *Palette) Visible() bool {

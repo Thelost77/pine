@@ -27,6 +27,7 @@ import (
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -107,6 +108,11 @@ type Model struct {
 
 	palette components.Palette
 
+	// scanStatus is the text of the box of a running scan. It is empty when
+	// no scan runs.
+	scanStatus  string
+	scanSpinner spinner.Model
+
 	lastPlayedTitle   string
 	lastPlayedTrackID string
 	lastPlayedAuthors []string
@@ -158,6 +164,7 @@ func NewWithPlayer(cfg config.Config, store *db.Store, client *cache.Client, cac
 		mprisLink:    &mprisLink{},
 		mprisState:   &MprisState{},
 		palette:      palette,
+		scanSpinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Accent)),
 	}
 }
 
@@ -589,6 +596,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case serieslist.BackMsg:
 		return m.back()
 
+	// A load reaches its screen also behind the active screen: a scan loads
+	// the screens in the back stack again.
+	case serieslist.LoadedMsg:
+		var cmd tea.Cmd
+		m.seriesList, cmd = m.seriesList.Update(msg)
+		return m, cmd
+
+	case series.LoadedMsg:
+		var cmd tea.Cmd
+		m.series, cmd = m.series.Update(msg)
+		return m, cmd
+
 	case detail.MarkFinishedCmd:
 		return m.handleMarkFinished(msg)
 
@@ -625,12 +644,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
 
 	case LibraryScannedMsg:
+		m.scanStatus = ""
+		if msg.Err != nil {
+			return m.Update(components.ErrMsg{Err: msg.Err})
+		}
 		m.home.InvalidateLibrary(msg.LibraryID)
 		m.library.InvalidateLibrary(msg.LibraryID)
 		if m.searchCache != nil {
 			m.searchCache.Invalidate(msg.LibraryID)
 		}
-		return m, tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd())
+		cmd := tea.Batch(m.home.ReloadCmd(), m.library.ReloadCmd(), m.prewarmCacheCmd(), m.reloadOpenScreensCmd(msg.LibraryID))
+		return m, cmd
+
+	case CacheClearedMsg:
+		for _, lib := range m.home.Libraries() {
+			m.library.InvalidateLibrary(lib.ID)
+		}
+		// The warm-up of the search index starts with home.PersonalizedMsg.
+		cmd := tea.Batch(m.home.RefreshCmd(), m.library.ReloadCmd(), m.reloadOpenScreensCmd(""))
+		return m, cmd
+
+	case spinner.TickMsg:
+		// The ticks end with the scan.
+		if m.scanStatus == "" {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.scanSpinner, cmd = m.scanSpinner.Update(msg)
+		return m, cmd
 
 	case detail.SeekToBookmarkCmd:
 		return m.handleSeekToBookmark(msg)
@@ -786,11 +827,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case search.CacheReadyMsg:
-		// The palette shows the results of its query when the snapshot of its
-		// library is ready.
-		if libID, _ := m.currentLibraryForSearch(); msg.LibraryID == libID {
-			m.palette.Refresh()
-		}
+		// The palette searches each library, so it shows the results of its
+		// query again when the snapshot of a library is ready.
+		m.palette.Refresh()
 		return m.updateScreen(msg)
 
 	case SleepTimerExpiredMsg:
@@ -1137,9 +1176,9 @@ func (m Model) checkUnauthorized(err error) (Model, tea.Cmd, bool) {
 }
 
 // openGlobalPalette opens the palette. The search of the palette answers only
-// from a snapshot that is ready, so if the snapshot of the library is not
-// ready, it returns a command that builds it. CacheReadyMsg then shows the
-// results of the query.
+// from a snapshot that is ready, so it returns a command that builds the
+// snapshot of each library that has none. CacheReadyMsg then shows the results
+// of the query.
 func (m *Model) openGlobalPalette() tea.Cmd {
 	playerItems, navItems := m.buildStaticPaletteItems()
 	contextItems := m.buildContextPaletteItems()
@@ -1151,45 +1190,76 @@ func (m *Model) openGlobalPalette() tea.Cmd {
 	items = append(items, navItems...)
 	m.palette.Open(items, m.contentSearchFunc())
 
-	libID, libMediaType := m.currentLibraryForSearch()
-	if m.searchCache == nil || libID == "" {
+	if m.searchCache == nil {
 		return nil
 	}
-	if _, ok := m.searchCache.TryGetAll(libID, libMediaType); ok {
-		return nil
+	var cmds []tea.Cmd
+	for _, lib := range m.searchLibraries() {
+		if _, ok := m.searchCache.TryGetAll(lib.ID, lib.MediaType); !ok {
+			cmds = append(cmds, m.searchCache.PrebuildCmd(lib.ID, lib.MediaType))
+		}
 	}
-	return m.searchCache.PrebuildCmd(libID, libMediaType)
+	return tea.Batch(cmds...)
 }
 
+// searchLibraries returns the libraries of the palette search: the library of
+// the current screen first, then the other libraries.
+func (m Model) searchLibraries() []abs.Library {
+	libID, libMediaType := m.currentLibraryForSearch()
+	var libs []abs.Library
+	if libID != "" {
+		libs = append(libs, abs.Library{ID: libID, Name: m.libraryName(libID), MediaType: libMediaType})
+	}
+	for _, lib := range m.home.Libraries() {
+		if lib.ID != libID {
+			libs = append(libs, lib)
+		}
+	}
+	return libs
+}
+
+// contentSearchFunc searches the library of the current screen first, then
+// each other library. The items of a different library are below a header with
+// its name. A row at the end shows that an index is not ready.
 func (m Model) contentSearchFunc() components.SearchFunc {
 	return func(query string) []components.PaletteItem {
 		if m.searchCache == nil {
 			return nil
 		}
-		libID, libMediaType := m.currentLibraryForSearch()
-		if libID == "" {
-			return nil
-		}
+		currentID, _ := m.currentLibraryForSearch()
 		ctx := context.Background()
-		results, err := m.searchCache.Search(ctx, libID, libMediaType, query)
-		if err != nil || len(results) == 0 {
-			return nil
-		}
-		items := make([]components.PaletteItem, 0, len(results))
-		for _, res := range results {
-			label := res.Media.Metadata.Title
-			if res.MediaType == "podcast" && res.RecentEpisode != nil {
-				label = res.RecentEpisode.Title + " — " + res.Media.Metadata.Title
+		var items []components.PaletteItem
+		building := false
+		for _, lib := range m.searchLibraries() {
+			if _, ok := m.searchCache.TryGetAll(lib.ID, lib.MediaType); !ok {
+				building = true
 			}
-			itemCopy := res
-			items = append(items, components.PaletteItem{
-				Label:      label,
-				Action:     components.ActionContentNavigate,
-				PlayAction: components.ActionPlayDirect,
-				LibraryID:  res.LibraryID,
-				ItemID:     res.ID,
-				Data:       itemCopy,
-			})
+			// With no ready index, Search builds it in the background.
+			results, err := m.searchCache.Search(ctx, lib.ID, lib.MediaType, query)
+			if err != nil || len(results) == 0 {
+				continue
+			}
+			if lib.ID != currentID {
+				items = append(items, components.PaletteItem{Label: lib.Name, IsHeader: true})
+			}
+			for _, res := range results {
+				label := res.Media.Metadata.Title
+				if res.MediaType == "podcast" && res.RecentEpisode != nil {
+					label = res.RecentEpisode.Title + " — " + res.Media.Metadata.Title
+				}
+				itemCopy := res
+				items = append(items, components.PaletteItem{
+					Label:      label,
+					Action:     components.ActionContentNavigate,
+					PlayAction: components.ActionPlayDirect,
+					LibraryID:  res.LibraryID,
+					ItemID:     res.ID,
+					Data:       itemCopy,
+				})
+			}
+		}
+		if building {
+			items = append(items, components.PaletteItem{Label: "Building index…", IsHeader: true})
 		}
 		return items
 	}
@@ -1213,6 +1283,12 @@ func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
 			return item.LibraryID, item.MediaType
 		}
 		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
+	case ScreenSessions:
+		// The sessions of all items have no library.
+		if lib, ok := m.libraryByID(m.sessions.LibraryID()); ok {
+			return lib.ID, lib.MediaType
+		}
+		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
 	case ScreenHome:
 		return m.home.SelectedLibraryID(), m.home.SelectedLibraryMediaType()
 	default:
@@ -1222,28 +1298,42 @@ func (m Model) currentLibraryForSearch() (libID, libMediaType string) {
 
 // libraryName returns the name of a library, or an empty string.
 func (m Model) libraryName(id string) string {
+	lib, _ := m.libraryByID(id)
+	return lib.Name
+}
+
+// libraryByID returns a library of the library list of the home screen.
+func (m Model) libraryByID(id string) (abs.Library, bool) {
 	for _, lib := range m.home.Libraries() {
 		if lib.ID == id {
-			return lib.Name
+			return lib, true
 		}
 	}
-	return ""
+	return abs.Library{}, false
 }
 
 func (m Model) buildStaticPaletteItems() (player, nav []components.PaletteItem) {
 	nav = []components.PaletteItem{
 		{Label: "Navigation", IsHeader: true},
 		{Label: "Go Home", Action: components.ActionGoHome},
-		{Label: "Go Library", Action: components.ActionGoLibrary},
 	}
+	if m.screen != ScreenLibrary {
+		nav = append(nav, components.PaletteItem{Label: "Go Library", Action: components.ActionGoLibrary})
+	}
+	libID, mediaType := m.currentLibraryForSearch()
 	// Only a book library has series. The series list is the target of the entry.
-	if libID, mediaType := m.currentLibraryForSearch(); mediaType == "book" && m.screen != ScreenSeriesList {
+	if mediaType == "book" && m.screen != ScreenSeriesList {
 		nav = append(nav, components.PaletteItem{Label: "Browse Series", Action: components.ActionBrowseSeries, LibraryID: libID, Payload: m.libraryName(libID)})
+	}
+	scanLabel := "Scan Library"
+	if name := m.libraryName(libID); name != "" {
+		scanLabel += ": " + name
 	}
 	nav = append(nav,
 		components.PaletteItem{Label: "Listening History", Action: components.ActionShowSessions},
 		components.PaletteItem{Label: "Library", IsHeader: true},
-		components.PaletteItem{Label: "Scan Library", Action: components.ActionScanLibrary},
+		components.PaletteItem{Label: scanLabel, Action: components.ActionScanLibrary},
+		components.PaletteItem{Label: "Refresh", Action: components.ActionRefresh},
 	)
 
 	if !m.isPlaying() {
@@ -1341,6 +1431,8 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	case components.ActionGoHome:
 		return m.navigate(ScreenHome)
 	case components.ActionGoLibrary:
+		libID, _ := m.currentLibraryForSearch()
+		m.library.Configure(libID, m.home.Libraries())
 		return m.navigate(ScreenLibrary)
 	case components.ActionShowSessions:
 		if entry, ok := data.(detail.AddToQueueCmd); ok {
@@ -1642,7 +1734,28 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	case components.ActionSwitchLibrary:
 		return m, nil
 	case components.ActionScanLibrary:
-		return m, m.scanLibraryCmd()
+		scanCmd := m.scanLibraryCmd()
+		if m.scanStatus != "" || scanCmd == nil {
+			return m, nil
+		}
+		libID, _ := m.currentLibraryForSearch()
+		name := m.libraryName(libID)
+		if name == "" {
+			name = "library"
+		}
+		m.scanStatus = "Scanning " + name + "…"
+		// The tick is first, because feedCmdWithin of the tests runs each
+		// command of a batch and gives the command of the last one.
+		return m, tea.Batch(m.scanSpinner.Tick, scanCmd)
+	case components.ActionRefresh:
+		if m.client == nil {
+			return m, nil
+		}
+		client := m.client
+		return m, func() tea.Msg {
+			client.Invalidate()
+			return CacheClearedMsg{}
+		}
 	case components.ActionDeleteItem:
 		if msg, ok := data.(detail.ShowDeleteConfirmMsg); ok && m.screen == ScreenDetail {
 			m.detail, _ = m.detail.Update(msg)
@@ -1652,25 +1765,25 @@ func (m Model) handlePaletteAction(action components.PaletteAction, payload, lib
 	return m, nil
 }
 
+// prewarmCacheCmd builds the search snapshot of each library, the library of
+// the current screen first.
 func (m Model) prewarmCacheCmd() tea.Cmd {
+	cache := m.searchCache
+	libs := m.searchLibraries()
 	return func() tea.Msg {
-		cache := m.searchCache
 		if cache == nil {
 			return PrewarmDoneMsg{}
 		}
-		libID := m.home.SelectedLibraryID()
-		libMediaType := m.home.SelectedLibraryMediaType()
-		if libID == "" {
-			return PrewarmDoneMsg{}
+		for _, lib := range libs {
+			_ = cache.Prepare(context.Background(), lib.ID, lib.MediaType)
 		}
-		_ = cache.Prepare(context.Background(), libID, libMediaType)
 		return PrewarmDoneMsg{}
 	}
 }
 
 // scanLibraryCmd scans the library of the current screen on the server. At the
 // end of the scan, the cache client clears the cache, and LibraryScannedMsg
-// loads the screens again.
+// closes the scan box and loads the screens again, or shows the error.
 func (m Model) scanLibraryCmd() tea.Cmd {
 	libraryID, _ := m.currentLibraryForSearch()
 	if m.client == nil || libraryID == "" {
@@ -1684,10 +1797,34 @@ func (m Model) scanLibraryCmd() tea.Cmd {
 			if abs.IsHTTPStatus(err, http.StatusForbidden) {
 				err = fmt.Errorf("ABS user does not have the admin permission to scan: %w", err)
 			}
-			return components.ErrMsg{Err: fmt.Errorf("failed to scan library: %w", err)}
+			return LibraryScannedMsg{LibraryID: libraryID, Err: fmt.Errorf("failed to scan library: %w", err)}
 		}
 		return LibraryScannedMsg{LibraryID: libraryID}
 	}
+}
+
+// reloadOpenScreensCmd loads the open series list, series screen, and detail
+// screen of a library again. With an empty libraryID, it loads them for each
+// library.
+func (m *Model) reloadOpenScreensCmd(libraryID string) tea.Cmd {
+	inLibrary := func(id string) bool {
+		return libraryID == "" || id == libraryID
+	}
+	var cmds []tea.Cmd
+	if m.screenOpen(ScreenSeriesList) && inLibrary(m.seriesList.SelectedLibraryID()) {
+		cmds = append(cmds, m.seriesList.ReloadCmd())
+	}
+	if m.screenOpen(ScreenSeries) && inLibrary(m.series.LibraryID()) {
+		cmds = append(cmds, m.series.Init())
+	}
+	if item := m.detail.Item(); m.screenOpen(ScreenDetail) && inLibrary(item.LibraryID) {
+		cmds = append(cmds, m.detailItemCmd(item))
+		// A load of the bookmarks closes the bookmark title editor.
+		if !m.detail.EditingBookmark() {
+			cmds = append(cmds, m.fetchBookmarksCmd(item.ID))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) handleDeleteItem(cmd detail.DeleteItemCmd) (Model, tea.Cmd) {

@@ -24,6 +24,7 @@ import (
 	"github.com/Thelost77/pine/internal/screens/metadataedit"
 	"github.com/Thelost77/pine/internal/screens/series"
 	"github.com/Thelost77/pine/internal/screens/serieslist"
+	"github.com/Thelost77/pine/internal/screens/sessions"
 	"github.com/Thelost77/pine/internal/ui"
 	"github.com/Thelost77/pine/internal/ui/components"
 	tea "github.com/charmbracelet/bubbletea"
@@ -2517,6 +2518,14 @@ func TestPaletteBrowseSeriesOpensBookLibraryOfScreen(t *testing.T) {
 			m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
 			m.screen = ScreenSeriesList
 		}, "", ""},
+		{"sessions of a book", homeOnPodcasts, func(m *Model) {
+			m.sessions = sessions.New(m.styles, m.client, sessions.Target{ItemID: "b-1", LibraryID: "lib-b"}, "")
+			m.screen = ScreenSessions
+		}, "lib-b", "B"},
+		{"sessions of all items", homeOnBooks, func(m *Model) {
+			m.sessions = sessions.New(m.styles, m.client, sessions.Target{}, "")
+			m.screen = ScreenSessions
+		}, "lib-a", "A"},
 	}
 
 	for _, tt := range tests {
@@ -2555,6 +2564,180 @@ func TestPaletteBrowseSeriesOpensBookLibraryOfScreen(t *testing.T) {
 				t.Errorf("series list library = %q, want %q", got, tt.wantLib)
 			}
 		})
+	}
+}
+
+// TestPaletteGoLibraryOpensLibraryOfScreen verifies that Go Library of the
+// palette opens the library of the current screen, also before the library
+// screen opens for the first time. The library screen shows no Go Library.
+func TestPaletteGoLibraryOpensLibraryOfScreen(t *testing.T) {
+	// The home screen shows the first library.
+	libs := []abs.Library{
+		{ID: "lib-a", Name: "A", MediaType: "book"},
+		{ID: "lib-b", Name: "B", MediaType: "book"},
+	}
+	book := abs.LibraryItem{ID: "b-1", LibraryID: "lib-b", MediaType: "book"}
+
+	tests := []struct {
+		name    string
+		setup   func(m *Model)
+		wantLib string
+	}{
+		{"home on a book library", func(m *Model) { m.screen = ScreenHome }, "lib-a"},
+		{"detail of a book of a different library", func(m *Model) {
+			m.detail = detail.New(m.styles, book)
+			m.screen = ScreenDetail
+		}, "lib-b"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModelAuthenticated()
+			m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: libs})
+			tt.setup(&m)
+
+			var goLibrary *components.PaletteItem
+			_, nav := m.buildStaticPaletteItems()
+			for _, item := range nav {
+				if item.Action == components.ActionGoLibrary {
+					goLibrary = &item
+				}
+			}
+			if goLibrary == nil {
+				t.Fatal("the palette has no Go Library")
+			}
+			m, _ = m.handlePaletteAction(goLibrary.Action, goLibrary.Payload, goLibrary.LibraryID, goLibrary.ItemID, goLibrary.Data)
+			if m.screen != ScreenLibrary {
+				t.Errorf("screen = %v, want the library", m.screen)
+			}
+			if got := m.library.SelectedLibraryID(); got != tt.wantLib {
+				t.Errorf("library = %q, want %q", got, tt.wantLib)
+			}
+		})
+	}
+
+	t.Run("library screen", func(t *testing.T) {
+		m := newTestModelAuthenticated()
+		m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: libs})
+		m.library.Configure("lib-b", libs)
+		m.screen = ScreenLibrary
+
+		_, nav := m.buildStaticPaletteItems()
+		for _, item := range nav {
+			if item.Action == components.ActionGoLibrary {
+				t.Error("the library screen has Go Library")
+			}
+		}
+	})
+}
+
+// TestScanReloadBlocksNextPageOfSeriesList verifies that the reload after a
+// scan marks the open series list as loading, so that the list starts no load
+// of a next page that can mix an old page into the new list.
+func TestScanReloadBlocksNextPageOfSeriesList(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
+	m.seriesList, _ = m.seriesList.Update(serieslist.LoadedMsg{LibraryID: "lib-a", Results: []abs.Series{{ID: "ser-1", Name: "Dune"}}, Total: 120})
+	m.backStack = []Screen{ScreenHome}
+	m.screen = ScreenSeriesList
+	if m.seriesList.Loading() {
+		t.Fatal("the series list loads before the scan")
+	}
+
+	res, _ := m.Update(LibraryScannedMsg{LibraryID: "lib-a"})
+	m = res.(Model)
+	if !m.seriesList.Loading() {
+		t.Error("the series list does not load after the scan")
+	}
+
+	// The answer of a load from before the scan does not change the list.
+	res, _ = m.Update(serieslist.LoadedMsg{LibraryID: "lib-a", Results: []abs.Series{{ID: "ser-9", Name: "Old Page"}}, Total: 120, Page: 1})
+	m = res.(Model)
+	m.width, m.height = 100, 30
+	m.propagateSize()
+	if containsString(m.seriesList.View(), "Old Page") {
+		t.Error("the series list shows a page of a load from before the scan")
+	}
+}
+
+// TestSeriesLoadedMsgReachesScreenBehindActiveScreen verifies that a load of
+// the series list or of a series reaches its screen model also when a
+// different screen is active: a scan loads the screens in the back stack again.
+func TestSeriesLoadedMsgReachesScreenBehindActiveScreen(t *testing.T) {
+	t.Run("series list behind the series screen", func(t *testing.T) {
+		m := newTestModelAuthenticated()
+		m.seriesList = serieslist.New(m.styles, m.client, "lib-a", "A")
+		m.series = series.New(m.styles, m.client, "lib-a", "ser-1", "")
+		m.backStack = []Screen{ScreenHome, ScreenSeriesList}
+		m.screen = ScreenSeries
+
+		m.width, m.height = 100, 30
+		m.propagateSize()
+
+		res, _ := m.Update(serieslist.LoadedMsg{LibraryID: "lib-a", Results: []abs.Series{{ID: "ser-1", Name: "Dune"}}, Total: 1})
+		m = res.(Model)
+		if m.seriesList.Loading() || !containsString(m.seriesList.View(), "Dune") {
+			t.Errorf("the series list did not get the loaded page\n%s", m.seriesList.View())
+		}
+	})
+
+	t.Run("series behind the detail screen", func(t *testing.T) {
+		m := newTestModelAuthenticated()
+		m.series = series.New(m.styles, m.client, "lib-a", "ser-1", "")
+		m.detail = detail.New(m.styles, abs.LibraryItem{ID: "b-1", LibraryID: "lib-a", MediaType: "book"})
+		m.backStack = []Screen{ScreenHome, ScreenSeries}
+		m.screen = ScreenDetail
+
+		m.width, m.height = 100, 30
+		m.propagateSize()
+
+		res, _ := m.Update(series.LoadedMsg{SeriesID: "ser-1", Contents: abs.SeriesContents{
+			Series: abs.Series{ID: "ser-1", Name: "Dune"},
+			Items:  []abs.LibraryItem{{ID: "b-1", Media: abs.Media{Metadata: abs.MediaMetadata{Title: "Dune Messiah"}}}},
+		}})
+		m = res.(Model)
+		if m.series.Loading() || !containsString(m.series.View(), "Dune Messiah") {
+			t.Errorf("the series screen did not get the loaded series\n%s", m.series.View())
+		}
+	})
+}
+
+// TestPaletteScanLibraryShowsScanBox verifies that Scan Library shows the box
+// of the scan, that a second Scan Library does nothing while the scan runs,
+// and that the end of a scan that failed closes the box and shows the error.
+func TestPaletteScanLibraryShowsScanBox(t *testing.T) {
+	m := newTestModelAuthenticated()
+	m.home, _ = m.home.Update(home.PersonalizedMsg{Libraries: []abs.Library{{ID: "lib-a", Name: "A", MediaType: "book"}}})
+
+	var scan *components.PaletteItem
+	_, nav := m.buildStaticPaletteItems()
+	for _, item := range nav {
+		if item.Action == components.ActionScanLibrary {
+			scan = &item
+		}
+	}
+	if scan == nil || scan.Label != "Scan Library: A" {
+		t.Fatalf("Scan Library entry = %+v, want the label %q", scan, "Scan Library: A")
+	}
+
+	m, cmd := m.handlePaletteAction(components.ActionScanLibrary, "", "", "", nil)
+	if cmd == nil {
+		t.Fatal("Scan Library returns no command")
+	}
+	if m.scanStatus != "Scanning A…" {
+		t.Errorf("scan status = %q, want %q", m.scanStatus, "Scanning A…")
+	}
+	if _, cmd := m.handlePaletteAction(components.ActionScanLibrary, "", "", "", nil); cmd != nil {
+		t.Error("a second Scan Library returns a command while a scan runs")
+	}
+
+	res, _ := m.Update(LibraryScannedMsg{LibraryID: "lib-a", Err: errors.New("failed to scan library: boom")})
+	m = res.(Model)
+	if m.scanStatus != "" {
+		t.Errorf("scan status = %q after the scan failed, want none", m.scanStatus)
+	}
+	if !m.err.HasError() {
+		t.Error("no error banner after the scan failed")
 	}
 }
 

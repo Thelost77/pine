@@ -94,6 +94,13 @@ func testPodcastItem(id, title string) abs.LibraryItem {
 	}
 }
 
+// testSeries is the series of the book library of the mock server. A scan of
+// the library finds testScannedSeries.
+var (
+	testSeries        = abs.Series{ID: "ser-001", Name: "Dystopias", LibraryID: "lib-001"}
+	testScannedSeries = abs.Series{ID: "ser-002", Name: "Utopias", LibraryID: "lib-001"}
+)
+
 func testBookmark(title string, seconds float64) abs.Bookmark {
 	return abs.Bookmark{
 		Title:     title,
@@ -324,6 +331,18 @@ func newFullMockABSServer(log *apiLog, state *e2eServerState) *httptest.Server {
 				},
 			}
 			_ = json.NewEncoder(w).Encode(resp)
+
+		// --- Series of the book library ---
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-001/series":
+			results := []abs.Series{testSeries}
+			if state.getLastScan() != 0 {
+				results = append(results, testScannedSeries)
+			}
+			resp := abs.LibrarySeriesResponse{Results: results, Total: len(results), Limit: 50}
+			_ = json.NewEncoder(w).Encode(resp)
+
+		case r.Method == http.MethodGet && r.URL.Path == "/api/libraries/lib-001/series/"+testSeries.ID:
+			_ = json.NewEncoder(w).Encode(testSeries)
 
 		// --- Library items (books) ---
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/libraries/lib-001/items"):

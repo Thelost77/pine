@@ -880,6 +880,22 @@ func e2eSaveBookmarkTitle(m Model, state *e2eServerState) string {
 	return state.getBookmarks("item-001")[0].Title
 }
 
+// TestE2E_ScanDuringBookmarkTitleEditKeepsTheEdit verifies that the reload of
+// the detail screen after a scan does not close the bookmark title editor.
+func TestE2E_ScanDuringBookmarkTitleEditKeepsTheEdit(t *testing.T) {
+	m, _ := e2eDetailWithBookmark(t)
+	m, _ = e2ePressKey(m, 'e')
+	if !m.detail.EditingBookmark() {
+		t.Fatal("the bookmark editor did not open")
+	}
+
+	res, cmd := m.Update(LibraryScannedMsg{LibraryID: m.detail.Item().LibraryID})
+	m, _ = feedCmdWithin(res.(Model), cmd, slowCmdWait)
+	if !m.detail.EditingBookmark() {
+		t.Error("the reload after the scan closed the bookmark editor")
+	}
+}
+
 // TestE2E_BookmarkTitleEditGetsEachKey verifies that the bookmark title editor
 // gets each key during a playback. Outside the editor, these keys have a
 // global function or a playback function.
@@ -2573,6 +2589,65 @@ func TestE2E_PaletteShowsResultsWhenSnapshotIsBuilt(t *testing.T) {
 	}
 }
 
+// TestE2E_PaletteSearchesEachLibrary verifies that the palette search shows
+// the matches of the current library first, then the matches of each other
+// library below a header with its name.
+func TestE2E_PaletteSearchesEachLibrary(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	for _, lib := range m.home.Libraries() {
+		if err := m.searchCache.Prepare(context.Background(), lib.ID, lib.MediaType); err != nil {
+			t.Fatalf("Prepare(%s) error: %v", lib.ID, err)
+		}
+	}
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	m = e2eTypeString(m, "test")
+	view := m.palette.View()
+	book := strings.Index(view, "The Great Gatsby")
+	header := strings.Index(view, "PODCASTS")
+	podcast := strings.Index(view, "Tech Talk Daily")
+	if book < 0 || header < 0 || podcast < 0 || book > header || header > podcast {
+		t.Errorf("the palette does not show the book, then the header of the podcast library, then the podcast\n%s", view)
+	}
+}
+
+// TestE2E_PaletteSearchShowsIndexBuild verifies that the palette search shows
+// a row while the index of a library is not ready.
+func TestE2E_PaletteSearchShowsIndexBuild(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	if err := m.searchCache.Prepare(context.Background(), "lib-001", "book"); err != nil {
+		t.Fatalf("Prepare() error: %v", err)
+	}
+	m.searchCache.Invalidate("lib-pods")
+
+	items := m.contentSearchFunc()("test")
+	if len(items) == 0 {
+		t.Fatal("the search found no item")
+	}
+	if last := items[len(items)-1]; !last.IsHeader || last.Label != "Building index…" {
+		t.Errorf("last row = %+v, want the header Building index…", last)
+	}
+	if items[0].IsHeader {
+		t.Errorf("first row = %+v, want an item of the current library", items[0])
+	}
+}
+
 // TestE2E_MetadataSaveBuildsSearchSnapshot verifies that a metadata save
 // builds the search snapshot again: the save clears the snapshots.
 func TestE2E_MetadataSaveBuildsSearchSnapshot(t *testing.T) {
@@ -2674,6 +2749,7 @@ func TestE2E_PaletteScanLibraryReloadsAfterTheScan(t *testing.T) {
 	if scanCmd == nil {
 		t.Fatal("Scan Library returns no command")
 	}
+	assertViewContains(t, m, "Scanning Audiobooks")
 
 	m, reloadCmd := feedCmdWithin(m, scanCmd, slowCmdWait)
 	if got := log.count(http.MethodPost, "/api/libraries/lib-001/scan"); got != 1 {
@@ -2682,8 +2758,102 @@ func TestE2E_PaletteScanLibraryReloadsAfterTheScan(t *testing.T) {
 	if m.err.HasError() {
 		t.Fatalf("error after the scan: %v", m.err.Error())
 	}
+	if strings.Contains(m.View(), "Scanning") {
+		t.Error("the view shows the scan box after the end of the scan")
+	}
 	feedCmdChain(m, reloadCmd, 5)
 	if got := log.count(http.MethodGet, "/api/libraries/lib-001/personalized"); got <= loads {
 		t.Errorf("home loads = %d, want more than %d after the scan", got, loads)
+	}
+}
+
+// TestE2E_PaletteScanLibraryReloadsSeriesScreens verifies that a scan loads
+// the series screen of the library again, and the series list in the back
+// stack. The series list shows the series that the scan finds.
+func TestE2E_PaletteScanLibraryReloadsSeriesScreens(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+
+	m := newE2EModelAuthenticated(srv, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, cmd := feedCmd(m, m.home.Init())
+	m = feedCmdChain(m, cmd, 5)
+	res, cmd := m.Update(library.NavigateSeriesListMsg{LibraryID: "lib-001", LibraryName: "Audiobooks"})
+	m = res.(Model)
+	m, _ = feedCmd(m, cmd)
+	m, cmd = e2ePressSpecial(m, tea.KeyEnter)
+	m = feedCmdChain(m, cmd, 3)
+	assertScreen(t, m, ScreenSeries)
+	seriesPath := "/api/libraries/lib-001/series/" + testSeries.ID
+	loads := log.count(http.MethodGet, seriesPath)
+
+	res, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	m = e2eTypeString(m, "scan")
+	m, _ = e2ePressSpecial(m, tea.KeyEnter)
+	m, scanCmd := e2ePressSpecial(m, tea.KeyEnter)
+	m, reloadCmd := feedCmdWithin(m, scanCmd, slowCmdWait)
+	if got := log.count(http.MethodPost, "/api/libraries/lib-001/scan"); got != 1 {
+		t.Fatalf("scan requests = %d, want 1", got)
+	}
+	m = feedCmdChain(m, reloadCmd, 5)
+
+	if got := log.count(http.MethodGet, seriesPath); got <= loads {
+		t.Errorf("series loads = %d, want more than %d after the scan", got, loads)
+	}
+	if !strings.Contains(m.seriesList.View(), testScannedSeries.Name) {
+		t.Errorf("the series list does not show %q after the scan", testScannedSeries.Name)
+	}
+}
+
+// TestE2E_PaletteRefreshLoadsLibrariesAgain verifies that the palette entry
+// Refresh clears the persistent cache, and reads the library list and the home
+// shelves from the server again.
+func TestE2E_PaletteRefreshLoadsLibrariesAgain(t *testing.T) {
+	log := &apiLog{}
+	state := &e2eServerState{bookmarks: make(map[string][]abs.Bookmark)}
+	srv := newFullMockABSServer(log, state)
+	defer srv.Close()
+	libraryLoads := func() int {
+		n := 0
+		for _, r := range log.get() {
+			if r.Method == http.MethodGet && r.Path == "/api/libraries" {
+				n++
+			}
+		}
+		return n
+	}
+
+	store, err := db.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	cacheStore := cache.NewStore(store)
+	client := cache.NewClient(abs.NewClient(srv.URL, "jwt-token-e2e"), cacheStore)
+	m := NewWithPlayer(config.Default(), nil, client, cacheStore, &mockPlayer{})
+	m = e2eSetSize(m, 120, 40)
+	m, _ = feedCmdWithin(m, m.home.Init(), slowCmdWait)
+	libraries := libraryLoads()
+	shelves := log.count(http.MethodGet, "/api/libraries/lib-001/personalized")
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = res.(Model)
+	m = e2eTypeString(m, "refresh")
+	m, _ = e2ePressSpecial(m, tea.KeyEnter)
+	m, refreshCmd := e2ePressSpecial(m, tea.KeyEnter)
+	if refreshCmd == nil {
+		t.Fatal("Refresh returns no command")
+	}
+	m, reloadCmd := feedCmdWithin(m, refreshCmd, slowCmdWait)
+	feedCmdWithin(m, reloadCmd, slowCmdWait)
+
+	if got := libraryLoads(); got <= libraries {
+		t.Errorf("library list loads = %d, want more than %d after Refresh", got, libraries)
+	}
+	if got := log.count(http.MethodGet, "/api/libraries/lib-001/personalized"); got <= shelves {
+		t.Errorf("home loads = %d, want more than %d after Refresh", got, shelves)
 	}
 }

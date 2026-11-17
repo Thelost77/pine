@@ -99,7 +99,7 @@ func TestNewStartsWithSkeletonRows(t *testing.T) {
 func TestSeriesLoadedMsgPopulatesListAndSelectsCurrentItem(t *testing.T) {
 	m := newTestModel()
 
-	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-expanse", Contents: sampleSeriesContents()})
 
 	if m.Loading() {
 		t.Fatal("expected loading to be false after series load")
@@ -111,7 +111,7 @@ func TestSeriesLoadedMsgPopulatesListAndSelectsCurrentItem(t *testing.T) {
 
 func TestView_ShowsSeriesNameAndBooks(t *testing.T) {
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-expanse", Contents: sampleSeriesContents()})
 
 	v := m.View()
 	for _, want := range []string{"The Expanse", "Leviathan Wakes", "Caliban's War"} {
@@ -126,7 +126,7 @@ func TestViewShowsFinishedMarkerOnlyForFinishedBooks(t *testing.T) {
 	contents.Items[0].UserMediaProgress = &abs.UserMediaProgress{Progress: 1.0, IsFinished: true}
 
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Contents: contents})
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-expanse", Contents: contents})
 
 	v := m.View()
 	if !strings.Contains(v, "✓ Leviathan Wakes") {
@@ -155,7 +155,7 @@ func TestLoadingSkeletonsDoNotRenderSelectedHighlight(t *testing.T) {
 
 func TestEnterKey_NavigatesToSelectedBook(t *testing.T) {
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Contents: sampleSeriesContents()})
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-expanse", Contents: sampleSeriesContents()})
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -173,7 +173,7 @@ func TestEnterKey_NavigatesToSelectedBook(t *testing.T) {
 
 func TestHLPageAcrossSeries(t *testing.T) {
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Contents: sampleLongSeriesContents(30)})
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-expanse", Contents: sampleLongSeriesContents(30)})
 
 	before := m.list.GlobalIndex()
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
@@ -190,7 +190,7 @@ func TestHLPageAcrossSeries(t *testing.T) {
 
 func TestHLFallsBackToExtremes(t *testing.T) {
 	m := newTestModel()
-	m, _ = m.Update(LoadedMsg{Contents: sampleLongSeriesContents(30)})
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-expanse", Contents: sampleLongSeriesContents(30)})
 
 	for i := 0; i < 5; i++ {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
@@ -204,5 +204,15 @@ func TestHLFallsBackToExtremes(t *testing.T) {
 	}
 	if got := m.list.GlobalIndex(); got != 0 {
 		t.Fatalf("H at start should jump to first row: got %d want 0", got)
+	}
+}
+
+// TestLoadedMsgOfOtherSeriesIsDropped verifies that the screen drops the
+// answer of a load for a different series.
+func TestLoadedMsgOfOtherSeriesIsDropped(t *testing.T) {
+	m := newTestModel()
+	m, _ = m.Update(LoadedMsg{SeriesID: "series-dune", Contents: sampleSeriesContents()})
+	if len(m.series.Items) != 0 || !m.Loading() {
+		t.Errorf("the screen shows %d books of a different series", len(m.series.Items))
 	}
 }
