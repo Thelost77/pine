@@ -203,6 +203,25 @@ func TestStore_GetStaleSkipsAnEntryPastKeepExpired(t *testing.T) {
 	}
 }
 
+// TestStore_ExpireKeepsTheEntryForGetStale verifies that Expire makes Get
+// miss the entry, and that GetStale still reads it.
+func TestStore_ExpireKeepsTheEntryForGetStale(t *testing.T) {
+	s := NewStore(openTestDB(t))
+	if err := s.Put("shelves", "value", time.Hour); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	if err := s.Expire("shelves"); err != nil {
+		t.Fatalf("Expire error: %v", err)
+	}
+	var v string
+	if hit, _ := s.Get("shelves", &v); hit {
+		t.Fatal("Get read an entry after Expire")
+	}
+	if hit, _ := s.GetStale("shelves", &v); !hit || v != "value" {
+		t.Fatalf("GetStale = (%v, %q) after Expire, want (true, %q)", hit, v, "value")
+	}
+}
+
 // TestStore_EvictExpired verifies that an expired entry stays for GetStale,
 // and that EvictExpired deletes it keepExpired after it expired.
 func TestStore_EvictExpired(t *testing.T) {

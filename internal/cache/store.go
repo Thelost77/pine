@@ -93,6 +93,19 @@ func (s *Store) Delete(key string) error {
 	return nil
 }
 
+// Expire makes a fresh entry for key expired now, so that Get misses it and
+// GetStale still reads it.
+func (s *Store) Expire(key string) error {
+	_, err := s.db.DB.Exec(
+		`UPDATE api_cache SET expires_at = datetime('now') WHERE cache_key = ? AND expires_at > datetime('now')`,
+		keyVersion+key,
+	)
+	if err != nil {
+		return fmt.Errorf("expire cache key %q: %w", key, err)
+	}
+	return nil
+}
+
 // EvictExpired removes the entries that expired more than keepExpired ago.
 func (s *Store) EvictExpired() error {
 	_, err := s.db.DB.Exec(

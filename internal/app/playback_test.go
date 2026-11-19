@@ -2482,3 +2482,34 @@ func TestSystemSleepDropsPlaySessionAskedBeforeSleep(t *testing.T) {
 		}
 	})
 }
+
+// TestStopKeepsHomeShelvesForTheNextStart verifies that a stop expires the
+// shelves of the library, so that the next load asks the server, and that
+// the next start can still show them from the cache.
+func TestStopKeepsHomeShelvesForTheNextStart(t *testing.T) {
+	book := testLibraryItem("book-001", "A Book")
+	book.LibraryID = "lib-books"
+	_, client := newFakeABS(t, map[string]abs.PlaySession{
+		"/api/items/book-001/play": {
+			ID:          "sess-new",
+			AudioTracks: []abs.AudioTrack{{ContentURL: "/s/audio.mp3", Duration: 1800}},
+		},
+	}, nil)
+	cacheStore := newTestCacheStore(t)
+	m := NewWithPlayer(config.Default(), nil, client, cacheStore, &mockPlayer{})
+	m, cmd := m.handlePlayCmd(detail.PlayCmd{Item: book})
+	m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+	if !m.isPlaying() {
+		t.Fatal("the playback did not start")
+	}
+	seedCache(t, cacheStore, cache.PersonalizedKey("lib-books"), []abs.PersonalizedResponse{{ID: "continue-listening"}})
+
+	m, cmd = m.stopPlayback()
+	feedCmdWithin(m, cmd, slowCmdWait)
+
+	assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, cache.PersonalizedKey("lib-books"))
+	var shelves []abs.PersonalizedResponse
+	if hit, err := cacheStore.GetStale(cache.PersonalizedKey("lib-books"), &shelves); err != nil || !hit {
+		t.Fatalf("GetStale = (%v, %v) after the stop, want the expired shelves", hit, err)
+	}
+}

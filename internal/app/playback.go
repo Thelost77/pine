@@ -984,14 +984,16 @@ func (m Model) handleSessionSynced(msg SessionSyncedMsg) Model {
 }
 
 // evictProgressCaches drops cached data that embeds user progress for an item:
-// the library item, the home shelves, and the series view.
+// the library item, the home shelves, and the series view. The home shelves
+// only expire, so that the next start can show them from the cache before
+// the server answers.
 func evictProgressCaches(store *cache.Store, itemID, libraryID, seriesID string) {
 	if store == nil || itemID == "" {
 		return
 	}
 	_ = store.Delete(cache.ItemKey(itemID))
 	if libraryID != "" {
-		_ = store.Delete(cache.PersonalizedKey(libraryID))
+		_ = store.Expire(cache.PersonalizedKey(libraryID))
 	}
 	if seriesID != "" {
 		_ = store.Delete(cache.SeriesContentsKey(seriesID))
