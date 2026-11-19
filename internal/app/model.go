@@ -474,6 +474,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case home.PersonalizedMsg:
+		// The home screen keeps its shelves on a failed load, so a 401 must
+		// open the login screen here.
+		if msg.Err != nil {
+			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+				return m2, cmd
+			}
+		}
 		var cmd tea.Cmd
 		m.home, cmd = m.home.Update(msg)
 		cmds := []tea.Cmd{}
