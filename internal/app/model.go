@@ -757,6 +757,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case SystemSleepMsg:
+		return m.handleSystemSleep(msg)
+
 	case SessionSyncedMsg:
 		return m.handleSessionSynced(msg), nil
 

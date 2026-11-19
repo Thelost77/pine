@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -2294,5 +2295,85 @@ func TestRestoredSessionClosedWhilePlaying(t *testing.T) {
 	}
 	if log.count(http.MethodPost, "/api/session/sess-b/close") != 0 {
 		t.Error("pine closed the session of the playback")
+	}
+}
+
+// runCmdToEnd runs cmd and the commands that it returns until each one has
+// ended, as the Bubble Tea program does: the commands of a batch run at the
+// same time, and the commands of a sequence run in order. Bubble Tea does not
+// export the type of a sequence, so the helper finds it as a slice of
+// tea.Cmd.
+func runCmdToEnd(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var wg sync.WaitGroup
+		for _, c := range batch {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runCmdToEnd(c)
+			}()
+		}
+		wg.Wait()
+		return
+	}
+	v := reflect.ValueOf(msg)
+	if v.Kind() == reflect.Slice && v.Type().Elem() == reflect.TypeFor[tea.Cmd]() {
+		for i := range v.Len() {
+			runCmdToEnd(v.Index(i).Interface().(tea.Cmd))
+		}
+	}
+}
+
+// TestSystemSleepStopsPlaybackBeforeRelease verifies that pine stops the
+// playback before the system sleeps, and that it releases logind only after
+// the server got the close of the session.
+func TestSystemSleepStopsPlaybackBeforeRelease(t *testing.T) {
+	book := testLibraryItem("book-001", "A Book")
+	log, client := newFakeABS(t, map[string]abs.PlaySession{
+		"/api/items/book-001/play": {
+			ID:          "sess-sleep",
+			AudioTracks: []abs.AudioTrack{{ContentURL: "/s/audio.mp3", Duration: 1800}},
+		},
+	}, nil)
+	m := NewWithPlayer(config.Default(), nil, client, nil, &mockPlayer{})
+	m, cmd := m.handlePlayCmd(detail.PlayCmd{Item: book})
+	m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+	if !m.isPlaying() {
+		t.Fatal("the playback did not start")
+	}
+	m.player.Position = 120
+
+	released := false
+	closesAtRelease := 0
+	result, cmd := m.Update(SystemSleepMsg{Release: func() {
+		released = true
+		closesAtRelease = log.count(http.MethodPost, "/api/session/sess-sleep/close")
+	}})
+	m = result.(Model)
+	if m.isPlaying() {
+		t.Error("the playback continues after the sleep signal")
+	}
+	runCmdToEnd(cmd)
+	if !released {
+		t.Fatal("pine did not release logind")
+	}
+	if closesAtRelease != 1 {
+		t.Errorf("closes of the session before the release = %d, want 1", closesAtRelease)
+	}
+}
+
+// TestSystemSleepWithoutPlaybackReleases verifies that pine releases logind
+// at once when nothing plays.
+func TestSystemSleepWithoutPlaybackReleases(t *testing.T) {
+	m := newPlaybackTestModel()
+	released := false
+	_, cmd := m.Update(SystemSleepMsg{Release: func() { released = true }})
+	runCmdToEnd(cmd)
+	if !released {
+		t.Error("pine did not release logind")
 	}
 }

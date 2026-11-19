@@ -1067,6 +1067,27 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 	return m, tea.Batch(closeCmd, stopCmd)
 }
 
+// handleSystemSleep stops the playback before the system sleeps, so that it
+// does not play on after the wake, and so that a later sync cannot replace
+// newer progress of another device. The next play takes the position of the
+// server. Release runs after each stop command has ended. A network that is
+// already down makes the requests fail, and the position since the last sync
+// is then lost.
+func (m Model) handleSystemSleep(msg SystemSleepMsg) (Model, tea.Cmd) {
+	release := func() tea.Msg {
+		if msg.Release != nil {
+			msg.Release()
+		}
+		return nil
+	}
+	if !m.isPlaying() {
+		return m, release
+	}
+	logger.Info("system sleep: stopping playback", "session", abs.SessionTag(m.sessionID))
+	m, stopCmd := m.stopPlayback()
+	return m, tea.Sequence(stopCmd, release)
+}
+
 // stopPlaybackCmds stops the playback as stopPlayback does. It returns the
 // close of the session apart from the other cleanup commands, so that a
 // caller can run a play request after the close with closeThen.

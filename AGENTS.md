@@ -33,7 +33,7 @@ go vet ./...                        # type-check
 | Packages | Owner |
 |----------|-------|
 | `internal/logger`, `internal/ui`, `internal/ui/components`, `internal/mpris`, `internal/player` | Shared by pine and spruce |
-| `internal/abs`, `internal/app`, `internal/cache`, `internal/captions`, `internal/config`, `internal/db`, `internal/screens` | pine |
+| `internal/abs`, `internal/app`, `internal/cache`, `internal/captions`, `internal/config`, `internal/db`, `internal/screens`, `internal/systemsleep` | pine |
 | `internal/spruce/app`, `internal/spruce/buildinfo`, `internal/spruce/config`, `internal/spruce/jellyfin`, `internal/spruce/screens` | spruce |
 
 Rules:
@@ -110,6 +110,12 @@ The Architecture Map below describes pine and the shared packages.
 
 The server is written from the MPRIS 2.2 specification. The Go MPRIS server library that exists is GPL-3.0, and a GPL module makes the release binaries GPL. Do not add a module with a copyleft license.
 
+### System sleep (internal/systemsleep/)
+
+`Start(who, prepare)` connects to the system bus and holds a logind sleep delay inhibitor. On `PrepareForSleep(true)`, it calls `prepare(release)` in a goroutine, and it releases the inhibitor when `prepare` calls `release`, or after 10 s, the timeout of an `abs.Client` request. After the wake, it takes a new inhibitor. Without a system bus (macOS, Windows), `Start` logs the cause and returns nil, and a nil `Monitor` is valid. The name keeps the package apart from the sleep timer.
+
+`main.go` sends `SystemSleepMsg` to the program. `handleSystemSleep` in `playback.go` stops the playback with `stopPlayback` and calls `Release` after the stop commands in a `tea.Sequence`. pine does not play on after the wake, and the next play takes the position of the server. NetworkManager can take the network down before the requests end, so the position since the last sync can be lost.
+
 ### API (internal/abs/)
 
 | File | Responsibility |
@@ -174,6 +180,8 @@ Styles from theme config. Format helpers (timestamps, durations). `RunProgram` r
 - `internal/mpris/mpris_test.go` for `RootAdapter` and the server properties, and `bridge_test.go` for the bridge
 - `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.
 - `internal/app/mpris_linux_test.go` starts the MPRIS server of the pine model on a private session bus and checks the Seeked signals. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead.
+- `internal/systemsleep/systemsleep_linux_test.go` runs a fake logind on a private session bus. Each inhibitor is the write end of a pipe, so the test sees the release as EOF on the read end. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead.
+- `runCmdToEnd` in `internal/app/playback_test.go` runs a command as the Bubble Tea program does, also a `tea.Sequence`. `feedCmd` and `executeBatchCmds` run only batches.
 - `internal/screens/metadataedit/model_test.go` for the metadata editor
 - Screen models have individual `*_test.go` files
 - `internal/player/libmpv_test.go`, `mpv_test.go`, and `group_test.go` play audio through the real libmpv with `ao=null`. They skip if libmpv is absent. With `PINE_REQUIRE_LIBMPV=1` they fail instead. `scripts/release.sh` sets that variable.

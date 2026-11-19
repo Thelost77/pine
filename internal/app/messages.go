@@ -89,6 +89,13 @@ type SyncTickMsg struct {
 	Generation uint64
 }
 
+// SystemSleepMsg tells that the system prepares to sleep. The model stops the
+// playback, and it calls Release when the stop has sent its requests, so
+// that logind can continue.
+type SystemSleepMsg struct {
+	Release func()
+}
+
 // SessionSyncedMsg carries the result of a sync of the playback session.
 // NewSessionID is the session that pine opened because the server did not
 // have the session SessionID.

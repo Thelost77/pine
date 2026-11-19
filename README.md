@@ -28,6 +28,7 @@ The remaining sections describe pine. For spruce, see [docs/spruce/README.md](do
 - In-place filtering (`/`) on home, library, and series lists
 - Metadata editor for books and episodes
 - MPRIS media-key support on Linux
+- Stop of the playback before the system sleeps, on Linux with logind, so that pine is silent after the wake
 - Bookmarks — create, edit, navigate to, and delete
 - Listening sessions (`R`) — see where each device stopped, and play from that position
 - Sleep timer
