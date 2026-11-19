@@ -2817,3 +2817,19 @@ func TestMetadataSavedKeepsDetailProgress(t *testing.T) {
 		t.Errorf("detail progress = %+v, want the finished progress", got.UserMediaProgress)
 	}
 }
+
+// TestHomeLoadUnauthorizedOpensLogin verifies that a 401 from the load of the
+// home shelves opens the login screen, also when the home screen shows
+// cached shelves and keeps them on other errors.
+func TestHomeLoadUnauthorizedOpensLogin(t *testing.T) {
+	m := newTestModelAuthenticated()
+	if m.screen != ScreenHome {
+		t.Fatalf("screen = %v, want home", m.screen)
+	}
+	err := fmt.Errorf("fetch personalized: %w", &abs.HTTPStatusError{StatusCode: http.StatusUnauthorized})
+
+	result, _ := m.Update(home.PersonalizedMsg{Err: err})
+	m = result.(Model)
+
+	assertScreen(t, m, ScreenLogin)
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/logger"
 	"github.com/Thelost77/pine/internal/player"
+	"github.com/Thelost77/pine/internal/systemsleep"
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -82,6 +83,12 @@ func main() {
 	model := app.New(cfg, store, cachedClient, cacheStore)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	model.SetProgram(p)
+	// After the program ends, p.Send returns at once, and the monitor
+	// releases logind after its wait time.
+	sleepMonitor := systemsleep.Start("pine", func(release func()) {
+		p.Send(app.SystemSleepMsg{Release: release})
+	})
+	defer sleepMonitor.Close()
 	logger.Info("starting TUI")
 	finalModel, err := ui.RunProgram(p)
 	if err != nil {

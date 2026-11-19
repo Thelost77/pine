@@ -13,8 +13,13 @@ import (
 
 // keyVersion is the prefix of each key in the database. Raise it when the
 // type of a cached value changes: the store then does not read the old rows,
-// and EvictExpired deletes them when they expire.
+// and EvictExpired deletes them keepExpired after they expire.
 const keyVersion = "v2-"
+
+// keepExpired is how long an expired entry stays for GetStale. It is longer
+// than a usual break between two starts of pine, so that a start can show the
+// last answer at once.
+const keepExpired = 30 * 24 * time.Hour
 
 // Store provides generic get/put/delete/evict operations over a SQLite table.
 type Store struct {
@@ -26,15 +31,26 @@ func NewStore(db *db.Store) *Store {
 	return &Store{db: db}
 }
 
-// Get attempts to retrieve and decode the value for key into dest.
-// Returns (true, nil) on hit, (false, nil) on miss, and (false, err) if the
-// database or the decode fails.
+// Get attempts to retrieve and decode the value for key into dest. An expired
+// entry is a miss. Returns (true, nil) on hit, (false, nil) on miss, and
+// (false, err) if the database or the decode fails.
 func (s *Store) Get(key string, dest any) (bool, error) {
-	var data []byte
-	err := s.db.DB.QueryRow(
+	return s.get(dest, key,
 		`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now')`,
-		keyVersion+key,
-	).Scan(&data)
+		keyVersion+key)
+}
+
+// GetStale is Get that also reads an entry that expired less than
+// keepExpired ago.
+func (s *Store) GetStale(key string, dest any) (bool, error) {
+	return s.get(dest, key,
+		`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now', '-' || ? || ' seconds')`,
+		keyVersion+key, int64(keepExpired.Seconds()))
+}
+
+func (s *Store) get(dest any, key, query string, args ...any) (bool, error) {
+	var data []byte
+	err := s.db.DB.QueryRow(query, args...).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // miss
 	}
@@ -77,9 +93,25 @@ func (s *Store) Delete(key string) error {
 	return nil
 }
 
-// EvictExpired removes all expired entries.
+// Expire makes a fresh entry for key expired now, so that Get misses it and
+// GetStale still reads it.
+func (s *Store) Expire(key string) error {
+	_, err := s.db.DB.Exec(
+		`UPDATE api_cache SET expires_at = datetime('now') WHERE cache_key = ? AND expires_at > datetime('now')`,
+		keyVersion+key,
+	)
+	if err != nil {
+		return fmt.Errorf("expire cache key %q: %w", key, err)
+	}
+	return nil
+}
+
+// EvictExpired removes the entries that expired more than keepExpired ago.
 func (s *Store) EvictExpired() error {
-	_, err := s.db.DB.Exec(`DELETE FROM api_cache WHERE expires_at <= datetime('now')`)
+	_, err := s.db.DB.Exec(
+		`DELETE FROM api_cache WHERE expires_at <= datetime('now', '-' || ? || ' seconds')`,
+		int64(keepExpired.Seconds()),
+	)
 	if err != nil {
 		return fmt.Errorf("evict expired cache entries: %w", err)
 	}

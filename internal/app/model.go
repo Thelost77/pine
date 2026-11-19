@@ -87,6 +87,11 @@ type Model struct {
 	// of the last session at the start then does nothing.
 	playRequested bool
 
+	// sleepEpoch counts the system sleeps. A command that asks for a play
+	// session stamps the session with it, and pine closes a session from an
+	// earlier epoch and does not play it (see PlaySessionMsg.SleepEpoch).
+	sleepEpoch uint64
+
 	// The library and the series of the item that plays: for the cache
 	// eviction after the playback, and for the series auto-continue.
 	playbackLibraryID string
@@ -469,6 +474,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case home.PersonalizedMsg:
+		// The home screen keeps its shelves on a failed load, so a 401 must
+		// open the login screen here.
+		if msg.Err != nil {
+			if m2, cmd, ok := m.checkUnauthorized(msg.Err); ok {
+				return m2, cmd
+			}
+		}
 		var cmd tea.Cmd
 		m.home, cmd = m.home.Update(msg)
 		cmds := []tea.Cmd{}
@@ -713,6 +725,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCaptionLoaded(msg)
 
 	case PlaySessionMsg:
+		if msg.SleepEpoch != m.sleepEpoch {
+			return m, m.closeSessionFromBeforeSleep(msg.Session)
+		}
 		logger.Info("play session started", "session", abs.SessionTag(msg.Session.SessionID), "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)
 		return m.handlePlaySessionMsg(msg)
 
@@ -735,6 +750,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startRestorePlaybackCmd(msg)
 
 	case RestorePlaySessionMsg:
+		if msg.PlaySessionMsg.SleepEpoch != m.sleepEpoch {
+			return m, m.closeSessionFromBeforeSleep(msg.PlaySessionMsg.Session)
+		}
 		if m.isPlaying() || m.playRequested {
 			session := msg.PlaySessionMsg.Session
 			logger.Info("closing restored session: the user started a playback", "session", abs.SessionTag(session.SessionID), "itemID", session.ItemID)
@@ -756,6 +774,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastEvict = time.Now()
 		}
 		return m, cmd
+
+	case SystemSleepMsg:
+		return m.handleSystemSleep(msg)
 
 	case SessionSyncedMsg:
 		return m.handleSessionSynced(msg), nil

@@ -33,7 +33,7 @@ go vet ./...                        # type-check
 | Packages | Owner |
 |----------|-------|
 | `internal/logger`, `internal/ui`, `internal/ui/components`, `internal/mpris`, `internal/player` | Shared by pine and spruce |
-| `internal/abs`, `internal/app`, `internal/cache`, `internal/captions`, `internal/config`, `internal/db`, `internal/screens` | pine |
+| `internal/abs`, `internal/app`, `internal/cache`, `internal/captions`, `internal/config`, `internal/db`, `internal/screens`, `internal/systemsleep` | pine |
 | `internal/spruce/app`, `internal/spruce/buildinfo`, `internal/spruce/config`, `internal/spruce/jellyfin`, `internal/spruce/screens` | spruce |
 
 Rules:
@@ -82,7 +82,7 @@ The Architecture Map below describes pine and the shared packages.
 | Screen | Key files | Notes |
 |--------|-----------|-------|
 | `login` | model.go, view.go | 3-field form (server, username, password), tab navigation |
-| `home` | model.go, view.go | Personalized shelves: continue-listening + recently-added. Library switching with tab. Item/recent caches per library. Skeleton loading with 500ms reveal delay. |
+| `home` | model.go, view.go | Personalized shelves: continue-listening + recently-added. Library switching with tab. Item/recent caches per library. Skeleton loading with 500ms reveal delay. At start and on a tab switch, `fetchPersonalizedCmd(false, true)` reads only the local cache, expired entries included, and the answer has `cached`. The answer of the server for the same load replaces it. A cached answer applies until the server answers the load with no error (`serverAnswered`), so it also applies after a fast error of the server. A load that reads the library list, at the start or with `RefreshCmd`, has `refreshed`: its answer replaces the list and selects the library by its ID, so the list of the server replaces an old cached list. A failed load keeps the shown shelves of the selected library and goes to the log. A 401 opens the login screen: the root model checks `PersonalizedMsg.Err` with `checkUnauthorized` before the home screen gets the message. |
 | `library` | model.go, view.go | Paginated item list (50/page), infinite scroll prefetch at 80%, per-library page cache shared with search cache. Library switching with tab. |
 | `detail` | model.go, view.go | Viewport-scrollable content: description, series row, episodes list (podcasts), bookmarks list, inline bookmark editing, item deletion. Tab cycles focus between sections. |
 | `metadataedit` | model.go, view.go | Inline metadata editor for books and podcast episodes. |
@@ -95,9 +95,9 @@ The Architecture Map below describes pine and the shared packages.
 
 | File | Responsibility |
 |------|---------------|
-| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly. On a miss, it fetches from the API in the command of the caller and stores the result. Each cached method calls `cached(c, key, ttl, fetch)`, which returns the data of the server. A cache read or write error goes to the log and does not fail the request. A fetch that started before an invalidation does not store its value (`generation`, under `mu`). `Invalidate` calls `OnInvalidate` also when the store is nil. |
+| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly. On a miss, it fetches from the API in the command of the caller and stores the result. Each cached method calls `cached(ctx, c, key, ttl, fetch)`, which returns the data of the server. With a `CachedOnly(ctx)` context, `cached` answers from the cache, also from an expired entry, sends no request, and returns `ErrNotCached` if the cache has no entry. A cache read or write error goes to the log and does not fail the request. A fetch that started before an invalidation does not store its value (`generation`, under `mu`). `Invalidate` calls `OnInvalidate` also when the store is nil. |
 | `keys.go` | The names of all cache keys. Code outside the package uses `ItemKey`, `PersonalizedKey`, `SeriesContentsKey`, `BookmarksKey`, and `SearchSnapshotKey`, not key strings. A key has no account, so a login (`LoginSuccessMsg`) clears the persistent cache with `ClearAll`. |
-| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v2-`). Raise it when the type of a cached value changes. |
+| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v2-`). Raise it when the type of a cached value changes. `Get` misses an expired entry. `GetStale` reads an entry until `keepExpired` (30 days) after it expires, and `EvictExpired` deletes it after that time. `Expire` makes a fresh entry expired now. A stop expires the home shelves of the library with it (`evictProgressCaches`), so that the next start can show them from the cache. |
 
 ### MPRIS (internal/mpris/, shared)
 
@@ -109,6 +109,12 @@ The Architecture Map below describes pine and the shared packages.
 | `server.go` | MPRIS server on `godbus/dbus`: the root and player interfaces, the D-Bus properties interface, introspection, and the change signals. `NewServer(name, root, accessor, actions)` reads the player properties from `ModelAccessor` and calls `PlayerActions`. It rejects a Rate or a Volume value that is not finite. `CanPlay` and `CanPause` are `HasActiveItem`, and `StatusChanged` and `PlaybackChanged` send them. `StatusChanged` and `PlaybackChanged` also send `CanGoNext` and `CanGoPrevious`. |
 
 The server is written from the MPRIS 2.2 specification. The Go MPRIS server library that exists is GPL-3.0, and a GPL module makes the release binaries GPL. Do not add a module with a copyleft license.
+
+### System sleep (internal/systemsleep/)
+
+`Start(who, prepare)` connects to the system bus and holds a logind sleep delay inhibitor. On `PrepareForSleep(true)`, it calls `prepare(release)` in a goroutine, and it releases the inhibitor when `prepare` calls `release`, or after 10 s, the timeout of an `abs.Client` request. After the wake, it takes a new inhibitor. It waits at most 3 s (`inhibitTimeout`) for an answer to `Inhibit`, and without an answer it runs with no inhibitor. Without a system bus (macOS, Windows), `Start` logs the cause and returns nil, and a nil `Monitor` is valid. The name keeps the package apart from the sleep timer.
+
+`main.go` sends `SystemSleepMsg` to the program. `handleSystemSleep` in `playback.go` stops the playback with `stopPlayback` and calls `Release` after the stop commands in a `tea.Sequence`. pine does not play on after the wake, and the next play takes the position of the server. A start or a change of the track can be in progress with no session yet: `handleSystemSleep` raises `sleepEpoch`, each command that asks for a play session stamps the `PlaySessionMsg` with the epoch of its creation, and `Update` closes a session of an earlier epoch with `closeRestoredSessionCmd` and does not play it. A change of the track (`restartPlaybackAt`) keeps `itemID` with no session, so `handleSystemSleep` also stops then, and quits mpv. NetworkManager can take the network down before the requests end, so the position since the last sync can be lost.
 
 ### API (internal/abs/)
 
@@ -174,6 +180,8 @@ Styles from theme config. Format helpers (timestamps, durations). `RunProgram` r
 - `internal/mpris/mpris_test.go` for `RootAdapter` and the server properties, and `bridge_test.go` for the bridge
 - `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.
 - `internal/app/mpris_linux_test.go` starts the MPRIS server of the pine model on a private session bus and checks the Seeked signals. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead.
+- `internal/systemsleep/systemsleep_linux_test.go` runs a fake logind on a private session bus. Each inhibitor is the write end of a pipe, so the test sees the release as EOF on the read end. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead.
+- `runCmdToEnd` in `internal/app/playback_test.go` runs a command as the Bubble Tea program does, also a `tea.Sequence`. `feedCmd` and `executeBatchCmds` run only batches.
 - `internal/screens/metadataedit/model_test.go` for the metadata editor
 - Screen models have individual `*_test.go` files
 - `internal/player/libmpv_test.go`, `mpv_test.go`, and `group_test.go` play audio through the real libmpv with `ao=null`. They skip if libmpv is absent. With `PINE_REQUIRE_LIBMPV=1` they fail instead. `scripts/release.sh` sets that variable.

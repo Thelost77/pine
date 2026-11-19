@@ -155,18 +155,93 @@ func TestStore_Delete(t *testing.T) {
 	}
 }
 
+func TestStore_GetStaleReadsExpiredRow(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+
+	if err := s.Put("old", "value", 1*time.Millisecond); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	var v string
+	if hit, _ := s.Get("old", &v); hit {
+		t.Fatal("Get read an expired entry")
+	}
+	hit, err := s.GetStale("old", &v)
+	if err != nil {
+		t.Fatalf("GetStale error: %v", err)
+	}
+	if !hit || v != "value" {
+		t.Fatalf("GetStale = (%v, %q), want (true, %q)", hit, v, "value")
+	}
+	if hit, _ := s.GetStale("missing", &v); hit {
+		t.Fatal("GetStale found an entry that does not exist")
+	}
+}
+
+// TestStore_GetStaleSkipsAnEntryPastKeepExpired verifies that GetStale does
+// not read an entry that expired more than keepExpired ago, also before
+// EvictExpired deletes it.
+func TestStore_GetStaleSkipsAnEntryPastKeepExpired(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+
+	if err := s.Put("old", "value", time.Minute); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	if _, err := dbStore.DB.Exec(
+		`UPDATE api_cache SET expires_at = datetime('now', '-31 days') WHERE cache_key = ?`,
+		keyVersion+"old",
+	); err != nil {
+		t.Fatalf("expire old: %v", err)
+	}
+
+	var v string
+	if hit, _ := s.GetStale("old", &v); hit {
+		t.Fatal("GetStale read an entry that expired more than keepExpired ago")
+	}
+}
+
+// TestStore_ExpireKeepsTheEntryForGetStale verifies that Expire makes Get
+// miss the entry, and that GetStale still reads it.
+func TestStore_ExpireKeepsTheEntryForGetStale(t *testing.T) {
+	s := NewStore(openTestDB(t))
+	if err := s.Put("shelves", "value", time.Hour); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	if err := s.Expire("shelves"); err != nil {
+		t.Fatalf("Expire error: %v", err)
+	}
+	var v string
+	if hit, _ := s.Get("shelves", &v); hit {
+		t.Fatal("Get read an entry after Expire")
+	}
+	if hit, _ := s.GetStale("shelves", &v); !hit || v != "value" {
+		t.Fatalf("GetStale = (%v, %q) after Expire, want (true, %q)", hit, v, "value")
+	}
+}
+
+// TestStore_EvictExpired verifies that an expired entry stays for GetStale,
+// and that EvictExpired deletes it keepExpired after it expired.
 func TestStore_EvictExpired(t *testing.T) {
 	dbStore := openTestDB(t)
 	s := NewStore(dbStore)
 
-	if err := s.Put("exp1", "a", 1*time.Millisecond); err != nil {
+	if err := s.Put("recent", "a", 1*time.Millisecond); err != nil {
 		t.Fatalf("Put error: %v", err)
 	}
-	if err := s.Put("exp2", "b", 1*time.Millisecond); err != nil {
+	if err := s.Put("old", "b", 1*time.Millisecond); err != nil {
 		t.Fatalf("Put error: %v", err)
 	}
 	if err := s.Put("live", "c", 5*time.Minute); err != nil {
 		t.Fatalf("Put error: %v", err)
+	}
+	if _, err := dbStore.DB.Exec(
+		`UPDATE api_cache SET expires_at = datetime('now', '-31 days') WHERE cache_key = ?`,
+		keyVersion+"old",
+	); err != nil {
+		t.Fatalf("expire old: %v", err)
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -176,11 +251,11 @@ func TestStore_EvictExpired(t *testing.T) {
 	}
 
 	var v string
-	if hit, _ := s.Get("exp1", &v); hit {
-		t.Fatal("expected exp1 to be evicted")
+	if hit, _ := s.GetStale("recent", &v); !hit {
+		t.Fatal("EvictExpired deleted an entry that expired less than keepExpired ago")
 	}
-	if hit, _ := s.Get("exp2", &v); hit {
-		t.Fatal("expected exp2 to be evicted")
+	if hit, _ := s.GetStale("old", &v); hit {
+		t.Fatal("EvictExpired kept an entry that expired more than keepExpired ago")
 	}
 	hit, err := s.Get("live", &v)
 	if err != nil {

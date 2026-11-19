@@ -71,7 +71,7 @@ go vet ./...
 go build ./...
 
 # Each binary must link only the shared packages and its own app packages.
-if go list -deps ./cmd/spruce | grep -E 'Thelost77/pine/internal/(abs|app|cache|captions|config|db|screens)(/|$)'; then
+if go list -deps ./cmd/spruce | grep -E 'Thelost77/pine/internal/(abs|app|cache|captions|config|db|screens|systemsleep)(/|$)'; then
 	echo "spruce links pine-only packages" >&2
 	exit 1
 fi

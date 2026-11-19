@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -2294,5 +2295,221 @@ func TestRestoredSessionClosedWhilePlaying(t *testing.T) {
 	}
 	if log.count(http.MethodPost, "/api/session/sess-b/close") != 0 {
 		t.Error("pine closed the session of the playback")
+	}
+}
+
+// runCmdToEnd runs cmd and the commands that it returns until each one has
+// ended, as the Bubble Tea program does: the commands of a batch run at the
+// same time, and the commands of a sequence run in order. Bubble Tea does not
+// export the type of a sequence, so the helper finds it as a slice of
+// tea.Cmd.
+func runCmdToEnd(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var wg sync.WaitGroup
+		for _, c := range batch {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runCmdToEnd(c)
+			}()
+		}
+		wg.Wait()
+		return
+	}
+	v := reflect.ValueOf(msg)
+	if v.Kind() == reflect.Slice && v.Type().Elem() == reflect.TypeFor[tea.Cmd]() {
+		for i := range v.Len() {
+			runCmdToEnd(v.Index(i).Interface().(tea.Cmd))
+		}
+	}
+}
+
+// TestSystemSleepStopsPlaybackBeforeRelease verifies that pine stops the
+// playback before the system sleeps, and that it releases logind only after
+// the server got the close of the session.
+func TestSystemSleepStopsPlaybackBeforeRelease(t *testing.T) {
+	book := testLibraryItem("book-001", "A Book")
+	log, client := newFakeABS(t, map[string]abs.PlaySession{
+		"/api/items/book-001/play": {
+			ID:          "sess-sleep",
+			AudioTracks: []abs.AudioTrack{{ContentURL: "/s/audio.mp3", Duration: 1800}},
+		},
+	}, nil)
+	m := NewWithPlayer(config.Default(), nil, client, nil, &mockPlayer{})
+	m, cmd := m.handlePlayCmd(detail.PlayCmd{Item: book})
+	m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+	if !m.isPlaying() {
+		t.Fatal("the playback did not start")
+	}
+	m.player.Position = 120
+
+	released := false
+	closesAtRelease := 0
+	result, cmd := m.Update(SystemSleepMsg{Release: func() {
+		released = true
+		closesAtRelease = log.count(http.MethodPost, "/api/session/sess-sleep/close")
+	}})
+	m = result.(Model)
+	if m.isPlaying() {
+		t.Error("the playback continues after the sleep signal")
+	}
+	runCmdToEnd(cmd)
+	if !released {
+		t.Fatal("pine did not release logind")
+	}
+	if closesAtRelease != 1 {
+		t.Errorf("closes of the session before the release = %d, want 1", closesAtRelease)
+	}
+}
+
+// TestSystemSleepWithoutPlaybackReleases verifies that pine releases logind
+// at once when nothing plays.
+func TestSystemSleepWithoutPlaybackReleases(t *testing.T) {
+	m := newPlaybackTestModel()
+	released := false
+	_, cmd := m.Update(SystemSleepMsg{Release: func() { released = true }})
+	runCmdToEnd(cmd)
+	if !released {
+		t.Error("pine did not release logind")
+	}
+}
+
+// TestSystemSleepDropsPlaySessionAskedBeforeSleep verifies that a play
+// session that a command asked for before the system slept does not play:
+// pine closes it. Before the sleep, a start or a change of the track has no
+// session yet.
+func TestSystemSleepDropsPlaySessionAskedBeforeSleep(t *testing.T) {
+	book := testLibraryItem("book-001", "A Book")
+	sessions := map[string]abs.PlaySession{
+		"/api/items/book-001/play": {
+			ID:          "sess-sleep",
+			AudioTracks: []abs.AudioTrack{{ContentURL: "/s/audio.mp3", Duration: 1800}},
+		},
+	}
+	sleep := func(t *testing.T, m Model) Model {
+		t.Helper()
+		released := false
+		result, cmd := m.Update(SystemSleepMsg{Release: func() { released = true }})
+		runCmdToEnd(cmd)
+		if !released {
+			t.Fatal("pine did not release logind")
+		}
+		return result.(Model)
+	}
+	assertNotPlayed := func(t *testing.T, m Model, mp *mockPlayer, msg tea.Msg) {
+		t.Helper()
+		if _, ok := msg.(PlaySessionMsg); !ok {
+			t.Fatalf("the command gave %T, want PlaySessionMsg", msg)
+		}
+		result, cmd := m.Update(msg)
+		m = result.(Model)
+		runCmdToEnd(cmd)
+		if m.isPlaying() {
+			t.Error("the session from before the sleep plays")
+		}
+		mp.mu.Lock()
+		launched := mp.launched
+		mp.mu.Unlock()
+		if launched {
+			t.Error("mpv started for the session from before the sleep")
+		}
+	}
+
+	t.Run("start", func(t *testing.T) {
+		log, client := newFakeABS(t, sessions, nil)
+		mp := &mockPlayer{}
+		m := NewWithPlayer(config.Default(), nil, client, nil, mp)
+		m, startCmd := m.handlePlayCmd(detail.PlayCmd{Item: book})
+
+		m = sleep(t, m)
+		assertNotPlayed(t, m, mp, startCmd())
+		if n := log.count(http.MethodPost, "/api/session/sess-sleep/close"); n != 1 {
+			t.Errorf("closes of the new session = %d, want 1", n)
+		}
+	})
+
+	t.Run("change of the track", func(t *testing.T) {
+		log, client := newFakeABS(t, sessions, nil)
+		mp := &mockPlayer{}
+		m := NewWithPlayer(config.Default(), nil, client, nil, mp)
+		m, cmd := m.handlePlayCmd(detail.PlayCmd{Item: book})
+		m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+		if !m.isPlaying() {
+			t.Fatal("the playback did not start")
+		}
+		mp.mu.Lock()
+		mp.launched = false
+		mp.mu.Unlock()
+		m, restartCmd := m.restartPlaybackAt(900)
+
+		m = sleep(t, m)
+		mp.mu.Lock()
+		quit := mp.quit
+		mp.mu.Unlock()
+		if !quit {
+			t.Error("mpv was not quit before the sleep")
+		}
+		assertNotPlayed(t, m, mp, restartCmd())
+		// The restart closes the old session, and pine closes the new one.
+		if n := log.count(http.MethodPost, "/api/session/sess-sleep/close"); n != 2 {
+			t.Errorf("closes of the sessions = %d, want 2", n)
+		}
+	})
+
+	t.Run("restore", func(t *testing.T) {
+		log, client := newFakeABS(t, sessions, nil)
+		mp := &mockPlayer{}
+		m := NewWithPlayer(config.Default(), nil, client, nil, mp)
+		restoreCmd := m.startRestoredBookPlaybackCmd(book)
+
+		m = sleep(t, m)
+		msg, ok := restoreCmd().(RestorePlaySessionMsg)
+		if !ok {
+			t.Fatal("the restore gave no RestorePlaySessionMsg")
+		}
+		result, cmd := m.Update(msg)
+		m = result.(Model)
+		runCmdToEnd(cmd)
+		if m.isPlaying() || m.restorePaused {
+			t.Errorf("playing = %v, restorePaused = %v after a restore from before the sleep, want false", m.isPlaying(), m.restorePaused)
+		}
+		if n := log.count(http.MethodPost, "/api/session/sess-sleep/close"); n != 1 {
+			t.Errorf("closes of the restored session = %d, want 1", n)
+		}
+	})
+}
+
+// TestStopKeepsHomeShelvesForTheNextStart verifies that a stop expires the
+// shelves of the library, so that the next load asks the server, and that
+// the next start can still show them from the cache.
+func TestStopKeepsHomeShelvesForTheNextStart(t *testing.T) {
+	book := testLibraryItem("book-001", "A Book")
+	book.LibraryID = "lib-books"
+	_, client := newFakeABS(t, map[string]abs.PlaySession{
+		"/api/items/book-001/play": {
+			ID:          "sess-new",
+			AudioTracks: []abs.AudioTrack{{ContentURL: "/s/audio.mp3", Duration: 1800}},
+		},
+	}, nil)
+	cacheStore := newTestCacheStore(t)
+	m := NewWithPlayer(config.Default(), nil, client, cacheStore, &mockPlayer{})
+	m, cmd := m.handlePlayCmd(detail.PlayCmd{Item: book})
+	m, _ = feedCmdWithin(m, cmd, slowCmdWait)
+	if !m.isPlaying() {
+		t.Fatal("the playback did not start")
+	}
+	seedCache(t, cacheStore, cache.PersonalizedKey("lib-books"), []abs.PersonalizedResponse{{ID: "continue-listening"}})
+
+	m, cmd = m.stopPlayback()
+	feedCmdWithin(m, cmd, slowCmdWait)
+
+	assertEvicted[[]abs.PersonalizedResponse](t, cacheStore, cache.PersonalizedKey("lib-books"))
+	var shelves []abs.PersonalizedResponse
+	if hit, err := cacheStore.GetStale(cache.PersonalizedKey("lib-books"), &shelves); err != nil || !hit {
+		t.Fatalf("GetStale = (%v, %v) after the stop, want the expired shelves", hit, err)
 	}
 }
