@@ -180,6 +180,29 @@ func TestStore_GetStaleReadsExpiredRow(t *testing.T) {
 	}
 }
 
+// TestStore_GetStaleSkipsAnEntryPastKeepExpired verifies that GetStale does
+// not read an entry that expired more than keepExpired ago, also before
+// EvictExpired deletes it.
+func TestStore_GetStaleSkipsAnEntryPastKeepExpired(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+
+	if err := s.Put("old", "value", time.Minute); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	if _, err := dbStore.DB.Exec(
+		`UPDATE api_cache SET expires_at = datetime('now', '-31 days') WHERE cache_key = ?`,
+		keyVersion+"old",
+	); err != nil {
+		t.Fatalf("expire old: %v", err)
+	}
+
+	var v string
+	if hit, _ := s.GetStale("old", &v); hit {
+		t.Fatal("GetStale read an entry that expired more than keepExpired ago")
+	}
+}
+
 // TestStore_EvictExpired verifies that an expired entry stays for GetStale,
 // and that EvictExpired deletes it keepExpired after it expired.
 func TestStore_EvictExpired(t *testing.T) {

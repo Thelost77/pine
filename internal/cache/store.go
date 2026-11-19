@@ -35,17 +35,22 @@ func NewStore(db *db.Store) *Store {
 // entry is a miss. Returns (true, nil) on hit, (false, nil) on miss, and
 // (false, err) if the database or the decode fails.
 func (s *Store) Get(key string, dest any) (bool, error) {
-	return s.get(`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now')`, key, dest)
+	return s.get(dest, key,
+		`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now')`,
+		keyVersion+key)
 }
 
-// GetStale is Get that also reads an expired entry.
+// GetStale is Get that also reads an entry that expired less than
+// keepExpired ago.
 func (s *Store) GetStale(key string, dest any) (bool, error) {
-	return s.get(`SELECT data FROM api_cache WHERE cache_key = ?`, key, dest)
+	return s.get(dest, key,
+		`SELECT data FROM api_cache WHERE cache_key = ? AND expires_at > datetime('now', '-' || ? || ' seconds')`,
+		keyVersion+key, int64(keepExpired.Seconds()))
 }
 
-func (s *Store) get(query, key string, dest any) (bool, error) {
+func (s *Store) get(dest any, key, query string, args ...any) (bool, error) {
 	var data []byte
-	err := s.db.DB.QueryRow(query, keyVersion+key).Scan(&data)
+	err := s.db.DB.QueryRow(query, args...).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // miss
 	}
