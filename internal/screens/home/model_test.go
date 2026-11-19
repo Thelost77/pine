@@ -1062,3 +1062,24 @@ func TestFailedLoadKeepsCachedShelves(t *testing.T) {
 		t.Errorf("the view does not keep the cached shelves:\n%s", v)
 	}
 }
+
+// TestServerErrorBeforeCachedAnswerShowsCachedShelves verifies that a cached
+// answer still applies after a fast error of the server for the same load,
+// for example a start with no network.
+func TestServerErrorBeforeCachedAnswerShowsCachedShelves(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	gen := m.loadingGen
+	libs := []abs.Library{{ID: "lib-1", Name: "Books", MediaType: "book"}}
+
+	m, _ = m.Update(PersonalizedMsg{Err: fmt.Errorf("fetch libraries: network error"), generation: gen})
+	m, _ = m.Update(PersonalizedMsg{Libraries: libs, LibraryID: "lib-1", Items: sampleItems(), generation: gen, cached: true})
+
+	if m.Error() != nil {
+		t.Errorf("Error() = %v, want nil", m.Error())
+	}
+	v := m.View()
+	if strings.Contains(v, "Error:") || !strings.Contains(v, "The Great Adventure") {
+		t.Errorf("the view does not show the cached shelves:\n%s", v)
+	}
+}

@@ -171,6 +171,10 @@ type Model struct {
 	client          *cache.Client
 	libraries       []abs.Library
 	selectedLibrary int
+
+	// serverAnswered is true after the server answered the current load with
+	// no error. A cached answer of the load then does not apply.
+	serverAnswered bool
 }
 
 // New creates a new home screen model.
@@ -220,7 +224,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			logger.Debug("STALE: discarding personalized msg of an earlier load", "msgLib", msg.LibraryID)
 			return m, nil
 		}
-		if msg.cached && !m.loading {
+		if msg.cached && m.serverAnswered {
 			logger.Debug("personalized: the server answered before the cache", "msgLib", msg.LibraryID)
 			return m, nil
 		}
@@ -249,6 +253,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		if !msg.cached {
+			m.serverAnswered = true
+		}
 		if msg.refreshed {
 			m.libraries = msg.Libraries
 			m.selectedLibrary = max(0, slices.IndexFunc(m.libraries, func(lib abs.Library) bool { return lib.ID == msg.LibraryID }))
@@ -325,6 +332,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.loading = true
 				m.loadingVisible = false
 				m.loadingGen++
+				m.serverAnswered = false
 				m.err = nil
 				m.updateListTitle()
 				// Keep current content visible briefly; show skeletons only if
@@ -609,6 +617,7 @@ func (m *Model) reloadCmd(refreshLibraries bool) tea.Cmd {
 	m.loading = true
 	m.loadingVisible = false
 	m.loadingGen++
+	m.serverAnswered = false
 	m.refreshListRows()
 	return tea.Batch(m.fetchPersonalizedCmd(refreshLibraries, false), m.loadingRevealCmd())
 }
