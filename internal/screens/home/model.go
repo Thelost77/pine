@@ -35,6 +35,10 @@ type PersonalizedMsg struct {
 	// refreshed is true when the load read the library list again. Libraries
 	// is then the new list, and LibraryID is the library to select in it.
 	refreshed bool
+	// cached is true when the answer came from the local cache, expired
+	// entries included. The answer of the server for the same load replaces
+	// it, and it never replaces the answer of the server.
+	cached bool
 }
 
 type rowKind int
@@ -205,7 +209,7 @@ func (m *Model) SetSize(width, height int) {
 
 // Init returns the initial command that fetches personalized data.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.fetchPersonalizedCmd(false), m.loadingRevealCmd())
+	return tea.Batch(m.fetchPersonalizedCmd(false, true), m.fetchPersonalizedCmd(false, false), m.loadingRevealCmd())
 }
 
 // Update handles messages for the home screen.
@@ -214,6 +218,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case PersonalizedMsg:
 		if msg.generation != m.loadingGen {
 			logger.Debug("STALE: discarding personalized msg of an earlier load", "msgLib", msg.LibraryID)
+			return m, nil
+		}
+		if msg.cached && !m.loading {
+			logger.Debug("personalized: the server answered before the cache", "msgLib", msg.LibraryID)
 			return m, nil
 		}
 		currentLib := m.SelectedLibraryID()
@@ -225,6 +233,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.loadingVisible = false
 		m.updateListTitle()
+		if msg.cached {
+			logger.Debug("personalized: showing the cached shelves", "msgLib", msg.LibraryID)
+		}
+		// The shelves of the selected library stay when a later load fails,
+		// for example a start with no network after the cached answer.
+		if msg.Err != nil && m.contentLibrary != "" && m.contentLibrary == m.SelectedLibraryID() {
+			logger.Warn("personalized load failed, keeping the shelves", "library", m.contentLibrary, "err", msg.Err)
+			return m, nil
+		}
 		if msg.Err != nil {
 			logger.Debug("personalized error", "err", msg.Err)
 			m.err = msg.Err
@@ -313,7 +330,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				// Keep current content visible briefly; show skeletons only if
 				// the fetch outlives the reveal delay.
 				m.refreshListRows()
-				return m, tea.Batch(m.fetchPersonalizedCmd(false), m.loadingRevealCmd())
+				return m, tea.Batch(m.fetchPersonalizedCmd(false, true), m.fetchPersonalizedCmd(false, false), m.loadingRevealCmd())
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.PageDown):
@@ -342,9 +359,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // fetchPersonalizedCmd creates a command that fetches personalized shelves.
 // With refreshLibraries, the command also reads the library list again, and
 // it loads the shelves of the selected library by its ID.
-func (m *Model) fetchPersonalizedCmd(refreshLibraries bool) tea.Cmd {
-	msg := PersonalizedMsg{generation: m.loadingGen, refreshed: refreshLibraries}
+//
+// With cachedOnly, the command reads only the local cache, expired entries
+// included, and sends no request. It sends no message if the cache does not
+// have the full answer.
+func (m *Model) fetchPersonalizedCmd(refreshLibraries, cachedOnly bool) tea.Cmd {
+	msg := PersonalizedMsg{generation: m.loadingGen, refreshed: refreshLibraries, cached: cachedOnly}
 	if m.client == nil {
+		if cachedOnly {
+			return nil
+		}
 		msg.Err = fmt.Errorf("not authenticated")
 		return func() tea.Msg { return msg }
 	}
@@ -355,20 +379,30 @@ func (m *Model) fetchPersonalizedCmd(refreshLibraries bool) tea.Cmd {
 		existingLibs = nil
 	}
 	currentLibID := m.SelectedLibraryID()
+	ctx := context.Background()
+	if cachedOnly {
+		ctx = cache.CachedOnly(ctx)
+	}
 	return func() tea.Msg {
 		libs := existingLibs
 		// Fetch libraries if we don't have them yet
 		if len(libs) == 0 {
 			var err error
-			libs, err = client.GetLibraries(context.Background())
+			libs, err = client.GetLibraries(ctx)
 			if err != nil {
+				if cachedOnly {
+					return nil
+				}
 				msg.Err = fmt.Errorf("fetch libraries: %w", err)
 				return msg
 			}
-			libs = client.FilterAudioLibraries(context.Background(), libs)
+			libs = client.FilterAudioLibraries(ctx, libs)
 		}
 		msg.Libraries = libs
 		if len(libs) == 0 {
+			if cachedOnly {
+				return nil
+			}
 			msg.LibraryID = currentLibID
 			return msg
 		}
@@ -382,8 +416,11 @@ func (m *Model) fetchPersonalizedCmd(refreshLibraries bool) tea.Cmd {
 		}
 		msg.LibraryID = libs[idx].ID
 
-		sections, err := client.GetPersonalized(context.Background(), libs[idx].ID)
+		sections, err := client.GetPersonalized(ctx, libs[idx].ID)
 		if err != nil {
+			if cachedOnly {
+				return nil
+			}
 			msg.Err = fmt.Errorf("fetch personalized: %w", err)
 			return msg
 		}
@@ -398,7 +435,7 @@ func (m *Model) fetchPersonalizedCmd(refreshLibraries bool) tea.Cmd {
 		}
 
 		if libs[idx].MediaType == "podcast" {
-			if eps, err := client.GetRecentEpisodes(context.Background(), libs[idx].ID, recentlyAddedLimit); err == nil {
+			if eps, err := client.GetRecentEpisodes(ctx, libs[idx].ID, recentlyAddedLimit); err == nil {
 				msg.RecentlyAdded = eps
 			}
 		}
@@ -573,7 +610,7 @@ func (m *Model) reloadCmd(refreshLibraries bool) tea.Cmd {
 	m.loadingVisible = false
 	m.loadingGen++
 	m.refreshListRows()
-	return tea.Batch(m.fetchPersonalizedCmd(refreshLibraries), m.loadingRevealCmd())
+	return tea.Batch(m.fetchPersonalizedCmd(refreshLibraries, false), m.loadingRevealCmd())
 }
 
 // Libraries returns the available libraries.

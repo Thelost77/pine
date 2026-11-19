@@ -82,7 +82,7 @@ The Architecture Map below describes pine and the shared packages.
 | Screen | Key files | Notes |
 |--------|-----------|-------|
 | `login` | model.go, view.go | 3-field form (server, username, password), tab navigation |
-| `home` | model.go, view.go | Personalized shelves: continue-listening + recently-added. Library switching with tab. Item/recent caches per library. Skeleton loading with 500ms reveal delay. |
+| `home` | model.go, view.go | Personalized shelves: continue-listening + recently-added. Library switching with tab. Item/recent caches per library. Skeleton loading with 500ms reveal delay. At start and on a tab switch, `fetchPersonalizedCmd(false, true)` reads only the local cache, expired entries included, and the answer has `cached`. The answer of the server for the same load replaces it, and a cached answer that comes after the answer of the server is dropped. A failed load keeps the shown shelves of the selected library and goes to the log. |
 | `library` | model.go, view.go | Paginated item list (50/page), infinite scroll prefetch at 80%, per-library page cache shared with search cache. Library switching with tab. |
 | `detail` | model.go, view.go | Viewport-scrollable content: description, series row, episodes list (podcasts), bookmarks list, inline bookmark editing, item deletion. Tab cycles focus between sections. |
 | `metadataedit` | model.go, view.go | Inline metadata editor for books and podcast episodes. |
@@ -95,9 +95,9 @@ The Architecture Map below describes pine and the shared packages.
 
 | File | Responsibility |
 |------|---------------|
-| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly. On a miss, it fetches from the API in the command of the caller and stores the result. Each cached method calls `cached(c, key, ttl, fetch)`, which returns the data of the server. A cache read or write error goes to the log and does not fail the request. A fetch that started before an invalidation does not store its value (`generation`, under `mu`). `Invalidate` calls `OnInvalidate` also when the store is nil. |
+| `client.go` | Cached wrapper around `abs.Client`: serves cache hits instantly. On a miss, it fetches from the API in the command of the caller and stores the result. Each cached method calls `cached(ctx, c, key, ttl, fetch)`, which returns the data of the server. With a `CachedOnly(ctx)` context, `cached` answers from the cache, also from an expired entry, sends no request, and returns `ErrNotCached` if the cache has no entry. A cache read or write error goes to the log and does not fail the request. A fetch that started before an invalidation does not store its value (`generation`, under `mu`). `Invalidate` calls `OnInvalidate` also when the store is nil. |
 | `keys.go` | The names of all cache keys. Code outside the package uses `ItemKey`, `PersonalizedKey`, `SeriesContentsKey`, `BookmarksKey`, and `SearchSnapshotKey`, not key strings. A key has no account, so a login (`LoginSuccessMsg`) clears the persistent cache with `ClearAll`. |
-| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v2-`). Raise it when the type of a cached value changes. |
+| `store.go` | SQLite-backed cache persistence and `ClearAll`. Each key in the database has the prefix `keyVersion` (`v2-`). Raise it when the type of a cached value changes. `Get` misses an expired entry, and `GetStale` reads it. `EvictExpired` deletes an entry `keepExpired` (30 days) after it expires. |
 
 ### MPRIS (internal/mpris/, shared)
 

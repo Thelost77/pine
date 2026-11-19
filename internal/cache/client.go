@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -46,11 +47,27 @@ func NewClient(inner *abs.Client, store *Store) *Client {
 	}
 }
 
+// ErrNotCached is the error of a read with a CachedOnly context that finds no
+// entry.
+var ErrNotCached = errors.New("not in the cache")
+
+type cachedOnlyKey struct{}
+
+// CachedOnly returns a context for reads that answer only from the local
+// cache, also from an expired entry, and send no request. A read that finds
+// no entry returns ErrNotCached.
+func CachedOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, cachedOnlyKey{}, true)
+}
+
 // cached returns the cached value of key, or calls fetch and caches its
 // result for ttl. The cache only makes a request faster: a read or a write
 // error of the cache goes to the log, and the caller gets the value of the
-// server.
-func cached[T any](c *Client, key string, ttl time.Duration, fetch func() (T, error)) (T, error) {
+// server. With a CachedOnly context, cached never calls fetch.
+func cached[T any](ctx context.Context, c *Client, key string, ttl time.Duration, fetch func() (T, error)) (T, error) {
+	if ctx.Value(cachedOnlyKey{}) != nil {
+		return cachedOnly[T](c, key)
+	}
 	if c.store == nil {
 		return fetch()
 	}
@@ -79,23 +96,41 @@ func cached[T any](c *Client, key string, ttl time.Duration, fetch func() (T, er
 	return v, nil
 }
 
+// cachedOnly returns the cached value of key, also an expired one.
+func cachedOnly[T any](c *Client, key string) (T, error) {
+	var zero T
+	if c.store == nil {
+		return zero, ErrNotCached
+	}
+	var v T
+	hit, err := c.store.GetStale(key, &v)
+	if err != nil {
+		logger.Warn("cache read failed", "key", key, "err", err)
+		return zero, ErrNotCached
+	}
+	if !hit {
+		return zero, ErrNotCached
+	}
+	return v, nil
+}
+
 // GetLibraries returns libraries from cache or fetches from the API.
 func (c *Client) GetLibraries(ctx context.Context) ([]abs.Library, error) {
-	return cached(c, librariesKey, ttlLibraries, func() ([]abs.Library, error) {
+	return cached(ctx, c, librariesKey, ttlLibraries, func() ([]abs.Library, error) {
 		return c.Client.GetLibraries(ctx)
 	})
 }
 
 // GetPersonalized returns personalized shelves from cache or fetches from the API.
 func (c *Client) GetPersonalized(ctx context.Context, libraryID string) ([]abs.PersonalizedResponse, error) {
-	return cached(c, PersonalizedKey(libraryID), ttlPersonalized, func() ([]abs.PersonalizedResponse, error) {
+	return cached(ctx, c, PersonalizedKey(libraryID), ttlPersonalized, func() ([]abs.PersonalizedResponse, error) {
 		return c.Client.GetPersonalized(ctx, libraryID)
 	})
 }
 
 // GetRecentEpisodes returns recent podcast episodes from cache or fetches from the API.
 func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit int) ([]abs.LibraryItem, error) {
-	return cached(c, recentEpisodesKey(libraryID, limit), ttlRecentEpisodes, func() ([]abs.LibraryItem, error) {
+	return cached(ctx, c, recentEpisodesKey(libraryID, limit), ttlRecentEpisodes, func() ([]abs.LibraryItem, error) {
 		return c.Client.GetRecentEpisodes(ctx, libraryID, limit)
 	})
 }
@@ -103,7 +138,7 @@ func (c *Client) GetRecentEpisodes(ctx context.Context, libraryID string, limit 
 // GetLibraryItems returns a paginated list of library items from cache or
 // fetches from the API. The response has the requested page and limit.
 func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, limit int) (*abs.LibraryItemsResponse, error) {
-	return cached(c, libraryItemsKey(libraryID, page, limit), ttlLibraryItems, func() (*abs.LibraryItemsResponse, error) {
+	return cached(ctx, c, libraryItemsKey(libraryID, page, limit), ttlLibraryItems, func() (*abs.LibraryItemsResponse, error) {
 		resp, err := c.Client.GetLibraryItems(ctx, libraryID, page, limit)
 		if err != nil {
 			return nil, err
@@ -116,7 +151,7 @@ func (c *Client) GetLibraryItems(ctx context.Context, libraryID string, page, li
 // GetLibrarySeries returns a paginated list of series from cache or fetches
 // from the API. The response has the requested page and limit.
 func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, limit int) (*abs.LibrarySeriesResponse, error) {
-	return cached(c, librarySeriesKey(libraryID, page, limit), ttlLibrarySeries, func() (*abs.LibrarySeriesResponse, error) {
+	return cached(ctx, c, librarySeriesKey(libraryID, page, limit), ttlLibrarySeries, func() (*abs.LibrarySeriesResponse, error) {
 		resp, err := c.Client.GetLibrarySeries(ctx, libraryID, page, limit)
 		if err != nil {
 			return nil, err
@@ -128,21 +163,21 @@ func (c *Client) GetLibrarySeries(ctx context.Context, libraryID string, page, l
 
 // GetLibraryItem returns a single library item from cache or fetches from the API.
 func (c *Client) GetLibraryItem(ctx context.Context, itemID string) (*abs.LibraryItem, error) {
-	return cached(c, ItemKey(itemID), ttlLibraryItem, func() (*abs.LibraryItem, error) {
+	return cached(ctx, c, ItemKey(itemID), ttlLibraryItem, func() (*abs.LibraryItem, error) {
 		return c.Client.GetLibraryItem(ctx, itemID)
 	})
 }
 
 // GetSeriesContents returns series contents from cache or fetches from the API.
 func (c *Client) GetSeriesContents(ctx context.Context, libraryID, seriesID string) (*abs.SeriesContents, error) {
-	return cached(c, SeriesContentsKey(seriesID), ttlSeriesContents, func() (*abs.SeriesContents, error) {
+	return cached(ctx, c, SeriesContentsKey(seriesID), ttlSeriesContents, func() (*abs.SeriesContents, error) {
 		return c.Client.GetSeriesContents(ctx, libraryID, seriesID)
 	})
 }
 
 // FilterAudioLibraries filters audio libraries using cache or fetches from the API.
 func (c *Client) FilterAudioLibraries(ctx context.Context, libs []abs.Library) []abs.Library {
-	v, _ := cached(c, filteredLibrariesKey, ttlLibraries, func() ([]abs.Library, error) {
+	v, _ := cached(ctx, c, filteredLibrariesKey, ttlLibraries, func() ([]abs.Library, error) {
 		return c.Client.FilterAudioLibraries(ctx, libs), nil
 	})
 	return v
@@ -150,7 +185,7 @@ func (c *Client) FilterAudioLibraries(ctx context.Context, libs []abs.Library) [
 
 // GetBookmarks returns bookmarks from cache or fetches from the API.
 func (c *Client) GetBookmarks(ctx context.Context, itemID string) ([]abs.Bookmark, error) {
-	return cached(c, BookmarksKey(itemID), ttlBookmarks, func() ([]abs.Bookmark, error) {
+	return cached(ctx, c, BookmarksKey(itemID), ttlBookmarks, func() ([]abs.Bookmark, error) {
 		return c.Client.GetBookmarks(ctx, itemID)
 	})
 }

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -547,5 +548,44 @@ func TestClient_ScanLibraryClearsCacheAfterTheScan(t *testing.T) {
 				t.Errorf("OnInvalidate called = %v, want %v", invalidated, tt.wantCleared)
 			}
 		})
+	}
+}
+
+// TestClient_CachedOnly verifies that a read with a CachedOnly context
+// answers from an expired entry, and that it sends no request.
+func TestClient_CachedOnly(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"libraries":[{"id":"lib1","name":"Books","mediaType":"book"}]}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(openTestDB(t))
+	client := NewClient(abs.NewClient(srv.URL, "tok"), store)
+	ctx := CachedOnly(context.Background())
+
+	if _, err := client.GetLibraries(ctx); !errors.Is(err, ErrNotCached) {
+		t.Fatalf("GetLibraries with no entry: error %v, want ErrNotCached", err)
+	}
+	if got := client.FilterAudioLibraries(ctx, []abs.Library{{ID: "lib1"}}); got != nil {
+		t.Fatalf("FilterAudioLibraries with no entry = %v, want nil", got)
+	}
+
+	if err := store.Put(librariesKey, []abs.Library{{ID: "old"}}, 1*time.Millisecond); err != nil {
+		t.Fatalf("put error: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	libs, err := client.GetLibraries(ctx)
+	if err != nil {
+		t.Fatalf("GetLibraries with an expired entry: %v", err)
+	}
+	if len(libs) != 1 || libs[0].ID != "old" {
+		t.Fatalf("GetLibraries = %v, want the expired entry", libs)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Fatalf("requests = %d, want 0", n)
 	}
 }

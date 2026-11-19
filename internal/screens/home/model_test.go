@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Thelost77/pine/internal/abs"
 	"github.com/Thelost77/pine/internal/cache"
+	"github.com/Thelost77/pine/internal/db"
 	"github.com/Thelost77/pine/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -837,7 +840,7 @@ func TestFetchPersonalizedPodcastLibraryUsesRecentEpisodes(t *testing.T) {
 	m.libraries = []abs.Library{{ID: "lib-pod", Name: "Podcasts", MediaType: "podcast"}}
 	m.selectedLibrary = 0
 
-	cmd := m.fetchPersonalizedCmd(false)
+	cmd := m.fetchPersonalizedCmd(false, false)
 	msg := cmd()
 	pMsg, ok := msg.(PersonalizedMsg)
 	if !ok {
@@ -960,7 +963,7 @@ func TestRefreshLoadsShelvesOfSelectedLibraryByID(t *testing.T) {
 	m.libraries = refreshTestLibraries()
 	m.selectedLibrary = 1
 
-	msg, ok := m.fetchPersonalizedCmd(true)().(PersonalizedMsg)
+	msg, ok := m.fetchPersonalizedCmd(true, false)().(PersonalizedMsg)
 	if !ok {
 		t.Fatal("the command gives no PersonalizedMsg")
 	}
@@ -969,5 +972,93 @@ func TestRefreshLoadsShelvesOfSelectedLibraryByID(t *testing.T) {
 	}
 	if len(shelves) != 1 || shelves[0] != "/api/libraries/lib-2/personalized" {
 		t.Errorf("shelves requests = %v, want only lib-2", shelves)
+	}
+}
+
+// TestCachedOnlyLoadReadsExpiredRowsWithoutRequest verifies that the
+// cached-only load answers from expired cache entries and sends no request.
+func TestCachedOnlyLoadReadsExpiredRowsWithoutRequest(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/libraries":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"libraries": []abs.Library{{ID: "lib-1", Name: "Books", MediaType: "book"}},
+			})
+		case "/api/libraries/lib-1/personalized":
+			_ = json.NewEncoder(w).Encode([]abs.PersonalizedResponse{
+				{ID: "continue-listening", Entities: sampleItems()},
+			})
+		default:
+			// The audio check of the library fails, and the library stays.
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dbStore, err := db.Open(filepath.Join(t.TempDir(), "pine.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = dbStore.Close() })
+	client := cache.NewClient(abs.NewClient(srv.URL, "tok"), cache.NewStore(dbStore))
+
+	// A load from the server fills the cache. Then each entry expires.
+	server := New(ui.DefaultStyles(), client)
+	if msg, ok := server.fetchPersonalizedCmd(false, false)().(PersonalizedMsg); !ok || msg.Err != nil {
+		t.Fatalf("the load from the server failed: %#v", msg)
+	}
+	if _, err := dbStore.DB.Exec(`UPDATE api_cache SET expires_at = datetime('now', '-1 minute')`); err != nil {
+		t.Fatalf("expire the cache: %v", err)
+	}
+	requests.Store(0)
+
+	m := New(ui.DefaultStyles(), client)
+	msg, ok := m.fetchPersonalizedCmd(false, true)().(PersonalizedMsg)
+	if !ok {
+		t.Fatal("the cached-only load gives no PersonalizedMsg")
+	}
+	if !msg.cached || msg.LibraryID != "lib-1" || len(msg.Items) != len(sampleItems()) {
+		t.Errorf("cached = %v, library = %q, items = %d, want true, lib-1, %d", msg.cached, msg.LibraryID, len(msg.Items), len(sampleItems()))
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("requests = %d, want 0", n)
+	}
+}
+
+// TestServerAnswerBeforeCachedAnswerWins verifies that a cached answer does
+// not replace the answer of the server for the same load.
+func TestServerAnswerBeforeCachedAnswerWins(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	gen := m.loadingGen
+
+	m, _ = m.Update(PersonalizedMsg{Items: sampleItems()[:1], generation: gen})
+	m, _ = m.Update(PersonalizedMsg{Items: sampleItems(), generation: gen, cached: true})
+
+	if got := len(m.Items()); got != 1 {
+		t.Errorf("items = %d, want the 1 item of the server answer", got)
+	}
+}
+
+// TestFailedLoadKeepsCachedShelves verifies that a failed load from the
+// server keeps the cached shelves of the selected library.
+func TestFailedLoadKeepsCachedShelves(t *testing.T) {
+	m := newTestModel()
+	m.SetSize(80, 24)
+	gen := m.loadingGen
+	libs := []abs.Library{{ID: "lib-1", Name: "Books", MediaType: "book"}}
+
+	m, _ = m.Update(PersonalizedMsg{Libraries: libs, LibraryID: "lib-1", Items: sampleItems(), generation: gen, cached: true})
+	m, _ = m.Update(PersonalizedMsg{Err: fmt.Errorf("fetch libraries: network error"), generation: gen})
+
+	if m.Error() != nil {
+		t.Errorf("Error() = %v, want nil", m.Error())
+	}
+	v := m.View()
+	if strings.Contains(v, "Error:") || !strings.Contains(v, "The Great Adventure") {
+		t.Errorf("the view does not keep the cached shelves:\n%s", v)
 	}
 }

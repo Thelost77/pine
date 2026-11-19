@@ -155,18 +155,51 @@ func TestStore_Delete(t *testing.T) {
 	}
 }
 
+func TestStore_GetStaleReadsExpiredRow(t *testing.T) {
+	dbStore := openTestDB(t)
+	s := NewStore(dbStore)
+
+	if err := s.Put("old", "value", 1*time.Millisecond); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	var v string
+	if hit, _ := s.Get("old", &v); hit {
+		t.Fatal("Get read an expired entry")
+	}
+	hit, err := s.GetStale("old", &v)
+	if err != nil {
+		t.Fatalf("GetStale error: %v", err)
+	}
+	if !hit || v != "value" {
+		t.Fatalf("GetStale = (%v, %q), want (true, %q)", hit, v, "value")
+	}
+	if hit, _ := s.GetStale("missing", &v); hit {
+		t.Fatal("GetStale found an entry that does not exist")
+	}
+}
+
+// TestStore_EvictExpired verifies that an expired entry stays for GetStale,
+// and that EvictExpired deletes it keepExpired after it expired.
 func TestStore_EvictExpired(t *testing.T) {
 	dbStore := openTestDB(t)
 	s := NewStore(dbStore)
 
-	if err := s.Put("exp1", "a", 1*time.Millisecond); err != nil {
+	if err := s.Put("recent", "a", 1*time.Millisecond); err != nil {
 		t.Fatalf("Put error: %v", err)
 	}
-	if err := s.Put("exp2", "b", 1*time.Millisecond); err != nil {
+	if err := s.Put("old", "b", 1*time.Millisecond); err != nil {
 		t.Fatalf("Put error: %v", err)
 	}
 	if err := s.Put("live", "c", 5*time.Minute); err != nil {
 		t.Fatalf("Put error: %v", err)
+	}
+	if _, err := dbStore.DB.Exec(
+		`UPDATE api_cache SET expires_at = datetime('now', '-31 days') WHERE cache_key = ?`,
+		keyVersion+"old",
+	); err != nil {
+		t.Fatalf("expire old: %v", err)
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -176,11 +209,11 @@ func TestStore_EvictExpired(t *testing.T) {
 	}
 
 	var v string
-	if hit, _ := s.Get("exp1", &v); hit {
-		t.Fatal("expected exp1 to be evicted")
+	if hit, _ := s.GetStale("recent", &v); !hit {
+		t.Fatal("EvictExpired deleted an entry that expired less than keepExpired ago")
 	}
-	if hit, _ := s.Get("exp2", &v); hit {
-		t.Fatal("expected exp2 to be evicted")
+	if hit, _ := s.GetStale("old", &v); hit {
+		t.Fatal("EvictExpired kept an entry that expired more than keepExpired ago")
 	}
 	hit, err := s.Get("live", &v)
 	if err != nil {
