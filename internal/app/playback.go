@@ -171,6 +171,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 
 	item := msg.Item
 	client := m.client
+	sleepEpoch := m.sleepEpoch
 	startCmd := func() tea.Msg {
 		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), item.ID, device)
@@ -189,6 +190,7 @@ func (m Model) handlePlayCmd(msg detail.PlayCmd) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return playMsg
 	}
 
@@ -230,6 +232,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 	item := msg.Item
 	episode := msg.Episode
 	client := m.client
+	sleepEpoch := m.sleepEpoch
 	startCmd := func() tea.Msg {
 		device := m.playbackDevice()
 		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
@@ -240,6 +243,7 @@ func (m Model) handlePlayEpisodeCmd(msg detail.PlayEpisodeCmd) (Model, tea.Cmd) 
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return playMsg
 	}
 
@@ -518,6 +522,7 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 	m.sessionID = ""
 	m.timeListened = 0
 	m.captionCues = nil
+	sleepEpoch := m.sleepEpoch
 
 	return m, func() tea.Msg {
 		if client != nil && sessionID != "" {
@@ -537,12 +542,14 @@ func (m Model) restartPlaybackAt(bookPos float64) (Model, tea.Cmd) {
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return playMsg
 	}
 }
 
 func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos float64) tea.Cmd {
 	client := m.client
+	sleepEpoch := m.sleepEpoch
 	return func() tea.Msg {
 		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), item.ID, device)
@@ -561,6 +568,7 @@ func (m Model) startPlaybackAtBookPositionCmd(item abs.LibraryItem, bookPos floa
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return playMsg
 	}
 }
@@ -594,6 +602,7 @@ func (m Model) playItemAt(item abs.LibraryItem, episode *abs.PodcastEpisode, pos
 
 func (m Model) startEpisodePlaybackAtPositionCmd(item abs.LibraryItem, episode abs.PodcastEpisode, pos float64) tea.Cmd {
 	client := m.client
+	sleepEpoch := m.sleepEpoch
 	return func() tea.Msg {
 		device := m.playbackDevice()
 		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
@@ -604,6 +613,7 @@ func (m Model) startEpisodePlaybackAtPositionCmd(item abs.LibraryItem, episode a
 		if err != nil {
 			return PlaybackErrorMsg{Err: err}
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return playMsg
 	}
 }
@@ -626,15 +636,16 @@ func (m Model) startRestorePlaybackCmd(msg RestoreSessionMsg) tea.Cmd {
 	return m.startRestoredBookPlaybackCmd(*msg.Item)
 }
 
-// closeRestoredSessionCmd closes a session that the restore opened and that
-// pine does not play. The session has no position to send.
+// closeRestoredSessionCmd closes a session that pine opened and does not play:
+// a restore that the user superseded, or a session that a command asked for
+// before the system slept. The session has no position to send.
 func closeRestoredSessionCmd(client *cache.Client, sessionID string) tea.Cmd {
 	if client == nil || sessionID == "" {
 		return nil
 	}
 	return func() tea.Msg {
 		if err := client.CloseSessionNoSync(context.Background(), sessionID); err != nil {
-			logger.Warn("failed to close restored session", "session", abs.SessionTag(sessionID), "err", err)
+			logger.Warn("failed to close an unused session", "session", abs.SessionTag(sessionID), "err", err)
 		}
 		return nil
 	}
@@ -643,6 +654,7 @@ func closeRestoredSessionCmd(client *cache.Client, sessionID string) tea.Cmd {
 func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 	client := m.client
 	store := m.db
+	sleepEpoch := m.sleepEpoch
 	return func() tea.Msg {
 		device := m.playbackDevice()
 		session, err := client.StartPlaySession(context.Background(), item.ID, device)
@@ -681,6 +693,7 @@ func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 			logSkippedRestore("book playback session invalid", "itemID", item.ID, "session", abs.SessionTag(session.ID), "err", err)
 			return nil
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return RestorePlaySessionMsg{PlaySessionMsg: playMsg}
 	}
 }
@@ -688,6 +701,7 @@ func (m Model) startRestoredBookPlaybackCmd(item abs.LibraryItem) tea.Cmd {
 func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs.PodcastEpisode) tea.Cmd {
 	client := m.client
 	store := m.db
+	sleepEpoch := m.sleepEpoch
 	return func() tea.Msg {
 		device := m.playbackDevice()
 		session, err := client.StartEpisodePlaySession(context.Background(), item.ID, episode.ID, device)
@@ -720,6 +734,7 @@ func (m Model) startRestoredEpisodePlaybackCmd(item abs.LibraryItem, episode abs
 			logSkippedRestore("podcast episode playback session invalid", "itemID", item.ID, "episodeID", episode.ID, "session", abs.SessionTag(session.ID), "err", err)
 			return nil
 		}
+		playMsg.SleepEpoch = sleepEpoch
 		return RestorePlaySessionMsg{PlaySessionMsg: playMsg}
 	}
 }
@@ -1073,6 +1088,11 @@ func (m Model) stopPlayback() (Model, tea.Cmd) {
 // server. Release runs after each stop command has ended. A network that is
 // already down makes the requests fail, and the position since the last sync
 // is then lost.
+//
+// A start or a change of the track can be in progress with no session yet.
+// The new sleep epoch makes pine close the session that such a command gets,
+// and a change of the track that keeps the item (restartPlaybackAt) stops
+// here, so that mpv does not play on.
 func (m Model) handleSystemSleep(msg SystemSleepMsg) (Model, tea.Cmd) {
 	release := func() tea.Msg {
 		if msg.Release != nil {
@@ -1080,12 +1100,20 @@ func (m Model) handleSystemSleep(msg SystemSleepMsg) (Model, tea.Cmd) {
 		}
 		return nil
 	}
-	if !m.isPlaying() {
+	m.sleepEpoch++
+	if !m.isPlaying() && m.itemID == "" {
 		return m, release
 	}
-	logger.Info("system sleep: stopping playback", "session", abs.SessionTag(m.sessionID))
+	logger.Info("system sleep: stopping playback", "session", abs.SessionTag(m.sessionID), "itemID", m.itemID)
 	m, stopCmd := m.stopPlayback()
 	return m, tea.Sequence(stopCmd, release)
+}
+
+// closeSessionFromBeforeSleep closes a play session that a command asked for
+// before the system slept, and does not play it.
+func (m Model) closeSessionFromBeforeSleep(session PlaySessionData) tea.Cmd {
+	logger.Info("system sleep: closing a play session from before the sleep", "session", abs.SessionTag(session.SessionID), "itemID", session.ItemID, "episodeID", session.EpisodeID)
+	return closeRestoredSessionCmd(m.client, session.SessionID)
 }
 
 // stopPlaybackCmds stops the playback as stopPlayback does. It returns the

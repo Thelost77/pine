@@ -57,6 +57,9 @@ type PlaySessionMsg struct {
 	Session   PlaySessionData
 	StreamURL string
 	AuthToken string
+	// SleepEpoch is the sleepEpoch of the model when the command asked for
+	// the session. A session from before a system sleep does not play.
+	SleepEpoch uint64
 }
 
 // PlaySessionData carries the data returned from ABS when starting a session.

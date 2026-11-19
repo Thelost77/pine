@@ -87,6 +87,11 @@ type Model struct {
 	// of the last session at the start then does nothing.
 	playRequested bool
 
+	// sleepEpoch counts the system sleeps. A command that asks for a play
+	// session stamps the session with it, and pine closes a session from an
+	// earlier epoch and does not play it (see PlaySessionMsg.SleepEpoch).
+	sleepEpoch uint64
+
 	// The library and the series of the item that plays: for the cache
 	// eviction after the playback, and for the series auto-continue.
 	playbackLibraryID string
@@ -713,6 +718,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCaptionLoaded(msg)
 
 	case PlaySessionMsg:
+		if msg.SleepEpoch != m.sleepEpoch {
+			return m, m.closeSessionFromBeforeSleep(msg.Session)
+		}
 		logger.Info("play session started", "session", abs.SessionTag(msg.Session.SessionID), "itemID", msg.Session.ItemID, "episodeID", msg.Session.EpisodeID, "currentTime", msg.Session.CurrentTime, "duration", msg.Session.Duration)
 		return m.handlePlaySessionMsg(msg)
 
@@ -735,6 +743,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startRestorePlaybackCmd(msg)
 
 	case RestorePlaySessionMsg:
+		if msg.PlaySessionMsg.SleepEpoch != m.sleepEpoch {
+			return m, m.closeSessionFromBeforeSleep(msg.PlaySessionMsg.Session)
+		}
 		if m.isPlaying() || m.playRequested {
 			session := msg.PlaySessionMsg.Session
 			logger.Info("closing restored session: the user started a playback", "session", abs.SessionTag(session.SessionID), "itemID", session.ItemID)
