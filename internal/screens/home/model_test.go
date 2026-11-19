@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -1081,5 +1082,71 @@ func TestServerErrorBeforeCachedAnswerShowsCachedShelves(t *testing.T) {
 	v := m.View()
 	if strings.Contains(v, "Error:") || !strings.Contains(v, "The Great Adventure") {
 		t.Errorf("the view does not show the cached shelves:\n%s", v)
+	}
+}
+
+// TestServerAnswerReplacesAnOldCachedLibraryList verifies that the server
+// answer at the start applies when the cached library list is old and the
+// first library of the server is a different one.
+func TestServerAnswerReplacesAnOldCachedLibraryList(t *testing.T) {
+	var mu sync.Mutex
+	libraries := []abs.Library{{ID: "lib-old", Name: "Old", MediaType: "podcast"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/libraries":
+			mu.Lock()
+			libs := libraries
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"libraries": libs})
+		case "/api/libraries/lib-old/personalized":
+			_ = json.NewEncoder(w).Encode([]abs.PersonalizedResponse{{ID: "continue-listening", Entities: sampleItems()}})
+		case "/api/libraries/lib-new/personalized":
+			_ = json.NewEncoder(w).Encode([]abs.PersonalizedResponse{{ID: "continue-listening", Entities: sampleItems()[:1]}})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"episodes": []any{}})
+		}
+	}))
+	defer srv.Close()
+
+	dbStore, err := db.Open(filepath.Join(t.TempDir(), "pine.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = dbStore.Close() })
+	client := cache.NewClient(abs.NewClient(srv.URL, "tok"), cache.NewStore(dbStore))
+
+	// The cache gets the old list. Then it expires, and the server gets a
+	// new first library.
+	first := New(ui.DefaultStyles(), client)
+	if msg, ok := first.fetchPersonalizedCmd(false, false)().(PersonalizedMsg); !ok || msg.Err != nil {
+		t.Fatalf("the load from the server failed: %#v", msg)
+	}
+	if _, err := dbStore.DB.Exec(`UPDATE api_cache SET expires_at = datetime('now', '-1 minute')`); err != nil {
+		t.Fatalf("expire the cache: %v", err)
+	}
+	mu.Lock()
+	libraries = []abs.Library{
+		{ID: "lib-new", Name: "New", MediaType: "podcast"},
+		{ID: "lib-old", Name: "Old", MediaType: "podcast"},
+	}
+	mu.Unlock()
+
+	// As Init does: both loads start before an answer comes.
+	m := New(ui.DefaultStyles(), client)
+	m.SetSize(80, 24)
+	cachedMsg := m.fetchPersonalizedCmd(false, true)()
+	serverMsg := m.fetchPersonalizedCmd(false, false)()
+	m, _ = m.Update(cachedMsg)
+	m, _ = m.Update(serverMsg)
+
+	if got := m.SelectedLibraryID(); got != "lib-new" {
+		t.Errorf("selected library = %q, want lib-new", got)
+	}
+	if got := len(m.Libraries()); got != 2 {
+		t.Errorf("libraries = %d, want the 2 of the server", got)
+	}
+	if got := len(m.Items()); got != 1 {
+		t.Errorf("items = %d, want the 1 item of lib-new", got)
 	}
 }

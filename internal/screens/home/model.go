@@ -372,7 +372,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // included, and sends no request. It sends no message if the cache does not
 // have the full answer.
 func (m *Model) fetchPersonalizedCmd(refreshLibraries, cachedOnly bool) tea.Cmd {
-	msg := PersonalizedMsg{generation: m.loadingGen, refreshed: refreshLibraries, cached: cachedOnly}
+	existingLibs := m.libraries
+	if refreshLibraries {
+		existingLibs = nil
+	}
+	// A load that reads the library list is a refresh of the list: at the
+	// start, the list of the server can differ from the cached list.
+	msg := PersonalizedMsg{generation: m.loadingGen, refreshed: len(existingLibs) == 0, cached: cachedOnly}
 	if m.client == nil {
 		if cachedOnly {
 			return nil
@@ -382,10 +388,6 @@ func (m *Model) fetchPersonalizedCmd(refreshLibraries, cachedOnly bool) tea.Cmd 
 	}
 	client := m.client
 	selectedIdx := m.selectedLibrary
-	existingLibs := m.libraries
-	if refreshLibraries {
-		existingLibs = nil
-	}
 	currentLibID := m.SelectedLibraryID()
 	ctx := context.Background()
 	if cachedOnly {
