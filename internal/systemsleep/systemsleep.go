@@ -6,6 +6,7 @@
 package systemsleep
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -27,6 +28,9 @@ const (
 	// before a sleep. It is the timeout of an abs.Client request. logind
 	// itself waits at most InhibitDelayMaxSec, which can be shorter.
 	releaseAfter = 10 * time.Second
+
+	// inhibitTimeout is the longest wait for an answer to Inhibit.
+	inhibitTimeout = 3 * time.Second
 )
 
 // Monitor holds a logind sleep delay inhibitor. Before each sleep, it calls
@@ -82,12 +86,15 @@ func start(conn *dbus.Conn, who string, wait time.Duration, prepare func(release
 	return m, nil
 }
 
-// inhibit takes a sleep delay inhibitor. If logind refuses it, the monitor
-// still calls prepare before a sleep, but logind does not wait.
+// inhibit takes a sleep delay inhibitor. If logind refuses it or does not
+// answer in inhibitTimeout, the monitor still calls prepare before a sleep,
+// but logind does not wait.
 func (m *Monitor) inhibit() {
+	ctx, cancel := context.WithTimeout(context.Background(), inhibitTimeout)
+	defer cancel()
 	var fd dbus.UnixFD
 	err := m.conn.Object(logindName, logindPath).
-		Call(managerIface+".Inhibit", 0, "sleep", m.who, inhibitReason, "delay").
+		CallWithContext(ctx, managerIface+".Inhibit", 0, "sleep", m.who, inhibitReason, "delay").
 		Store(&fd)
 	if err != nil {
 		logger.Warn("system sleep: logind gave no inhibitor", "err", err)

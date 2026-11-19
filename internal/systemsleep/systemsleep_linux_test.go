@@ -53,7 +53,9 @@ func startSessionBus(t *testing.T) string {
 type fakeLogind struct {
 	conn *dbus.Conn
 
-	mu     sync.Mutex
+	mu sync.Mutex
+	// block, if it is not nil, makes Inhibit wait until it closes.
+	block  chan struct{}
 	reads  []*os.File
 	writes []*os.File
 }
@@ -61,6 +63,12 @@ type fakeLogind struct {
 // Inhibit is the logind method. The write end stays open until
 // closeWriteEnds, so that it is valid while D-Bus sends it.
 func (f *fakeLogind) Inhibit(what, who, why, mode string) (dbus.UnixFD, *dbus.Error) {
+	f.mu.Lock()
+	block := f.block
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
 	if what != "sleep" || mode != "delay" {
 		return 0, dbus.MakeFailedError(errors.New("unexpected inhibitor " + what + " " + mode))
 	}
@@ -117,6 +125,8 @@ func startFakeLogind(t *testing.T, address string) *fakeLogind {
 	fake := &fakeLogind{conn: conn}
 	t.Cleanup(func() {
 		fake.closeWriteEnds()
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
 		for _, r := range fake.reads {
 			_ = r.Close()
 		}
@@ -221,4 +231,40 @@ func TestReleaseAfterTimeout(t *testing.T) {
 		t.Fatal("prepare was not called before the sleep")
 	}
 	assertReleased(t, fake.read(0))
+}
+
+// TestStartDoesNotWaitForAnInhibitWithNoAnswer verifies that the start of the
+// monitor does not wait longer than inhibitTimeout for logind.
+func TestStartDoesNotWaitForAnInhibitWithNoAnswer(t *testing.T) {
+	address := startSessionBus(t)
+	fake := startFakeLogind(t, address)
+	block := make(chan struct{})
+	fake.mu.Lock()
+	fake.block = block
+	fake.mu.Unlock()
+	t.Cleanup(func() { close(block) })
+
+	conn, err := dbus.Connect(address)
+	if err != nil {
+		t.Fatalf("connect the monitor: %v", err)
+	}
+	type result struct {
+		m   *Monitor
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		m, err := start(conn, "pinetest", time.Minute, func(func()) {})
+		done <- result{m, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("start() error: %v", r.err)
+		}
+		r.m.Close()
+	case <-time.After(inhibitTimeout + 2*time.Second):
+		_ = conn.Close()
+		t.Fatal("start waits for an Inhibit call that gets no answer")
+	}
 }
