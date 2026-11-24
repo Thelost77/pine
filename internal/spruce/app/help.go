@@ -47,7 +47,6 @@ func helpGroups() []components.HelpGroup {
 				{Key: "< / >", Desc: "previous / next track"},
 				{Key: "s", Desc: "shuffle queue"},
 				{Key: "r / R", Desc: "repeat track / queue"},
-				{Key: "b", Desc: "toggle subliminal mode"},
 				{Key: "m", Desc: "edit metadata"},
 				{Key: "d / x", Desc: "remove track"},
 				{Key: "c", Desc: "clear queue"},

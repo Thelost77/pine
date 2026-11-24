@@ -263,6 +263,10 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 	case components.ActionShuffleQueue:
 		return m.Update(queue.QueueActionMsg{Action: "shuffle"})
 	case components.ActionRepeatTrack:
+		if m.isSubliminalActive() {
+			// No track plays alone, so the queue action guard rejects it.
+			return m.Update(queue.QueueActionMsg{Action: "repeat_track"})
+		}
 		if m.currentIndex >= 0 && m.currentIndex < len(m.tracks) {
 			return m.Update(queue.QueueActionMsg{
 				Action:  "repeat_track",
@@ -371,15 +375,16 @@ func (m *Model) handlePaletteAction(action components.PaletteAction, itemID stri
 			return m, cmd
 		}
 	case components.ActionPlayDirect:
-		if m.isSubliminalActive() {
-			return m, m.err.SetError(fmt.Errorf("stop subliminal mode before starting another track"))
-		}
 		if jump, ok := data.(queue.JumpQueueMsg); ok {
-			return m.startPlaybackAt(jump.Index)
+			stopCmd := m.stopSubliminalForTrack()
+			newM, cmd := m.startPlaybackAt(jump.Index)
+			return newM, tea.Batch(stopCmd, cmd)
 		}
 		if track, ok := data.(jellyfin.Track); ok {
+			stopCmd := m.stopSubliminalAndClearQueue()
 			m.tracks = append(m.tracks, track)
-			return m.startPlaybackAt(len(m.tracks) - 1)
+			newM, cmd := m.startPlaybackAt(len(m.tracks) - 1)
+			return newM, tea.Batch(stopCmd, cmd)
 		}
 	case components.ActionSleep15:
 		return m.setSleepTimer(15 * time.Minute)

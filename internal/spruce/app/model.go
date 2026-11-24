@@ -670,9 +670,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case library.PlayTracksMsg:
-		if m.isSubliminalActive() {
-			return m, m.err.SetError(errors.New("stop subliminal mode before starting another track"))
-		}
+		stopCmd := m.stopSubliminalAndClearQueue()
 		logger.Info("received PlayTracksMsg", "count", len(msg.Tracks), "start", msg.StartIndex)
 		var flashCmd tea.Cmd
 		if len(msg.Tracks) > 0 {
@@ -680,7 +678,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			flashCmd = m.flashQueuedItems(msg.Confirmation)
 		}
 		newM, cmd := m.startPlaybackAt(msg.StartIndex)
-		return newM, tea.Batch(cmd, flashCmd)
+		return newM, tea.Batch(stopCmd, cmd, flashCmd)
 
 	case library.AddTrackToQueueMsg:
 		if m.isSubliminalActive() {
@@ -762,11 +760,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case queue.JumpQueueMsg:
-		if m.isSubliminalActive() {
-			return m, m.err.SetError(errors.New("stop subliminal mode before selecting a track"))
-		}
+		stopCmd := m.stopSubliminalForTrack()
 		newM, cmd := m.startPlaybackAt(msg.Index)
-		return newM, cmd
+		return newM, tea.Batch(stopCmd, cmd)
 
 	case queue.RemoveQueueMsg:
 		if m.isSubliminalActive() {
@@ -815,9 +811,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case queue.QueueActionMsg:
-		if msg.Action == "subliminal" {
-			return m.toggleSubliminalMode()
-		}
 		if m.isSubliminalActive() && msg.Action != "edit_metadata" {
 			if msg.Action == "toggle_pause" && m.isSubliminalRunning() {
 				return m.setSubliminalPaused(m.playerState.Playing)

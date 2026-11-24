@@ -12,7 +12,7 @@ type RemoveQueueMsg struct {
 
 // QueueActionMsg signals a media control command from the queue screen.
 type QueueActionMsg struct {
-	Action  string // e.g. "toggle_pause", "clear", "repeat_queue", "subliminal"
+	Action  string // e.g. "toggle_pause", "clear", "repeat_queue"
 	Index   int
 	TrackID string
 }

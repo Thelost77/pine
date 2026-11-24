@@ -442,6 +442,31 @@ func (m *Model) stopSubliminalMode() (*Model, tea.Cmd) {
 	return m, player.QuitGroupCmd(group)
 }
 
+// stopSubliminalForTrack stops subliminal mode before a track that the user
+// starts. It keeps the sleep timer, as a normal track change does. It does
+// nothing if subliminal mode is inactive.
+func (m *Model) stopSubliminalForTrack() tea.Cmd {
+	if !m.isSubliminalActive() {
+		return nil
+	}
+	deadline, duration, remaining := m.sleepDeadline, m.sleepDuration, m.playerState.SleepRemaining
+	_, cmd := m.stopSubliminalMode()
+	m.sleepDeadline, m.sleepDuration, m.playerState.SleepRemaining = deadline, duration, remaining
+	return cmd
+}
+
+// stopSubliminalAndClearQueue does stopSubliminalForTrack and removes the
+// tracks of the mix from the queue, so that a new track replaces the mix.
+func (m *Model) stopSubliminalAndClearQueue() tea.Cmd {
+	if !m.isSubliminalActive() {
+		return nil
+	}
+	cmd := m.stopSubliminalForTrack()
+	m.tracks = nil
+	m.currentIndex = -1
+	return cmd
+}
+
 func (m *Model) stopAllPlayback() (*Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if m.isSubliminalActive() {

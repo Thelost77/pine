@@ -180,6 +180,7 @@ Styles from theme config. Format helpers (timestamps, durations). `RunProgram` r
 - `internal/mpris/mpris_test.go` for `RootAdapter` and the server properties, and `bridge_test.go` for the bridge
 - `internal/mpris/server_linux_test.go` starts the MPRIS server on a private session bus and checks it as an MPRIS client. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead. CI and `scripts/release.sh` set that variable.
 - `internal/app/mpris_linux_test.go` starts the MPRIS server of the pine model on a private session bus and checks the Seeked signals. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead.
+- `internal/spruce/app/mpris_linux_test.go` does the same for the spruce model.
 - `internal/systemsleep/systemsleep_linux_test.go` runs a fake logind on a private session bus. Each inhibitor is the write end of a pipe, so the test sees the release as EOF on the read end. It skips if `dbus-daemon` is absent. With `PINE_REQUIRE_DBUS=1` it fails instead.
 - `runCmdToEnd` in `internal/app/playback_test.go` runs a command as the Bubble Tea program does, also a `tea.Sequence`. `feedCmd` and `executeBatchCmds` run only batches.
 - `internal/screens/metadataedit/model_test.go` for the metadata editor

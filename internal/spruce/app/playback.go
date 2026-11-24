@@ -17,7 +17,7 @@ func (m *Model) startPlaybackAt(index int) (*Model, tea.Cmd) {
 		return m.stopPlayback()
 	}
 
-	restart := m.CurrentItemID() == m.tracks[index].ID
+	restart := m.mprisState.CurrentItemID() == m.tracks[index].ID
 	stopReqCmd := m.reportStoppedCmd()
 	m.currentIndex = index
 	m.pendingRepeatIndex = -1

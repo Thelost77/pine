@@ -48,7 +48,7 @@ func New(styles ui.Styles) Model {
 
 	l := list.New(nil, del, 0, 0)
 	l.KeyMap.Quit.SetKeys("q")
-	l.KeyMap.PrevPage.SetKeys("pgup", "u")
+	l.KeyMap.PrevPage.SetKeys("pgup", "b", "u")
 	l.KeyMap.NextPage.SetKeys("pgdown")
 	l.Title = "Queue / Now Playing"
 	l.SetShowTitle(false)
@@ -68,7 +68,6 @@ func New(styles ui.Styles) Model {
 			key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "shuffle")),
 			key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "repeat track")),
 			key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "repeat queue")),
-			key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "subliminal mode")),
 		}
 	}
 
@@ -227,8 +226,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case "R":
 			return m, func() tea.Msg { return QueueActionMsg{Action: "repeat_queue"} }
-		case "b":
-			return m, func() tea.Msg { return QueueActionMsg{Action: "subliminal"} }
 		case "L":
 			before := m.list.GlobalIndex()
 			m.list.NextPage()

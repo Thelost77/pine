@@ -100,7 +100,6 @@ Keys can be context-specific. Press `?` in Spruce for the complete active help.
 | `S` | On the queue screen during playback: cycle the sleep timer. The command palette also sets it. |
 | `s` | Shuffle the current queue |
 | `r` / `R` | Repeat a track or the queue. On the queue screen, `r` repeats the selected track. On the other screens, it repeats the track that plays. |
-| `b` | Toggle subliminal mode from the queue |
 | `+` / `-` | Increase or decrease playback speed |
 | `]` / `[` | Increase or decrease volume |
 | `m` | Edit selected album or track metadata |
@@ -121,13 +120,16 @@ may transfer once more while the cache is prepared. The cache is limited to 2
 GiB and removed when Spruce exits. Jellyfin playback progress reports still use
 a small amount of network traffic.
 
-Subliminal mode is available from the queue with `b` or the command palette. It
-first caches every queued track, then plays each queue entry at the same time in
-an independent loop. Each track starts at 20% volume. The normal volume controls
-change every track to the same value. Subliminal mode supports up to eight queue
-entries and locks queue changes until the mode stops. Jellyfin does not receive
-playback progress for a simultaneous subliminal mix because its session model
-represents only one current item.
+Subliminal mode is available from the command palette. It first caches every
+queued track, then plays each queue entry at the same time in an independent
+loop. Each track starts at 20% volume. The normal volume controls change every
+track to the same value. Subliminal mode supports up to eight queue entries and
+locks queue changes until the mode stops. The command palette entry that stops
+the mode keeps the queue. A track that you start from the library, a playlist,
+or the command palette stops the mode and replaces the queue. A queue entry that
+you start, also from the command palette, stops the mode and keeps the queue.
+After such a start, the sleep timer continues. Jellyfin does not receive playback progress for a simultaneous subliminal mix
+because its session model represents only one current item.
 
 ## Configuration
 

@@ -20,8 +20,8 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 	if slices.Contains(m.list.KeyMap.NextPage.Keys(), "f") {
 		t.Fatal("f remains bound to next page")
 	}
-	if slices.Contains(m.list.KeyMap.PrevPage.Keys(), "b") {
-		t.Fatal("b remains bound to previous page")
+	if !slices.Contains(m.list.KeyMap.PrevPage.Keys(), "b") {
+		t.Fatal("b is not bound to previous page")
 	}
 	m.SetSize(80, 24)
 
@@ -115,14 +115,11 @@ func TestQueueModel_ActionsAndView(t *testing.T) {
 		t.Errorf("unexpected msg: %+v", msg)
 	}
 
-	// Test subliminal mode action.
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
-	if cmd == nil {
-		t.Fatal("expected subliminal mode cmd")
-	}
-	msg = cmd()
-	if qam, ok := msg.(QueueActionMsg); !ok || qam.Action != "subliminal" {
-		t.Errorf("unexpected msg: %+v", msg)
+	// The command palette is the only control of subliminal mode.
+	if _, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")}); cmd != nil {
+		if msg, ok := cmd().(QueueActionMsg); ok {
+			t.Fatalf("b sent %+v", msg)
+		}
 	}
 
 	m.SetSubliminalState(SubliminalPreparing, 1, 2, 20)

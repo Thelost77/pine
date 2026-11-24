@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -253,9 +254,90 @@ func TestSubliminalModeCachesUniqueTracksAndStartsEveryQueueEntryAtTwentyPercent
 	}
 }
 
+func TestTrackStartStopsSubliminalMode(t *testing.T) {
+	states := []struct {
+		name  string
+		state subliminalState
+	}{
+		{"preparing", subliminalPreparing},
+		{"starting", subliminalStarting},
+		{"playing", subliminalPlaying},
+	}
+	starts := []struct {
+		name      string
+		start     func(m *Model) (tea.Model, tea.Cmd)
+		wantID    string
+		wantQueue []string
+	}{
+		{"library", func(m *Model) (tea.Model, tea.Cmd) {
+			return m.Update(library.PlayTracksMsg{Tracks: []jellyfin.Track{{ID: "three"}}})
+		}, "three", []string{"three"}},
+		{"queue", func(m *Model) (tea.Model, tea.Cmd) {
+			return m.Update(queue.JumpQueueMsg{Index: 1})
+		}, "two", []string{"one", "two"}},
+		{"palette track", func(m *Model) (tea.Model, tea.Cmd) {
+			return m.handlePaletteAction(components.ActionPlayDirect, "three", jellyfin.Track{ID: "three"})
+		}, "three", []string{"three"}},
+		{"palette queue entry", func(m *Model) (tea.Model, tea.Cmd) {
+			return m.handlePaletteAction(components.ActionPlayDirect, "two", queue.JumpQueueMsg{Index: 1})
+		}, "two", []string{"one", "two"}},
+	}
+	for _, s := range states {
+		for _, tc := range starts {
+			t.Run(s.name+"/"+tc.name, func(t *testing.T) {
+				m := New(nil, nil)
+				m.tracks = []jellyfin.Track{{ID: "one"}, {ID: "two"}}
+				m.subliminalState = s.state
+				m.subliminalGroup = player.NewGroup()
+				ctx, cancel := context.WithCancel(context.Background())
+				m.subliminalContext, m.subliminalCancel = ctx, cancel
+				deadline := time.Now().Add(30 * time.Minute)
+				m.sleepDeadline, m.sleepDuration = deadline, 30*time.Minute
+				m.playerState.Playing = s.state != subliminalStarting
+				if s.state == subliminalPreparing {
+					// Normal playback goes on while the mix tracks download.
+					m.currentIndex = 0
+					m.playerState.Title = "one"
+					m.playerState.Volume = 100
+				} else {
+					m.normalVolume = 100
+					m.playerState.Title = "Subliminal mix"
+					m.playerState.Volume = 20
+					m.playerState.SubliminalCount = 2
+				}
+
+				updated, _ := tc.start(m)
+				m = updated.(*Model)
+				if m.isSubliminalActive() || m.err.HasError() || ctx.Err() == nil {
+					t.Fatalf("active=%v error=%v cancelled=%v", m.isSubliminalActive(), m.err.HasError(), ctx.Err() != nil)
+				}
+				if m.CurrentItemID() != tc.wantID || m.playerState.Volume != 100 || m.playerState.SubliminalCount != 0 {
+					t.Fatalf("item=%q volume=%d layers=%d", m.CurrentItemID(), m.playerState.Volume, m.playerState.SubliminalCount)
+				}
+				var queueIDs []string
+				for _, track := range m.tracks {
+					queueIDs = append(queueIDs, track.ID)
+				}
+				if !slices.Equal(queueIDs, tc.wantQueue) {
+					t.Fatalf("queue=%v, want %v", queueIDs, tc.wantQueue)
+				}
+				if !m.sleepDeadline.Equal(deadline) || m.sleepDuration != 30*time.Minute {
+					t.Fatalf("sleep deadline=%v duration=%v, want the timer kept", m.sleepDeadline, m.sleepDuration)
+				}
+				wantRetired := 1
+				if s.state == subliminalPreparing {
+					wantRetired = 0 // The group has no players yet.
+				}
+				if len(m.subliminalRetired) != wantRetired {
+					t.Fatalf("retired groups=%d, want %d", len(m.subliminalRetired), wantRetired)
+				}
+			})
+		}
+	}
+}
+
 func TestSubliminalModeRejectsBlockedPaletteActionsWithErrors(t *testing.T) {
 	for _, action := range []components.PaletteAction{
-		components.ActionPlayDirect,
 		components.ActionClearQueue,
 		components.ActionShuffleQueue,
 		components.ActionRepeatTrack,
@@ -265,7 +347,6 @@ func TestSubliminalModeRejectsBlockedPaletteActionsWithErrors(t *testing.T) {
 			m := New(nil, nil)
 			m.subliminalState = subliminalPlaying
 			m.tracks = []jellyfin.Track{{ID: "one"}}
-			m.currentIndex = 0
 
 			updated, cmd := m.handlePaletteAction(action, "two", jellyfin.Track{ID: "two"})
 			m = updated.(*Model)
@@ -384,7 +465,7 @@ func TestSubliminalModeRejectsOversizedQueue(t *testing.T) {
 	_ = cmd()
 }
 
-func TestQueueSubliminalActionTogglesMode(t *testing.T) {
+func TestPaletteSubliminalActionStopsModeAndKeepsQueue(t *testing.T) {
 	m := New(nil, nil)
 	m.subliminalState = subliminalPlaying
 	m.subliminalGroup = player.NewGroup()
@@ -392,10 +473,10 @@ func TestQueueSubliminalActionTogglesMode(t *testing.T) {
 	m.playerState.Volume = 20
 	m.tracks = []jellyfin.Track{{ID: "one"}}
 
-	updated, cmd := m.Update(queue.QueueActionMsg{Action: "subliminal"})
+	updated, cmd := m.handlePaletteAction(components.ActionSubliminalMode, "", nil)
 	m = updated.(*Model)
-	if m.isSubliminalActive() {
-		t.Fatal("queue action did not stop subliminal mode")
+	if m.isSubliminalActive() || len(m.tracks) != 1 {
+		t.Fatalf("palette action: active=%v queue=%d", m.isSubliminalActive(), len(m.tracks))
 	}
 	if cmd != nil {
 		_ = cmd()
